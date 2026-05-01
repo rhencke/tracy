@@ -12,5 +12,11 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-      - name: CI gate placeholder
-        run: echo "CI gate in place"
+      - name: Build (placeholder)
+        run: |
+          echo "No build step defined yet. Failing as a reminder."
+          exit 1
+      - name: Test (placeholder)
+        run: |
+          echo "No test step defined yet. Failing as a reminder."
+          exit 1
