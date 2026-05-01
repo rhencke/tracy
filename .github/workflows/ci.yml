@@ -1,0 +1,16 @@
+name: CI Gate
+
+on:
+  push:
+    branches: [ main, ci-gate-start-fresh ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  ci-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: CI gate placeholder
+        run: echo "CI gate in place"
