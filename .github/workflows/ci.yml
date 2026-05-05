@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    env:
+      WABT_VERSION: "1.0.37"
+      WABT_PLATFORM: ubuntu-20.04
+      WABT_DIR: ${{ github.workspace }}/.wabt/wabt-1.0.37
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache WABT
+        id: cache-wabt
+        uses: actions/cache@v4
+        with:
+          path: .wabt/wabt-${{ env.WABT_VERSION }}
+          key: wabt-${{ runner.os }}-${{ env.WABT_VERSION }}-${{ env.WABT_PLATFORM }}
+
+      - name: Install WABT
+        if: steps.cache-wabt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .wabt/download
+          base="https://github.com/WebAssembly/wabt/releases/download/${WABT_VERSION}"
+          archive="wabt-${WABT_VERSION}-${WABT_PLATFORM}.tar.gz"
+          curl -fsSL "${base}/${archive}" -o ".wabt/download/${archive}"
+          curl -fsSL "${base}/${archive}.sha256" -o ".wabt/download/${archive}.sha256"
+          (cd .wabt/download && sha256sum -c "${archive}.sha256")
+          mkdir -p .wabt
+          tar -xzf ".wabt/download/${archive}" -C .wabt
+
+      - name: Add WABT to PATH
+        run: echo "${WABT_DIR}/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        run: bash tools/build.sh
+
+      - name: Test WAT
+        run: node tools/watwat.js dist/wasm/*.test.wasm
+
+      - name: Detect Playwright golden tests
+        if: github.event_name == 'pull_request'
+        id: golden-tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d tests/e2e ] && find tests/e2e -type f \( -name '*.spec.js' -o -name '*.spec.mjs' -o -name '*.spec.ts' \) -print -quit | grep -q .; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Playwright browsers
+        if: github.event_name == 'pull_request' && steps.golden-tests.outputs.exists == 'true'
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright golden e2e
+        if: github.event_name == 'pull_request' && steps.golden-tests.outputs.exists == 'true'
+        run: npx playwright test
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: deploy
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
