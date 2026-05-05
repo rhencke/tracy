@@ -1,4 +1,4 @@
-const canvas = document.getElementById("tracy-canvas");
+const canvas = document.getElementById("tracy");
 const context = canvas.getContext("2d", { alpha: false });
 
 function resizeCanvas() {
