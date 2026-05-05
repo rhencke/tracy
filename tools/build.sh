@@ -6,6 +6,8 @@ DIST_DIR="${ROOT_DIR}/dist"
 WAT_DIR="${ROOT_DIR}/wat"
 STATIC_DIR="${ROOT_DIR}/static"
 
+PATH="${ROOT_DIR}/node_modules/.bin:${PATH}"
+
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     printf 'error: %s is required on PATH\n' "$1" >&2
