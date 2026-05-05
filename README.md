@@ -1,5 +1,7 @@
 # tracy
 
+[![ci](https://github.com/rhencke/tracy/actions/workflows/ci.yml/badge.svg)](https://github.com/rhencke/tracy/actions/workflows/ci.yml)
+
 A trace viewer.  Mobile-first.  Material 3 throughout.  Client-side
 only — your traces never leave your device.  Handles 10 GB+ traces
 without choking.
@@ -24,7 +26,7 @@ then [v1.0 — release](https://github.com/rhencke/tracy/issues/35).
 | Trace size target | 10 GB+ (server-recording scale) |
 | Input format (v0.1) | Chrome JSON Trace Event Format |
 | Design language | Material 3 (everywhere) |
-| Hosting | Client-side only.  GitHub Pages from `gh-pages`. |
+| Hosting | Client-side only.  GitHub Pages at <https://rhencke.github.io/tracy/>. |
 | Implementation | Pure WAT.  ≤50 LOC JS bootstrap + thin host shim. |
 | Build | `wat2wasm` (wabt) + `esbuild` for the bootstrap bundle.  Driven by GitHub Actions. |
 | Tests | `watwat` — WAT-native test framework, TAP output. |
@@ -48,15 +50,21 @@ then [v1.0 — release](https://github.com/rhencke/tracy/issues/35).
 
 ## Build + run
 
-The CI workflow builds and deploys to GitHub Pages on every merge
-to `main`.  Local dev:
+The CI workflow builds `dist/` on every PR and deploys that artifact
+to GitHub Pages on every merge to `main`.  Local dev:
 
 ```sh
 # install wabt (once)
 brew install wabt   # or: apt install wabt
 
+# install locked JS build tools
+npm ci
+
 # build
 bash tools/build.sh
+
+# produced app shell
+ls dist/index.html dist/bootstrap.bundle.js dist/wasm/app.wasm
 
 # run watwat tests
 node tools/watwat.js dist/wasm/*.test.wasm
@@ -65,9 +73,9 @@ node tools/watwat.js dist/wasm/*.test.wasm
 python3 -m http.server -d dist 8000
 ```
 
-(All of the above is the responsibility of [v0.1 #1
-"Foundation"](https://github.com/rhencke/tracy/issues/3) and
-landing phases.  Nothing builds yet.)
+The hosted scaffold is <https://rhencke.github.io/tracy/>.  At this
+stage it is intentionally only a blank full-screen canvas loaded from
+the placeholder wasm module.
 
 ## Contributing
 
