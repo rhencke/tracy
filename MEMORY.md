@@ -356,6 +356,71 @@ Cross-page state is limited to immutable dictionary epochs and committed side
 pages named by explicit page id.  A page is malformed if decoding any column
 requires scanning a previous or next raw-event page.
 
+### 100 MB fixture byte budget
+
+The v0.1 index must average at most 12 encoded bytes per raw event on the
+100 MB synthetic Chrome trace fixture used to gate index work.  The fixture
+models one sorted trace with dense timestamps, common names and categories,
+stable process/thread tracks, mostly complete `dur`, and sparse optional
+`args` data.  Side pages count toward the average; OPFS page slack, page
+headers, and column directories also count.
+
+The budget target is:
+
+| Component | Encoding | Budget B/event | Notes |
+|---|---|---:|---|
+| Page overhead | Header, footer, directory, padding | 0.30 | Assumes pages are filled to at least 90% before commit. |
+| `track_id` | `dict8` hot table, `dict16` fallback | 1.00 | Synthetic tracks fit in the page-local hot tier. |
+| `ts_delta` | `uvarint` | 2.00 | Sorted track-local deltas usually fit in one or two bytes. |
+| `dur` | `uvarint` | 1.50 | Short durations dominate; long spans use wider varints. |
+| `name_id` | `dict8` hot table, `dict16` fallback | 1.25 | Common event names take one byte; uncommon names take two. |
+| `cat_id` | `dict8` hot table, `dict16` fallback | 0.75 | Missing category uses id `0`; common categories use one byte. |
+| `phase` | `fixed8` | 1.00 | Chrome trace phase code. |
+| `flags` | `fixed8` | 1.00 | Row-local side-data and relationship bits. |
+| Optional fields | `rle` plus `side-ref` | 1.60 | Null runs dominate; non-null `args` live in side pages. |
+| **Total target** | | **10.40** | Leaves 1.60 B/event headroom below the 12 B/event cap. |
+
+The gate assertion for #11 is: after indexing the 100 MB synthetic fixture,
+`(raw index page bytes + side page bytes + committed dictionary bytes used by
+the fixture) / event_count <= 12.0`.  The measurement uses committed OPFS byte
+lengths, not just in-memory payload lengths, so page padding and resumability
+metadata stay visible.
+
+### Decoder API contract
+
+The index implementation must expose a page-oriented decoder API.  The API
+is a design contract here; exact WAT function names can change when #11
+implements it, but the behavior and ownership rules are fixed.
+
+| Operation | Inputs | Output | Contract |
+|---|---|---|---|
+| `index_validate_page` | Cache-slot pointer, page byte length | Status code | Checks magic, format version, payload bounds, CRCs, footer, and required columns before decode. |
+| `index_column_span` | Validated page pointer, column id | Pointer, byte length, encoding id, row count | Returns a zero-copy span inside the page payload. |
+| `index_varint_scan` | Column span, start row, row limit | Last row, last byte offset, optional decoded value | Scans without materializing a full column and may stop at any row boundary. |
+| `index_dict_lookup` | Dictionary epoch, kind, dictionary id | Pointer, byte length, type tag | Resolves ids through immutable epoch tables without copying string bytes. |
+| `index_rle_seek` | RLE column span, target row | Run descriptor | Skips null and repeated runs without expanding them. |
+| `index_side_ref_open` | Side reference tuple | Validated side-page span | Loads or pins the named side page and validates its commit marker before use. |
+| `index_page_cursor_next` | Cursor over one raw-event page | Row view or end status | Advances across columns in lockstep and never crosses to another raw-event page implicitly. |
+
+Zero-copy scan means decoders read directly from the 64 KiB cache slot at
+`MEM_INDEX_CACHE_BASE` or from a validated side-page slot.  Varint scans may
+return intermediate byte offsets so later calls resume from the same column
+without rescanning from row zero.  They must reject overlong varints, values
+that exceed the field's documented range, and streams that end before the
+directory row count is satisfied.
+
+Dictionary lookup returns borrowed spans into `MEM_DICT_BASE` or a committed
+dictionary side page.  Callers must not retain those spans after the owning
+dictionary epoch is evicted from the dictionary cache.  A raw-event page pins
+its dictionary epoch for the duration of decode so page scans see stable
+strings and ids.
+
+Page boundary handling is explicit.  A cursor reaches `end` at the end of
+one raw-event page; callers choose the next page id from the page index or
+time bucket metadata and validate that page separately.  Side-page access is
+also explicit through `index_side_ref_open`, so optional payloads cannot
+silently pull arbitrary pages into the cache while scanning hot columns.
+
 ## Host-shim GC pressure
 
 The parser and host shim must stream text with
