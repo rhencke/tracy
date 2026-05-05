@@ -84,6 +84,12 @@ Index and LOD data are stored in fixed 64 KiB pages.  OPFS offsets are page
 aligned, and cache slots in linear memory are page aligned.  A cache slot
 contains exactly one decoded or partially decoded page.
 
+The index cache at `MEM_INDEX_CACHE_BASE` is a page cache, not an arena for
+the whole index.  OPFS page id `n` maps to byte offset `n * 65536` in the
+index file, and a loaded page occupies exactly one 64 KiB cache slot.  Slot
+metadata is module-private index state; bytes inside the slot always keep the
+same header, payload, unused space, and optional footer layout used on disk.
+
 Every page starts with a 64-byte header:
 
 | Offset | Size | Field |
@@ -116,6 +122,84 @@ last 16 bytes when resumability is enabled:
 Readers accept a page only when the header, payload length, checksum, and
 footer commit marker agree.  On resume after interruption, the indexer scans
 backward to the last committed page and resumes from the next page id.
+
+### Raw-event index pages
+
+Raw-event index pages use page magic `TRCI` and level `0`.  Each page covers
+one contiguous timestamp bucket for one track group.  Events inside a page
+are sorted by `(track_id, timestamp, input_order)` so timestamp deltas stay
+small and a decoder can scan forward without seeking into another page.
+
+The 64-byte page header is followed by a compact column directory.  Directory
+entries are fixed-width so the decoder can find any column with one indexed
+load:
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 1 | Column id. |
+| 1 | 1 | Encoding id for the column payload. |
+| 2 | 2 | Flags, zero unless specified by the encoding. |
+| 4 | 4 | Payload offset from the start of the page. |
+| 8 | 4 | Payload byte length. |
+| 12 | 4 | Decoded row count or run count, depending on encoding. |
+
+The directory starts with a 4-byte prelude:
+
+| Offset from payload start | Size | Field |
+|---:|---:|---|
+| 0 | 1 | Directory version, `1` for v0.1. |
+| 1 | 1 | Directory entry count. |
+| 2 | 2 | Directory byte length, including this prelude. |
+
+Column payload offsets are relative to the start of the 64 KiB page, not to
+the payload start.  The directory is the first payload segment, column
+payloads follow it in ascending column id order, and every unused byte after
+the last payload segment is zeroed until the optional footer.
+
+The v0.1 raw-event stream has these required columns:
+
+| Column id | Column | Meaning |
+|---:|---|---|
+| 1 | `track_id` | Dictionary-coded process/thread track for each row. |
+| 2 | `ts_delta` | Timestamp delta from the page bucket start. |
+| 3 | `dur` | Event duration, or zero for instant events. |
+| 4 | `name_id` | Dictionary id for the trace event `name`. |
+| 5 | `cat_id` | Dictionary id for the trace event `cat`, with `0` for missing. |
+| 6 | `phase` | Chrome trace phase code, stored as a compact integer column. |
+| 7 | `flags` | Bitset for row-local properties such as async, flow, or side data. |
+
+Optional columns are present only when at least one row in the page needs
+them.  v0.1 reserves optional column ids `32..63` for sparse trace fields
+such as `args`, flow ids, bind ids, scope strings, and source locations.
+Optional columns must use an encoding that preserves row alignment, usually
+RLE for absent values plus a packed non-null value stream.
+
+Every required column decodes to exactly the page header's record count.
+Optional columns either decode to that same row count or name a side page and
+row range in their payload.  A page is malformed if a required column is
+missing, a column range overlaps another range, a payload extends past the
+declared payload byte length, or a non-zero byte appears in unused page space.
+
+### Resumable index writes
+
+Index pages are committed in page-id order.  The writer fills the header with
+the header CRC field zeroed, writes the directory and column payloads, zeroes
+unused space, computes the payload CRC32C, then writes the footer magic
+`DONE` last.  The footer is the commit marker; a page without `DONE` is
+treated as absent even if its header and payload look complete.
+
+The `previous committed page id` footer field forms a backward chain through
+the committed index.  On resume, the indexer reads candidate pages from the
+highest known page id downward until it finds a page whose header CRC,
+payload CRC, commit sequence, previous-page link, and `DONE` marker agree.
+Indexing resumes at the next page id and may overwrite any later incomplete
+pages.
+
+The dictionary epoch in the page header is part of the resumability contract:
+the epoch must already be committed before any page that references it is
+accepted.  A resumed indexer must either reuse the committed epoch or start a
+new epoch; it must not rewrite an already committed page to point at a
+different dictionary layout.
 
 ## Encoding spec
 
