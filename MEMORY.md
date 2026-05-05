@@ -207,26 +207,154 @@ The average encoded event budget is at most 12 bytes per event in index
 pages.  Wide strings and uncommon fields are dictionary-coded or moved into
 side tables so the hot event stream stays compact.
 
-Integer fields use unsigned LEB128 varints unless a field explicitly says it
-is zigzag-encoded.  Timestamp and duration values are stored as deltas from
-the page base timestamp.  Negative deltas, when needed for clock correction
-or async relationships, use zigzag encoding before unsigned LEB128 storage.
+### Encoding ids
 
-Name, category, process id, and thread id are dictionary-coded.  The event
-stream stores dictionary ids, not repeated strings.  Dictionary id `0` is
-reserved for null or missing, and ids are scoped by dictionary epoch so OPFS
-pages remain decodable after dictionary compaction.
+Column directory entries identify the payload format with these v0.1
+encoding ids:
 
-Fields with high null rates use run-length encoding.  A run header records
-the target field id, null/non-null mode, and run length as varints.  Non-null
-runs then store a packed stream of values using that field's normal encoding.
-Sparse optional data that still exceeds the per-event budget belongs in a
-side page referenced by page id and row range.
+| Encoding id | Name | Payload shape |
+|---:|---|---|
+| 0 | `absent` | Reserved for missing optional columns; not valid for required columns. |
+| 1 | `uvarint` | Packed unsigned LEB128 value stream. |
+| 2 | `zigzag-varint` | Packed signed values after zigzag transform and unsigned LEB128 storage. |
+| 3 | `dict8` | One byte per row, interpreted in the page dictionary epoch. |
+| 4 | `dict16` | Two little-endian bytes per row, interpreted in the page dictionary epoch. |
+| 5 | `fixed8` | One byte per row for phases, flags, and small enums. |
+| 6 | `rle` | Run packets for sparse optional columns. |
+| 7 | `side-ref` | Packed references to side pages for values too large for the hot stream. |
+
+Unknown encoding ids make the page unreadable for v0.1.  A later format may
+add new ids only by bumping the page format version so old decoders fail
+closed instead of silently misreading column bytes.
+
+### Varints
+
+Integer fields use unsigned LEB128 unless their column encoding id is
+`zigzag-varint`.  Each byte contributes seven payload bits; bit `0x80`
+indicates that another byte follows.  Encoders must use the shortest legal
+form, so values `0..127` use one byte and a decoder rejects overlong forms.
+
+Signed values use the standard zigzag mapping before unsigned LEB128
+storage:
+
+```text
+zigzag(n) = (n << 1) ^ (n >> 63)
+```
+
+Timestamp columns are page-local.  `ts_delta` stores the unsigned delta from
+the page header's inclusive bucket start timestamp.  Duration stores an
+unsigned event duration, with zero for instant events.  A column may use
+`zigzag-varint` only when the design explicitly permits negative values,
+such as future clock-correction or async relationship columns; raw-event
+`ts_delta` and `dur` are non-negative in v0.1.
+
+Varint streams are self-delimiting but not self-counting.  The column
+directory's decoded row count is the authoritative number of values to scan.
+A decoder reaches the end of a varint column only after reading that many
+values and landing exactly on `payload_offset + payload_byte_length`.
+
+### Dictionaries
+
+The dictionary region at `MEM_DICT_BASE` stores interned values for event
+names, categories, process/thread tracks, and other repeated strings or
+small ids.  The page header's dictionary epoch selects the immutable snapshot
+used to decode every dictionary-coded column in that page.
+
+Dictionary id `0` is reserved for null or missing.  Non-zero ids are scoped
+to their dictionary kind and epoch; `name_id 10` and `cat_id 10` are not the
+same entry unless their kind also matches.  Epoch metadata must include the
+committed OPFS location of each dictionary kind, the number of entries, and
+the code-width tier used by hot pages.
+
+The v0.1 code-width tiers are:
+
+| Tier | Range | Use |
+|---|---:|---|
+| `dict8` | `0..255` | Page-local hot code table for common values. |
+| `dict16` | `0..65535` | Normal compressed ids for names, categories, and tracks. |
+| `side-ref` | Larger ids or large values | Rare values stored through a side page reference. |
+
+`dict8` values are page-local aliases into the epoch dictionary.  A page that
+uses `dict8` must include a hot-code table for that column in the same page
+payload so decoding does not require neighboring pages.  The hot-code table
+maps each one-byte code to a full epoch dictionary id.  Code `0` still means
+null.
+
+`dict16` stores full epoch dictionary ids directly as little-endian unsigned
+16-bit values.  If an epoch grows beyond 65,535 entries for a kind, newly
+introduced rare values must be emitted as `side-ref` values until a later
+epoch compacts or retires the dictionary.
+
+Dictionary compaction is epoch based.  Committing a new epoch never mutates
+the meaning of old ids; old OPFS pages remain decodable as long as their
+epoch metadata is retained.  A dictionary epoch may be garbage-collected only
+after no committed page header references it.
+
+### RLE packets
+
+RLE is used for optional columns with high null rates, especially `args` and
+future flow metadata.  An RLE payload is a sequence of packets.  Each packet
+starts with one unsigned LEB128 header:
+
+```text
+header = (run_length << 2) | mode
+```
+
+The low two mode bits are:
+
+| Mode | Meaning | Packet body |
+|---:|---|---|
+| 0 | Null run | No body; all rows in the run decode to null. |
+| 1 | Literal run | `run_length` values encoded with the column's value encoding. |
+| 2 | Repeated value | One encoded value repeated for `run_length` rows. |
+| 3 | Side-reference run | One or more side-page references covering the run. |
+
+`run_length` must be non-zero.  Runs are concatenated until their decoded row
+counts equal the page header's record count.  A decoder rejects an RLE column
+if the runs underflow, overflow, or leave trailing bytes after the final
+packet.
+
+The column directory flags for an RLE column identify the value encoding used
+inside literal and repeated-value bodies: unsigned varint, zigzag varint,
+`dict8`, `dict16`, `fixed8`, or `side-ref`.  Literal bodies contain exactly
+one value per row in the run.  Repeated-value bodies contain one value total.
+
+### Side pages
+
+Values that would blow the hot stream budget are stored in side pages and
+referenced from `side-ref` payloads or RLE side-reference packets.  Side
+pages use the index page magic `TRCI`, a non-zero side-page level reserved by
+the index module, and the same 64 KiB header/footer rules as raw-event pages.
+
+A side reference stores four unsigned LEB128 values:
+
+```text
+page_id, byte_offset, byte_length, row_count
+```
+
+Offsets are relative to the start of the referenced side page payload, not
+to the 64-byte page header.  `row_count` is the number of raw-event rows
+covered by the reference.  For a scalar large value, `row_count` is `1`; for
+an RLE side-reference packet, the sum of referenced row counts must equal the
+packet's run length.
+
+Side pages are immutable once committed.  A raw-event page may reference only
+side pages whose footer commit sequence is less than or equal to its own
+commit sequence, so resume never leaves a committed hot page pointing at an
+uncommitted side page.
+
+### Independent page decode
 
 Page payloads are independently decodable.  A decoder needs only the page
-header, the dictionary epoch named in the header, and any side pages named by
-decode hints.  This keeps cache eviction simple: no hot page may depend on a
-different hot page being resident.
+header, the column directory, the dictionary epoch named in the header, and
+any side pages named by `side-ref` payloads.  This keeps cache eviction
+simple: no hot page may depend on a different hot page being resident.
+
+All page-local lookup tables needed by a column, including `dict8` hot-code
+tables, live inside that page's payload and are covered by its payload CRC.
+Cross-page state is limited to immutable dictionary epochs and committed side
+pages named by explicit page id.  A page is malformed if decoding any column
+requires scanning a previous or next raw-event page.
 
 ## Host-shim GC pressure
 
