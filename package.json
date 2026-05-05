@@ -1,0 +1,12 @@
+{
+  "name": "tracy",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "bash tools/build.sh",
+    "test": "node tools/watwat.js dist/wasm/*.test.wasm"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.3"
+  }
+}

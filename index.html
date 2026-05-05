@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#fbf8f4">
+    <title>tracy</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/tracy-icon.svg" type="image/svg+xml">
+    <style>
+      :root {
+        color-scheme: light;
+        background: #fbf8f4;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        background: #fbf8f4;
+      }
+
+      #tracy-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        touch-action: none;
+      }
+
+      noscript {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        color: #1f1b16;
+        font: 1rem/1.4 system-ui, sans-serif;
+        text-align: center;
+        background: #fbf8f4;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="tracy-canvas" aria-label="tracy trace canvas"></canvas>
+    <noscript>tracy needs JavaScript enabled to load the WebAssembly viewer.</noscript>
+    <script src="bootstrap.bundle.js" defer></script>
+  </body>
+</html>
