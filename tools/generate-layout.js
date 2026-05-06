@@ -162,6 +162,22 @@ function renderMemoryLayoutSection() {
   lines.push(
     `| \`TOKEN_RECORD_BYTES\` | \`${spec.parser.TOKEN_RECORD_BYTES.value}\` | ${spec.parser.TOKEN_RECORD_BYTES.description} |`,
     `| \`INDEX_TARGET_ENCODED_BYTES_PER_EVENT\` | \`${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.value}\` | ${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.description} |`,
+    `| \`INDEX_DECODE_HINT_TRACK_ID_SHIFT\` | \`${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.value}\` | ${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.description} |`,
+    `| \`INDEX_COLUMN_ENTRY_BYTES\` | \`${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.value}\` | ${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.description} |`,
+    `| \`INDEX_QUERY_RESULT_FIELD_BYTES\` | \`${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value}\` | ${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.description} |`,
+  );
+
+  for (const section of [spec.index.pageHeader, spec.index.directory, spec.index.queryResult]) {
+    for (const entry of section.fields) {
+      lines.push(`| \`${entry.name}\` | \`${entry.value}\` | ${entry.description} |`);
+    }
+  }
+
+  lines.push(
+    "",
+    "Index page header, directory, and query-result offsets are part of the",
+    "generated layout spec so cold-reload parity checks and binary readers use",
+    "documented names rather than ad hoc byte arithmetic.",
     "",
     "`MEM_STACK_BASE`, region sizes, page size constants, and end addresses may",
     "also be exported for convenience, but the base constants above are the",

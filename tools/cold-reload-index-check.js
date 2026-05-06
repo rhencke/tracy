@@ -3,6 +3,18 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const {
+  INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET,
+  INDEX_COLUMN_ENTRY_BYTES,
+  INDEX_DECODE_HINT_TRACK_ID_SHIFT,
+  INDEX_DIRECTORY_BYTES_OFFSET,
+  INDEX_DIRECTORY_COLUMN_COUNT_OFFSET,
+  INDEX_DIRECTORY_FIRST_ENTRY_OFFSET,
+  INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+  INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+  INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+  INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+  INDEX_QUERY_RESULT_FIELD_BYTES,
+  INDEX_QUERY_RESULT_FIELDS,
   INDEX_TARGET_ENCODED_BYTES_PER_EVENT,
   OPFS_PAGE_SIZE,
   TOKEN_RECORD_BYTES,
@@ -309,7 +321,7 @@ function cursorAt(view, ptr) {
     },
     u32() {
       const value = readU32(view, ptr);
-      ptr += 4;
+      ptr += INDEX_QUERY_RESULT_FIELD_BYTES;
       return value;
     },
   };
@@ -341,14 +353,9 @@ function queryRows(index, view, trackId, tsMin, tsMax) {
   const rows = [];
   for (let i = 0; i < count; i += 1) {
     const row = cursorAt(view, queryOutPtr + i * rowBytes);
-    rows.push({
-      start: row.u32(),
-      dur: row.u32(),
-      name: row.u32(),
-      depth: row.u32(),
-      cat: row.u32(),
-      color: row.u32(),
-    });
+    rows.push(
+      Object.fromEntries(INDEX_QUERY_RESULT_FIELDS.map((field) => [field.property, row.u32()])),
+    );
   }
 
   return rows;
@@ -369,17 +376,17 @@ function rebuildSliceCatalog(index, view, pages) {
       `catalog page ${pageId} validates`,
     );
 
-    const hints = readU32(view, page + 36);
+    const hints = readU32(view, page + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET);
     if ((hints & globalValue(index.INDEX_DECODE_HINT_COMPACT_SLICES)) === 0) {
       continue;
     }
 
     index.index_page_catalog_add_slice_page(
-      hints >>> 8,
+      hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
       pageId,
-      readU32(view, page + 12),
-      readU32(view, page + 20),
-      readU32(view, page + 28),
+      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET),
+      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET),
+      readU32(view, page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET),
     );
   }
 }
@@ -389,13 +396,14 @@ function compactPayloadBytes(indexBytes, index, pages) {
   const view = new DataView(indexBytes.buffer, indexBytes.byteOffset, indexBytes.byteLength);
   for (let pageId = 0; pageId < pages; pageId += 1) {
     const page = pageId * OPFS_PAGE_SIZE;
-    const hints = view.getUint32(page + 36, true);
+    const hints = view.getUint32(page + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET, true);
     if ((hints & globalValue(index.INDEX_DECODE_HINT_COMPACT_SLICES)) !== 0) {
       const dir = page + globalValue(index.INDEX_HEADER_BYTES);
-      const columnCount = view.getUint8(dir + 1);
-      bytes += view.getUint16(dir + 2, true);
+      const columnCount = view.getUint8(dir + INDEX_DIRECTORY_COLUMN_COUNT_OFFSET);
+      bytes += view.getUint16(dir + INDEX_DIRECTORY_BYTES_OFFSET, true);
       for (let i = 0; i < columnCount; i += 1) {
-        bytes += view.getUint32(dir + 4 + i * 16 + 8, true);
+        const entry = dir + INDEX_DIRECTORY_FIRST_ENTRY_OFFSET + i * INDEX_COLUMN_ENTRY_BYTES;
+        bytes += view.getUint32(entry + INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET, true);
       }
     }
   }

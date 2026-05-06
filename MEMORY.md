@@ -63,6 +63,27 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `MEM_HEAP_CEILING_PAGES` | `16384` | 1 GiB heap ceiling in WebAssembly pages. |
 | `TOKEN_RECORD_BYTES` | `12` | Parser token output record byte length. |
 | `INDEX_TARGET_ENCODED_BYTES_PER_EVENT` | `12` | Maximum average compact index payload bytes per event. |
+| `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
+| `INDEX_COLUMN_ENTRY_BYTES` | `16` | Byte length of one compact index column directory entry. |
+| `INDEX_QUERY_RESULT_FIELD_BYTES` | `4` | Byte length of one u32 field in an index query result row. |
+| `INDEX_PAGE_HEADER_BUCKET_START_OFFSET` | `12` | Index page header byte offset of the inclusive page timestamp start. |
+| `INDEX_PAGE_HEADER_BUCKET_END_OFFSET` | `20` | Index page header byte offset of the inclusive page timestamp end. |
+| `INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET` | `28` | Index page header byte offset of the encoded record count. |
+| `INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET` | `36` | Index page header byte offset of the decode-hints bitfield. |
+| `INDEX_DIRECTORY_COLUMN_COUNT_OFFSET` | `1` | Compact page directory byte offset of the column-count field. |
+| `INDEX_DIRECTORY_BYTES_OFFSET` | `2` | Compact page directory byte offset of the directory byte-length field. |
+| `INDEX_DIRECTORY_FIRST_ENTRY_OFFSET` | `4` | Compact page directory byte offset of the first column entry. |
+| `INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET` | `8` | Column directory entry byte offset of the encoded column payload length. |
+| `INDEX_QUERY_RESULT_START_TS_OFFSET` | `0` | Query result row byte offset of the slice start timestamp. |
+| `INDEX_QUERY_RESULT_DUR_OFFSET` | `4` | Query result row byte offset of the slice duration. |
+| `INDEX_QUERY_RESULT_NAME_ID_OFFSET` | `8` | Query result row byte offset of the name dictionary id. |
+| `INDEX_QUERY_RESULT_DEPTH_OFFSET` | `12` | Query result row byte offset of the nesting depth. |
+| `INDEX_QUERY_RESULT_CAT_ID_OFFSET` | `16` | Query result row byte offset of the category dictionary id. |
+| `INDEX_QUERY_RESULT_COLOR_OFFSET` | `20` | Query result row byte offset of the resolved color. |
+
+Index page header, directory, and query-result offsets are part of the
+generated layout spec so cold-reload parity checks and binary readers use
+documented names rather than ad hoc byte arithmetic.
 
 `MEM_STACK_BASE`, region sizes, page size constants, and end addresses may
 also be exported for convenience, but the base constants above are the

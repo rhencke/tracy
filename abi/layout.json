@@ -148,6 +148,108 @@
     "INDEX_TARGET_ENCODED_BYTES_PER_EVENT": {
       "value": 12,
       "description": "Maximum average compact index payload bytes per event."
+    },
+    "pageHeader": {
+      "fields": [
+        {
+          "name": "INDEX_PAGE_HEADER_BUCKET_START_OFFSET",
+          "value": 12,
+          "description": "Index page header byte offset of the inclusive page timestamp start."
+        },
+        {
+          "name": "INDEX_PAGE_HEADER_BUCKET_END_OFFSET",
+          "value": 20,
+          "description": "Index page header byte offset of the inclusive page timestamp end."
+        },
+        {
+          "name": "INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET",
+          "value": 28,
+          "description": "Index page header byte offset of the encoded record count."
+        },
+        {
+          "name": "INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET",
+          "value": 36,
+          "description": "Index page header byte offset of the decode-hints bitfield."
+        }
+      ]
+    },
+    "decodeHints": {
+      "INDEX_DECODE_HINT_TRACK_ID_SHIFT": {
+        "value": 8,
+        "description": "Number of bits to shift a track id into or out of the decode-hints bitfield."
+      }
+    },
+    "directory": {
+      "INDEX_COLUMN_ENTRY_BYTES": {
+        "value": 16,
+        "description": "Byte length of one compact index column directory entry."
+      },
+      "fields": [
+        {
+          "name": "INDEX_DIRECTORY_COLUMN_COUNT_OFFSET",
+          "value": 1,
+          "description": "Compact page directory byte offset of the column-count field."
+        },
+        {
+          "name": "INDEX_DIRECTORY_BYTES_OFFSET",
+          "value": 2,
+          "description": "Compact page directory byte offset of the directory byte-length field."
+        },
+        {
+          "name": "INDEX_DIRECTORY_FIRST_ENTRY_OFFSET",
+          "value": 4,
+          "description": "Compact page directory byte offset of the first column entry."
+        },
+        {
+          "name": "INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET",
+          "value": 8,
+          "description": "Column directory entry byte offset of the encoded column payload length."
+        }
+      ]
+    },
+    "queryResult": {
+      "INDEX_QUERY_RESULT_FIELD_BYTES": {
+        "value": 4,
+        "description": "Byte length of one u32 field in an index query result row."
+      },
+      "fields": [
+        {
+          "name": "INDEX_QUERY_RESULT_START_TS_OFFSET",
+          "property": "start",
+          "value": 0,
+          "description": "Query result row byte offset of the slice start timestamp."
+        },
+        {
+          "name": "INDEX_QUERY_RESULT_DUR_OFFSET",
+          "property": "dur",
+          "value": 4,
+          "description": "Query result row byte offset of the slice duration."
+        },
+        {
+          "name": "INDEX_QUERY_RESULT_NAME_ID_OFFSET",
+          "property": "name",
+          "value": 8,
+          "description": "Query result row byte offset of the name dictionary id."
+        },
+        {
+          "name": "INDEX_QUERY_RESULT_DEPTH_OFFSET",
+          "property": "depth",
+          "value": 12,
+          "description": "Query result row byte offset of the nesting depth."
+        },
+        {
+          "name": "INDEX_QUERY_RESULT_CAT_ID_OFFSET",
+          "property": "cat",
+          "value": 16,
+          "description": "Query result row byte offset of the category dictionary id."
+        },
+        {
+          "name": "INDEX_QUERY_RESULT_COLOR_OFFSET",
+          "property": "color",
+          "value": 20,
+          "description": "Query result row byte offset of the resolved color."
+        }
+      ]
     }
   }
 }
