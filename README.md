@@ -67,7 +67,7 @@ bash tools/build.sh
 ls dist/index.html dist/bootstrap.bundle.js dist/wasm/app.wasm
 
 # run watwat tests
-node tools/watwat.js dist/wasm/*.test.wasm
+node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 
 # serve dist/ locally
 python3 -m http.server -d dist 8000
@@ -76,6 +76,11 @@ python3 -m http.server -d dist 8000
 The hosted scaffold is <https://rhencke.github.io/tracy/>.  At this
 stage it is intentionally only a blank full-screen canvas loaded from
 the placeholder wasm module.
+
+`watwat` provides behavioral coverage for hand-written WAT modules in
+CI.  Tracy does not currently report WAT/WASM line or branch coverage;
+that needs a separate tooling evaluation once there is a practical path
+for this stack.
 
 ## Contributing
 

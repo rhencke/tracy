@@ -5,7 +5,7 @@
   "scripts": {
     "build": "bash tools/build.sh",
     "test": "npm run test:wat && npm run test:watwat-probe",
-    "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm",
+    "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
     "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm"
   },
   "devDependencies": {

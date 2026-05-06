@@ -91,6 +91,92 @@ async function instantiateAssert(assertPath, memory, watwat) {
   return instance.exports;
 }
 
+function stdModulePathForTest(file) {
+  if (!file.endsWith(".test.wasm")) {
+    return null;
+  }
+
+  const parsed = path.parse(file);
+  if (path.basename(parsed.dir) !== "std") {
+    return null;
+  }
+
+  return path.join(parsed.dir, `${parsed.name.replace(/\.test$/, "")}.wasm`);
+}
+
+function stdImportAliases(file) {
+  const parsed = path.parse(file);
+  const name = parsed.name;
+  const parent = path.basename(parsed.dir);
+
+  return [name, `${parent}/${name}`, `wat/${parent}/${name}`];
+}
+
+async function instantiateStdModule(file, imports) {
+  const stdPath = stdModulePathForTest(file);
+
+  if (stdPath === null) {
+    return {};
+  }
+
+  try {
+    await fs.access(stdPath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return {};
+    }
+
+    throw error;
+  }
+
+  const allocPath = path.join(path.dirname(stdPath), "alloc.wasm");
+  const stdImports = { ...imports };
+  const aliases = {};
+
+  if (path.basename(stdPath) !== "alloc.wasm") {
+    try {
+      await fs.access(allocPath);
+      const allocBytes = await fs.readFile(allocPath);
+      const { instance } = await WebAssembly.instantiate(allocBytes, stdImports);
+      stdImports.alloc = instance.exports;
+      aliases.alloc = instance.exports;
+      aliases["std/alloc"] = instance.exports;
+      aliases["wat/std/alloc"] = instance.exports;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  const hashPath = path.join(path.dirname(stdPath), "hash.wasm");
+
+  if (path.basename(stdPath) === "strtab.wasm") {
+    try {
+      await fs.access(hashPath);
+      const hashBytes = await fs.readFile(hashPath);
+      const { instance } = await WebAssembly.instantiate(hashBytes, stdImports);
+      stdImports.hash = instance.exports;
+      aliases.hash = instance.exports;
+      aliases["std/hash"] = instance.exports;
+      aliases["wat/std/hash"] = instance.exports;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  const bytes = await fs.readFile(stdPath);
+  const { instance } = await WebAssembly.instantiate(bytes, stdImports);
+
+  for (const name of stdImportAliases(stdPath)) {
+    aliases[name] = instance.exports;
+  }
+
+  return aliases;
+}
+
 async function instantiateTestModule(file, assertPath) {
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 32768 });
   const watwat = {
@@ -100,12 +186,15 @@ async function instantiateTestModule(file, assertPath) {
   };
   const assert = await instantiateAssert(assertPath, memory, watwat);
   Object.assign(watwat, assert);
-  const bytes = await fs.readFile(file);
-  const { instance } = await WebAssembly.instantiate(bytes, {
+  const imports = {
     env: { memory },
     watwat,
     assert,
-  });
+  };
+  Object.assign(imports, await instantiateStdModule(file, imports));
+
+  const bytes = await fs.readFile(file);
+  const { instance } = await WebAssembly.instantiate(bytes, imports);
 
   return {
     instance,
