@@ -2529,6 +2529,14 @@
         i32.and
         if
           local.get $state
+          local.get $out_ptr
+          global.get $PARSER_JSON_TOKEN_YIELD
+          i32.const 0
+          i32.const 0
+          call $emit_checked_token
+          drop
+
+          local.get $state
           global.get $PARSER_STATUS_YIELDED
           call $set_status
           return
@@ -2549,9 +2557,23 @@
   )
 
   (func (export "parser_parse_with_budget") (param $state i32) (param $requested_chunk_len i32) (param $byte_budget i32) (result i32)
+    (local $effective_budget i32)
+
+    local.get $byte_budget
+    local.set $effective_budget
+
+    local.get $effective_budget
+    i32.eqz
+    if
+      local.get $state
+      global.get $PARSER_STATE_YIELD_BUDGET_MS_OFFSET
+      call $load_i32
+      local.set $effective_budget
+    end
+
     local.get $state
     local.get $requested_chunk_len
-    local.get $byte_budget
+    local.get $effective_budget
     call $parser_parse_core
   )
 )

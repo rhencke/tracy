@@ -1581,6 +1581,35 @@
     i32.const 161
     call $assert_eq_i64
 
+    ;; Yield markers are host-visible turn boundaries, not parser progress.
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    call $store_i32
+
     i32.const 61440
     i32.const 62000
     i32.const 162
@@ -1673,6 +1702,8 @@
   )
 
   (func (export "test_parser_default_yield_budget_can_force_turns")
+    (local $last_record i32)
+
     i32.const 57344
     i32.const 99
     call $parser_state_init
@@ -1694,9 +1725,7 @@
 
     i32.const 57344
     i32.const 1
-    i32.const 57344
-    global.get $PARSER_STATE_YIELD_BUDGET_MS_OFFSET
-    call $load_i32
+    i32.const 0
     call $parser_parse_with_budget
     global.get $PARSER_STATUS_YIELDED
     i32.const 172
@@ -1717,5 +1746,24 @@
     global.get $PARSER_STATUS_YIELDED
     i32.const 174
     call $assert_eq_i32
+
+    i32.const 57344
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    i32.const 1
+    i32.sub
+    local.tee $last_record
+    i32.const 0
+    i32.ge_s
+    i32.const 175
+    call $assert_true
+
+    i32.const 0x00500000
+    local.get $last_record
+    global.get $PARSER_JSON_TOKEN_YIELD
+    i32.const 0
+    i32.const 0
+    i32.const 176
+    call $assert_token_record
   )
 )
