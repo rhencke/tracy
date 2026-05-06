@@ -44,6 +44,8 @@ function memoryMaximumPagesFor(file) {
 }
 
 function imports({ memory }) {
+  let indexBytes = Buffer.alloc(0);
+
   return {
     host: {
       canvas_get_size() {
@@ -104,9 +106,16 @@ function imports({ memory }) {
         }
 
         if (indexId === 21 && Number(offset) >= 0) {
-          const source = 65536 + Number(offset);
-          const sourceEnd = source + len;
           const destEnd = dest + len;
+          const start = Number(offset);
+
+          if (destEnd <= memory.buffer.byteLength && start + len <= indexBytes.length) {
+            new Uint8Array(memory.buffer, dest, len).set(indexBytes.subarray(start, start + len));
+            return len;
+          }
+
+          const source = 65536 + start;
+          const sourceEnd = source + len;
 
           if (sourceEnd <= memory.buffer.byteLength && destEnd <= memory.buffer.byteLength) {
             new Uint8Array(memory.buffer, dest, len).set(new Uint8Array(memory.buffer, source, len));
@@ -115,9 +124,25 @@ function imports({ memory }) {
 
         return 65536;
       },
-      opfs_index_write(indexId) {
+      opfs_index_write(indexId, offset, src, len) {
         if (indexId === 111) {
           return -1;
+        }
+
+        if (indexId === 21 && Number(offset) >= 0) {
+          const start = Number(offset);
+          const end = start + len;
+          const srcEnd = src + len;
+
+          if (srcEnd <= memory.buffer.byteLength) {
+            if (end > indexBytes.length) {
+              const next = Buffer.alloc(end);
+              indexBytes.copy(next);
+              indexBytes = next;
+            }
+
+            indexBytes.set(new Uint8Array(memory.buffer, src, len), start);
+          }
         }
 
         return 65536;

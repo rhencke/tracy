@@ -3,6 +3,7 @@
   (import "host" "opfs_index_read" (func $opfs_index_read (param i32 i64 i32 i32) (result i32)))
   (import "host" "opfs_index_write" (func $opfs_index_write (param i32 i64 i32 i32) (result i32)))
   (import "host" "opfs_index_flush" (func $opfs_index_flush (param i32) (result i32)))
+  (import "mem" "MEM_DICT_BASE" (global $MEM_DICT_BASE i32))
   (import "mem" "MEM_INDEX_CACHE_BASE" (global $MEM_INDEX_CACHE_BASE i32))
   (import "mem" "MEM_INDEX_CACHE_SIZE" (global $MEM_INDEX_CACHE_SIZE i32))
   (import "mem" "OPFS_PAGE_SIZE" (global $OPFS_PAGE_SIZE i32))
@@ -97,6 +98,9 @@
   (global $INDEX_COUNTER_WRITER_TS_OFFSET i32 (i32.const 116))
   (global $INDEX_COUNTER_WRITER_NAME_OFFSET i32 (i32.const 14616))
   (global $INDEX_COUNTER_WRITER_VALUE_OFFSET i32 (i32.const 20416))
+  (global $INDEX_PAGE_CATALOG_ENTRY_BYTES (export "INDEX_PAGE_CATALOG_ENTRY_BYTES") i32 (i32.const 20))
+  (global $INDEX_PAGE_CATALOG_CAPACITY (export "INDEX_PAGE_CATALOG_CAPACITY") i32 (i32.const 4096))
+  (global $INDEX_QUERY_RESULT_BYTES (export "INDEX_QUERY_RESULT_BYTES") i32 (i32.const 24))
   (global $INDEX_READER_SLOT_META_BASE i32 (i32.const 0x00080000))
   (global $INDEX_READER_SLOT_META_BYTES i32 (i32.const 16))
   (global $INDEX_TRACK_TABLE_BASE i32 (i32.const 0x00090000))
@@ -140,7 +144,11 @@
   (global $index_reader_configured_slots (mut i32) (i32.const 0))
   (global $index_reader_clock (mut i32) (i32.const 0))
   (global $index_reader_last_slot (mut i32) (i32.const -1))
+  (global $index_reader_cache_hits (mut i32) (i32.const 0))
+  (global $index_reader_cache_misses (mut i32) (i32.const 0))
+  (global $index_reader_cache_evictions (mut i32) (i32.const 0))
   (global $index_track_count (mut i32) (i32.const 0))
+  (global $index_slice_page_count (mut i32) (i32.const 0))
 
   (func $load_payload_len (param $page i32) (result i32)
     local.get $page
@@ -1644,6 +1652,18 @@
       return
     end
 
+    global.get $index_writer_mode
+    i32.const 1
+    i32.eq
+    if
+      global.get $index_writer_page_track
+      global.get $index_writer_next_page_id
+      global.get $index_writer_bucket_start
+      global.get $index_writer_bucket_end
+      global.get $index_writer_count
+      call $index_page_catalog_add_slice_page
+    end
+
     global.get $index_writer_next_page_id
     global.set $index_writer_previous_page_id
     global.get $index_writer_next_page_id
@@ -1686,6 +1706,99 @@
     call $index_writer_row_ptr
     local.get $value
     i32.store8
+  )
+
+  (func $index_page_catalog_ptr (param $entry_id i32) (result i32)
+    global.get $MEM_DICT_BASE
+    local.get $entry_id
+    global.get $INDEX_PAGE_CATALOG_ENTRY_BYTES
+    i32.mul
+    i32.add
+  )
+
+  (func $index_page_catalog_ensure_memory
+    (local $needed_pages i32)
+
+    global.get $MEM_DICT_BASE
+    global.get $INDEX_PAGE_CATALOG_CAPACITY
+    global.get $INDEX_PAGE_CATALOG_ENTRY_BYTES
+    i32.mul
+    i32.add
+    i32.const 65535
+    i32.add
+    i32.const 16
+    i32.shr_u
+    local.set $needed_pages
+
+    local.get $needed_pages
+    memory.size
+    i32.gt_u
+    if
+      local.get $needed_pages
+      memory.size
+      i32.sub
+      memory.grow
+      drop
+    end
+  )
+
+  (func $index_page_catalog_reset (export "index_page_catalog_reset")
+    call $index_page_catalog_ensure_memory
+    i32.const 0
+    global.set $index_slice_page_count
+  )
+
+  (func $index_page_catalog_add_slice_page (export "index_page_catalog_add_slice_page")
+    (param $track_id i32)
+    (param $page_id i32)
+    (param $ts_min i32)
+    (param $ts_max i32)
+    (param $event_count i32)
+    (local $entry i32)
+
+    global.get $index_slice_page_count
+    global.get $INDEX_PAGE_CATALOG_CAPACITY
+    i32.ge_u
+    if
+      return
+    end
+
+    global.get $index_slice_page_count
+    call $index_page_catalog_ptr
+    local.set $entry
+
+    local.get $entry
+    local.get $track_id
+    i32.store
+
+    local.get $entry
+    i32.const 4
+    i32.add
+    local.get $page_id
+    i32.store
+
+    local.get $entry
+    i32.const 8
+    i32.add
+    local.get $ts_min
+    i32.store
+
+    local.get $entry
+    i32.const 12
+    i32.add
+    local.get $ts_max
+    i32.store
+
+    local.get $entry
+    i32.const 16
+    i32.add
+    local.get $event_count
+    i32.store
+
+    global.get $index_slice_page_count
+    i32.const 1
+    i32.add
+    global.set $index_slice_page_count
   )
 
   (func $index_track_entry_ptr (param $track_id i32) (result i32)
@@ -2490,6 +2603,7 @@
     i32.const 0
     global.set $index_writer_mode
     call $index_tracks_reset
+    call $index_page_catalog_reset
     call $index_writer_prepare_page
   )
 
@@ -3165,10 +3279,16 @@
     global.set $index_reader_file
     global.get $INDEX_READER_STATUS_OK
     global.set $index_reader_last_status
+    i32.const 0
+    global.set $index_reader_cache_hits
+    i32.const 0
+    global.set $index_reader_cache_misses
+    i32.const 0
+    global.set $index_reader_cache_evictions
     call $index_reader_clear_cache
   )
 
-  (func (export "read_page") (param $level i32) (param $page_id i32) (result i32)
+  (func $read_page (export "read_page") (param $level i32) (param $page_id i32) (result i32)
     (local $read_bytes i32)
     (local $status i32)
     (local $slot i32)
@@ -3197,6 +3317,10 @@
       global.set $index_reader_last_status
       i32.const 1
       global.set $index_reader_last_hit
+      global.get $index_reader_cache_hits
+      i32.const 1
+      i32.add
+      global.set $index_reader_cache_hits
       local.get $slot
       global.set $index_reader_last_slot
       local.get $slot
@@ -3212,9 +3336,21 @@
 
     i32.const 0
     global.set $index_reader_last_hit
+    global.get $index_reader_cache_misses
+    i32.const 1
+    i32.add
+    global.set $index_reader_cache_misses
     call $index_reader_choose_slot
     local.tee $slot
     global.set $index_reader_last_slot
+    local.get $slot
+    call $index_reader_slot_valid
+    if
+      global.get $index_reader_cache_evictions
+      i32.const 1
+      i32.add
+      global.set $index_reader_cache_evictions
+    end
     local.get $slot
     call $index_reader_slot_ptr
     local.set $page_ptr
@@ -3308,6 +3444,369 @@
     global.get $index_reader_last_slot
   )
 
+  (func (export "index_reader_cache_hits") (result i32)
+    global.get $index_reader_cache_hits
+  )
+
+  (func (export "index_reader_cache_misses") (result i32)
+    global.get $index_reader_cache_misses
+  )
+
+  (func (export "index_reader_cache_evictions") (result i32)
+    global.get $index_reader_cache_evictions
+  )
+
+  (func (export "index_slice_page_count") (result i32)
+    global.get $index_slice_page_count
+  )
+
+  (func $index_query_result_ptr (param $out_buf i32) (param $row i32) (result i32)
+    local.get $out_buf
+    local.get $row
+    global.get $INDEX_QUERY_RESULT_BYTES
+    i32.mul
+    i32.add
+  )
+
+  (func (export "index_query_range")
+    (param $track_id i32)
+    (param $ts_min i32)
+    (param $ts_max i32)
+    (param $out_buf i32)
+    (result i32)
+    (local $catalog_i i32)
+    (local $entry i32)
+    (local $page i32)
+    (local $row i32)
+    (local $count i32)
+    (local $start_ptr i32)
+    (local $start_len i32)
+    (local $start_cursor i32)
+    (local $dur_ptr i32)
+    (local $dur_len i32)
+    (local $dur_cursor i32)
+    (local $name_ptr i32)
+    (local $depth_ptr i32)
+    (local $cat_ptr i32)
+    (local $color_ptr i32)
+    (local $color_len i32)
+    (local $color_cursor i32)
+    (local $encoding i32)
+    (local $rows i32)
+    (local $value i32)
+    (local $bytes i32)
+    (local $status i32)
+    (local $start_ts i32)
+    (local $dur i32)
+    (local $color i32)
+    (local $result i32)
+
+    global.get $index_reader_file
+    i32.eqz
+    if
+      global.get $INDEX_READER_STATUS_NOT_INITIALIZED
+      global.set $index_reader_last_status
+      i32.const 0
+      return
+    end
+
+    block $catalog_done
+      loop $catalog
+        local.get $catalog_i
+        global.get $index_slice_page_count
+        i32.ge_u
+        br_if $catalog_done
+
+        local.get $catalog_i
+        call $index_page_catalog_ptr
+        local.set $entry
+
+        local.get $entry
+        i32.load
+        local.get $track_id
+        i32.eq
+        local.get $entry
+        i32.const 12
+        i32.add
+        i32.load
+        local.get $ts_min
+        i32.ge_u
+        i32.and
+        local.get $entry
+        i32.const 8
+        i32.add
+        i32.load
+        local.get $ts_max
+        i32.le_u
+        i32.and
+        if
+          i32.const 0
+          local.get $entry
+          i32.const 4
+          i32.add
+          i32.load
+          call $read_page
+          local.tee $page
+          i32.eqz
+          if
+            local.get $count
+            return
+          end
+
+          local.get $page
+          i32.const 36
+          i32.add
+          i32.load
+          global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+          i32.and
+          i32.eqz
+          if
+            global.get $INDEX_READER_STATUS_CORRUPT_PAGE
+            global.set $index_reader_last_status
+            local.get $count
+            return
+          end
+
+          local.get $page
+          global.get $INDEX_SLICE_COLUMN_START_TS
+          call $index_column_span
+          local.set $rows
+          local.set $encoding
+          local.set $start_len
+          local.set $start_ptr
+
+          local.get $page
+          global.get $INDEX_SLICE_COLUMN_DUR
+          call $index_column_span
+          local.set $rows
+          local.set $encoding
+          local.set $dur_len
+          local.set $dur_ptr
+
+          local.get $page
+          global.get $INDEX_SLICE_COLUMN_NAME_ID
+          call $index_column_span
+          local.set $rows
+          local.set $encoding
+          drop
+          local.set $name_ptr
+
+          local.get $page
+          global.get $INDEX_SLICE_COLUMN_DEPTH
+          call $index_column_span
+          local.set $rows
+          local.set $encoding
+          drop
+          local.set $depth_ptr
+
+          local.get $page
+          global.get $INDEX_SLICE_COLUMN_CAT_ID
+          call $index_column_span
+          local.set $rows
+          local.set $encoding
+          drop
+          local.set $cat_ptr
+
+          local.get $page
+          global.get $INDEX_SLICE_COLUMN_COLOR
+          call $index_column_span
+          local.set $rows
+          local.set $encoding
+          local.set $color_len
+          local.set $color_ptr
+
+          i32.const 0
+          local.set $row
+          i32.const 0
+          local.set $start_cursor
+          i32.const 0
+          local.set $dur_cursor
+          i32.const 0
+          local.set $color_cursor
+
+          block $rows_done
+            loop $rows_loop
+              local.get $row
+              local.get $rows
+              i32.ge_u
+              br_if $rows_done
+
+              local.get $start_ptr
+              local.get $start_cursor
+              i32.add
+              local.get $start_len
+              local.get $start_cursor
+              i32.sub
+              call $index_uvarint_read
+              local.set $status
+              local.set $bytes
+              local.set $value
+
+              local.get $status
+              global.get $INDEX_CODEC_STATUS_OK
+              i32.ne
+              if
+                global.get $INDEX_READER_STATUS_CORRUPT_PAGE
+                global.set $index_reader_last_status
+                local.get $count
+                return
+              end
+
+              local.get $start_cursor
+              local.get $bytes
+              i32.add
+              local.set $start_cursor
+
+              local.get $page
+              i32.const 12
+              i32.add
+              i32.load
+              local.get $value
+              i32.add
+              local.set $start_ts
+
+              local.get $dur_ptr
+              local.get $dur_cursor
+              i32.add
+              local.get $dur_len
+              local.get $dur_cursor
+              i32.sub
+              call $index_uvarint_read
+              local.set $status
+              local.set $bytes
+              local.set $dur
+
+              local.get $status
+              global.get $INDEX_CODEC_STATUS_OK
+              i32.ne
+              if
+                global.get $INDEX_READER_STATUS_CORRUPT_PAGE
+                global.set $index_reader_last_status
+                local.get $count
+                return
+              end
+
+              local.get $dur_cursor
+              local.get $bytes
+              i32.add
+              local.set $dur_cursor
+
+              local.get $color_ptr
+              local.get $color_cursor
+              i32.add
+              local.get $color_len
+              local.get $color_cursor
+              i32.sub
+              call $index_uvarint_read
+              local.set $status
+              local.set $bytes
+              local.set $color
+
+              local.get $status
+              global.get $INDEX_CODEC_STATUS_OK
+              i32.ne
+              if
+                global.get $INDEX_READER_STATUS_CORRUPT_PAGE
+                global.set $index_reader_last_status
+                local.get $count
+                return
+              end
+
+              local.get $color_cursor
+              local.get $bytes
+              i32.add
+              local.set $color_cursor
+
+              local.get $start_ts
+              local.get $ts_max
+              i32.le_u
+              local.get $start_ts
+              local.get $dur
+              i32.add
+              local.get $ts_min
+              i32.ge_u
+              i32.and
+              if
+                local.get $out_buf
+                local.get $count
+                call $index_query_result_ptr
+                local.set $result
+
+                local.get $result
+                local.get $start_ts
+                i32.store
+
+                local.get $result
+                i32.const 4
+                i32.add
+                local.get $dur
+                i32.store
+
+                local.get $result
+                i32.const 8
+                i32.add
+                local.get $name_ptr
+                local.get $row
+                i32.const 2
+                i32.mul
+                i32.add
+                i32.load16_u
+                i32.store
+
+                local.get $result
+                i32.const 12
+                i32.add
+                local.get $depth_ptr
+                local.get $row
+                i32.add
+                i32.load8_u
+                i32.store
+
+                local.get $result
+                i32.const 16
+                i32.add
+                local.get $cat_ptr
+                local.get $row
+                i32.const 2
+                i32.mul
+                i32.add
+                i32.load16_u
+                i32.store
+
+                local.get $result
+                i32.const 20
+                i32.add
+                local.get $color
+                i32.store
+
+                local.get $count
+                i32.const 1
+                i32.add
+                local.set $count
+              end
+
+              local.get $row
+              i32.const 1
+              i32.add
+              local.set $row
+              br $rows_loop
+            end
+          end
+        end
+
+        local.get $catalog_i
+        i32.const 1
+        i32.add
+        local.set $catalog_i
+        br $catalog
+      end
+    end
+
+    global.get $INDEX_READER_STATUS_OK
+    global.set $index_reader_last_status
+    local.get $count
+  )
+
   (func (export "index_reader_evict_cold_pages") (param $count i32) (result i32)
     (local $evicted i32)
     (local $slot i32)
@@ -3337,6 +3836,10 @@
         local.get $slot
         i32.const 0
         call $index_reader_set_slot_valid
+        global.get $index_reader_cache_evictions
+        i32.const 1
+        i32.add
+        global.set $index_reader_cache_evictions
 
         local.get $evicted
         i32.const 1
