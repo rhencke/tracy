@@ -74,6 +74,17 @@ function testPathFor(manifestPath) {
   );
 }
 
+function relatedTestPathsFor(manifestPath, testPaths) {
+  const moduleBase = path.basename(manifestPath, ".cov.json");
+  const exactTest = `${moduleBase}.test.wasm`;
+  const splitTestPrefix = `${moduleBase}.`;
+
+  return testPaths.filter((testPath) => {
+    const testFile = path.basename(testPath);
+    return testFile === exactTest || testFile.startsWith(splitTestPrefix);
+  });
+}
+
 function mergeHits(target, report) {
   for (let index = 0; index < target.length; index += 1) {
     target[index] = Math.max(target[index], report.hits[index] ?? 0);
@@ -134,14 +145,22 @@ function expectedFailureRunsFor(manifestPath, testPath) {
 async function runManifest(manifestPath, testPaths) {
   const manifest = await readJson(manifestPath);
   const testPath = testPathFor(manifestPath);
-  await accessOrThrow(testPath, "coverage test wasm missing");
+  const relatedTestPaths = relatedTestPathsFor(manifestPath, testPaths);
+  if (relatedTestPaths.length === 0) {
+    throw new Error(`coverage test wasm missing for ${manifestPath}`);
+  }
 
   const hits = new Array(manifest.blocks?.length ?? 0).fill(0);
   for (const suiteTestPath of testPaths) {
     mergeHits(hits, await runWithCoverage(manifestPath, [suiteTestPath]));
   }
 
-  for (const args of expectedFailureRunsFor(manifestPath, testPath)) {
+  const expectedFailureRuns = expectedFailureRunsFor(manifestPath, testPath);
+  if (expectedFailureRuns.length > 0) {
+    await accessOrThrow(testPath, "coverage test wasm missing");
+  }
+
+  for (const args of expectedFailureRuns) {
     mergeHits(hits, await runWithCoverage(manifestPath, args));
   }
 

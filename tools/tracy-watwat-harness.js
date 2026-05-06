@@ -168,7 +168,9 @@ function modulePathForTest(file) {
   }
 
   const parsed = path.parse(file);
-  return path.join(parsed.dir, `${parsed.name.replace(/\.test$/, "")}.wasm`);
+  const testModuleName = parsed.name.replace(/\.test$/, "");
+  const moduleName = testModuleName.startsWith("index.") ? "index" : testModuleName;
+  return path.join(parsed.dir, `${moduleName}.wasm`);
 }
 
 function wasmRootFor(modulePath) {
