@@ -45,6 +45,80 @@ so design docs and module code use the same names.
 also be exported for convenience, but the base constants above are the
 cross-module ABI surface required by v0.1.
 
+## Host scratch ABI
+
+The browser host shim owns the first page of `MEM_SCRATCH_BASE` for v0.1
+browser input state.  Wasm may read these bytes during `tracy_tick`; no wasm
+module may allocate from or overwrite this range.  The app may clear the rest
+of scratch every tick, but it must preserve the host range below.
+
+Multi-byte fields are little-endian.  Canvas sizes are physical pixels:
+`floor(canvas.clientWidth * devicePixelRatio)` and
+`floor(canvas.clientHeight * devicePixelRatio)`, clamped to at least `1`.
+The packed canvas size returned by `canvas_get_size()` is a 64-bit value with
+width in bits `0..31` and height in bits `32..63`.
+
+### Host scratch layout
+
+| Offset | Constant | Size | Field |
+|---:|---|---:|---|
+| `0x0000` | `HOST_CANVAS_SIZE_OFFSET` | 4 | Canvas width, `u32`. |
+| `0x0004` | `HOST_CANVAS_SIZE_OFFSET + 4` | 4 | Canvas height, `u32`. |
+| `0x0008` | `HOST_CANVAS_RESIZE_SEQ_OFFSET` | 4 | Incremented after each resize write. |
+| `0x000C..0x003F` | | 52 | Reserved, zero for v0.1. |
+| `0x0040` | `HOST_POINTER_RING_OFFSET` | 32 | Pointer ring header. |
+| `0x0060` | `HOST_POINTER_RECORDS_OFFSET` | 8192 | Pointer event records. |
+| `0x2060..0xFFFF` | | 57248 | Reserved for future host scratch fields. |
+
+The resize observer writes width and height first, then increments
+`HOST_CANVAS_RESIZE_SEQ_OFFSET`.  Readers that need a stable pair should read
+the sequence before and after the size fields and retry when it changes.
+
+### Pointer ring
+
+`pointer_listen()` appends fixed-width records to a circular ring in host
+scratch memory.  The ring capacity is 256 records, and each record is 32
+bytes.  When the ring is full, the host drops the newest event and increments
+the dropped counter; wasm advances the read index as it consumes records.
+
+The ring header at `HOST_POINTER_RING_OFFSET` is:
+
+| Header offset | Size | Field |
+|---:|---:|---|
+| 0 | 4 | `read_index`, `u32`, written by wasm. |
+| 4 | 4 | `write_index`, `u32`, written by the host. |
+| 8 | 4 | `count`, `u32`, number of unread records. |
+| 12 | 4 | `dropped`, `u32`, count of events dropped because the ring was full. |
+| 16 | 4 | `capacity`, `u32`, always `256` for v0.1. |
+| 20 | 4 | `record_size`, `u32`, always `32` for v0.1. |
+| 24 | 8 | Reserved, zero for v0.1. |
+
+Each pointer record is:
+
+| Record offset | Size | Type | Field |
+|---:|---:|---|---|
+| 0 | 1 | `u8` | Kind: `1` down, `2` move, `3` up, `4` cancel. |
+| 1 | 3 | | Padding, zero. |
+| 4 | 4 | `u32` | `pointerId`. |
+| 8 | 4 | `f32` | Canvas-local x in CSS pixels. |
+| 12 | 4 | `f32` | Canvas-local y in CSS pixels. |
+| 16 | 8 | `f64` | DOM event timestamp. |
+| 24 | 4 | `f32` | Pressure, or `0` when unavailable. |
+| 28 | 4 | `u32` | Modifier bitset. |
+
+Modifier bits are:
+
+| Bit | Constant | Meaning |
+|---:|---|---|
+| `0x00000001` | `HOST_POINTER_MOD_SHIFT` | Shift key active. |
+| `0x00000002` | `HOST_POINTER_MOD_CTRL` | Control key active. |
+| `0x00000004` | `HOST_POINTER_MOD_ALT` | Alt key active. |
+| `0x00000008` | `HOST_POINTER_MOD_META` | Meta key active. |
+| `0x00000010` | `HOST_POINTER_MOD_PRIMARY` | Event is the primary pointer. |
+| `0x00000020` | `HOST_POINTER_MOD_BUTTON_PRIMARY` | Primary pointer button is down. |
+| `0x00000040` | `HOST_POINTER_MOD_BUTTON_SECONDARY` | Secondary pointer button is down. |
+| `0x00000080` | `HOST_POINTER_MOD_BUTTON_AUXILIARY` | Auxiliary pointer button is down. |
+
 ## Ownership rules
 
 Each region has exactly one writer.  Reads are unrestricted, but a reader
