@@ -147,20 +147,16 @@ async function instantiateAssert(assertPath, memory, watwat, coverage = null) {
   return instance.exports;
 }
 
-function stdModulePathForTest(file) {
+function modulePathForTest(file) {
   if (!file.endsWith(".test.wasm")) {
     return null;
   }
 
   const parsed = path.parse(file);
-  if (path.basename(parsed.dir) !== "std") {
-    return null;
-  }
-
   return path.join(parsed.dir, `${parsed.name.replace(/\.test$/, "")}.wasm`);
 }
 
-function stdImportAliases(file) {
+function moduleImportAliases(file) {
   const parsed = path.parse(file);
   const name = parsed.name;
   const parent = path.basename(parsed.dir);
@@ -168,15 +164,15 @@ function stdImportAliases(file) {
   return [name, `${parent}/${name}`, `wat/${parent}/${name}`];
 }
 
-async function instantiateStdModule(file, imports) {
-  const stdPath = stdModulePathForTest(file);
+async function instantiateSiblingModule(file, imports) {
+  const modulePath = modulePathForTest(file);
 
-  if (stdPath === null) {
+  if (modulePath === null) {
     return {};
   }
 
   try {
-    await fs.access(stdPath);
+    await fs.access(modulePath);
   } catch (error) {
     if (error.code === "ENOENT") {
       return {};
@@ -185,16 +181,16 @@ async function instantiateStdModule(file, imports) {
     throw error;
   }
 
-  const allocPath = path.join(path.dirname(stdPath), "alloc.wasm");
-  const stdImports = { ...imports };
+  const allocPath = path.join(path.dirname(modulePath), "alloc.wasm");
+  const moduleImports = { ...imports };
   const aliases = {};
 
-  if (path.basename(stdPath) !== "alloc.wasm") {
+  if (path.basename(modulePath) !== "alloc.wasm") {
     try {
       await fs.access(allocPath);
       const allocBytes = await fs.readFile(allocPath);
-      const { instance } = await WebAssembly.instantiate(allocBytes, stdImports);
-      stdImports.alloc = instance.exports;
+      const { instance } = await WebAssembly.instantiate(allocBytes, moduleImports);
+      moduleImports.alloc = instance.exports;
       aliases.alloc = instance.exports;
       aliases["std/alloc"] = instance.exports;
       aliases["wat/std/alloc"] = instance.exports;
@@ -205,14 +201,14 @@ async function instantiateStdModule(file, imports) {
     }
   }
 
-  const hashPath = path.join(path.dirname(stdPath), "hash.wasm");
+  const hashPath = path.join(path.dirname(modulePath), "hash.wasm");
 
-  if (path.basename(stdPath) === "strtab.wasm") {
+  if (path.basename(modulePath) === "strtab.wasm") {
     try {
       await fs.access(hashPath);
       const hashBytes = await fs.readFile(hashPath);
-      const { instance } = await WebAssembly.instantiate(hashBytes, stdImports);
-      stdImports.hash = instance.exports;
+      const { instance } = await WebAssembly.instantiate(hashBytes, moduleImports);
+      moduleImports.hash = instance.exports;
       aliases.hash = instance.exports;
       aliases["std/hash"] = instance.exports;
       aliases["wat/std/hash"] = instance.exports;
@@ -223,10 +219,10 @@ async function instantiateStdModule(file, imports) {
     }
   }
 
-  const bytes = await fs.readFile(stdPath);
-  const { instance } = await WebAssembly.instantiate(bytes, stdImports);
+  const bytes = await fs.readFile(modulePath);
+  const { instance } = await WebAssembly.instantiate(bytes, moduleImports);
 
-  for (const name of stdImportAliases(stdPath)) {
+  for (const name of moduleImportAliases(modulePath)) {
     aliases[name] = instance.exports;
   }
 
@@ -250,7 +246,7 @@ async function instantiateTestModule(file, assertPath, coverage = null) {
   if (coverage !== null) {
     imports.cov = coverage.imports;
   }
-  Object.assign(imports, await instantiateStdModule(file, imports));
+  Object.assign(imports, await instantiateSiblingModule(file, imports));
 
   const bytes = await fs.readFile(file);
   const { instance } = await WebAssembly.instantiate(bytes, imports);
