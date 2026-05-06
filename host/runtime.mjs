@@ -1,11 +1,6 @@
-const asyncHostImports = new Set([
-  "file_picker_open",
-  "opfs_create_from_file",
-  "opfs_read_chunk",
-  "opfs_source_from_file",
-  "opfs_source_open",
-  "opfs_source_read",
-]);
+import { HOST_ASYNC_IMPORTS } from "./abi.mjs";
+
+const asyncHostImports = new Set(HOST_ASYNC_IMPORTS);
 
 function supportsJSPI() {
   return typeof WebAssembly.Suspending === "function";

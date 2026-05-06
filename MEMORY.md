@@ -47,28 +47,33 @@ cross-module ABI surface required by v0.1.
 
 ## Host scratch ABI
 
+<!-- @generated host-abi:start -->
+### Generated host scratch ABI
+
+This section is generated from `abi/host.json` by `tools/generate-host-abi.js`.
+The same source also generates JavaScript host constants and WAT host import declarations.
+
 The browser host shim owns the first page of `MEM_SCRATCH_BASE` for v0.1
 browser input state.  Wasm may read these bytes during `tracy_tick`; no wasm
 module may allocate from or overwrite this range.  The app may clear the rest
 of scratch every tick, but it must preserve the host range below.
 
-Multi-byte fields are little-endian.  Canvas sizes are physical pixels:
-`floor(canvas.clientWidth * devicePixelRatio)` and
-`floor(canvas.clientHeight * devicePixelRatio)`, clamped to at least `1`.
+Multi-byte fields are little-endian.
+
+Canvas sizes are physical pixels: `floor(canvas.clientWidth * devicePixelRatio)`
+and `floor(canvas.clientHeight * devicePixelRatio)`, clamped to at least `1`.
 The packed canvas size returned by `canvas_get_size()` is a 64-bit value with
 width in bits `0..31` and height in bits `32..63`.
 
-### Host scratch layout
-
 | Offset | Constant | Size | Field |
 |---:|---|---:|---|
-| `0x0000` | `HOST_CANVAS_SIZE_OFFSET` | 4 | Canvas width, `u32`. |
-| `0x0004` | `HOST_CANVAS_SIZE_OFFSET + 4` | 4 | Canvas height, `u32`. |
-| `0x0008` | `HOST_CANVAS_RESIZE_SEQ_OFFSET` | 4 | Incremented after each resize write. |
-| `0x000C..0x003F` | | 52 | Reserved, zero for v0.1. |
-| `0x0040` | `HOST_POINTER_RING_OFFSET` | 32 | Pointer ring header. |
-| `0x0060` | `HOST_POINTER_RECORDS_OFFSET` | 8192 | Pointer event records. |
-| `0x2060..0xFFFF` | | 57248 | Reserved for future host scratch fields. |
+| `0x00000000` | `HOST_CANVAS_SIZE_OFFSET` | 4 | Canvas width, `u32`. |
+| `0x00000004` | `HOST_CANVAS_HEIGHT_OFFSET` | 4 | Canvas height, `u32`. |
+| `0x00000008` | `HOST_CANVAS_RESIZE_SEQ_OFFSET` | 4 | Incremented after each resize write. |
+| `0x0000000C..0x0000003F` | | 52 | Reserved, zero for v0.1. |
+| `0x00000040` | `HOST_POINTER_RING_OFFSET` | 32 | Pointer ring header. |
+| `0x00000060` | `HOST_POINTER_RECORDS_OFFSET` | 8192 | Pointer event records. |
+| `0x00002060..0x0000FFFF` | | 57248 | Reserved for future host scratch fields. |
 
 The resize observer writes width and height first, then increments
 `HOST_CANVAS_RESIZE_SEQ_OFFSET`.  Readers that need a stable pair should read
@@ -118,6 +123,10 @@ Modifier bits are:
 | `0x00000020` | `HOST_POINTER_MOD_BUTTON_PRIMARY` | Primary pointer button is down. |
 | `0x00000040` | `HOST_POINTER_MOD_BUTTON_SECONDARY` | Secondary pointer button is down. |
 | `0x00000080` | `HOST_POINTER_MOD_BUTTON_AUXILIARY` | Auxiliary pointer button is down. |
+
+Host import names, signatures, and async/sync status are generated in
+[HOST_ABI.md](HOST_ABI.md).
+<!-- @generated host-abi:end -->
 
 ## Ownership rules
 

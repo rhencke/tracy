@@ -17,6 +17,8 @@ require_command() {
 require_command node
 require_command wat2wasm
 
+node "${ROOT_DIR}/tools/generate-host-abi.js" --check
+
 rm -rf "${COV_DIR}"
 mkdir -p "${COV_DIR}"
 

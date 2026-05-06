@@ -1,3 +1,4 @@
+import { HOST_IMPORT_NAME } from "./abi.mjs";
 import { u64ToNumber } from "./memory.mjs";
 
 export function makeOpfsSourceHost(memoryView, files) {
@@ -165,13 +166,13 @@ export function makeOpfsSourceHost(memoryView, files) {
   }
 
   return {
-    opfs_create_from_file: opfsSourceFromFile,
-    opfs_read_chunk: opfsSourceRead,
-    opfs_source_from_file: opfsSourceFromFile,
-    opfs_source_name: opfsSourceName,
-    opfs_source_name_len: opfsSourceNameLen,
-    opfs_source_open: opfsSourceOpen,
-    opfs_source_read: opfsSourceRead,
-    opfs_source_size: opfsSourceSize,
+    [HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]: opfsSourceFromFile,
+    [HOST_IMPORT_NAME.OPFS_READ_CHUNK]: opfsSourceRead,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]: opfsSourceFromFile,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME]: opfsSourceName,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN]: opfsSourceNameLen,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN]: opfsSourceOpen,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_READ]: opfsSourceRead,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE]: opfsSourceSize,
   };
 }

@@ -1,6 +1,9 @@
-export const HOST_SCRATCH_BASE = 0x00000000;
-export const HOST_CANVAS_SIZE_OFFSET = HOST_SCRATCH_BASE + 0x0000;
-export const HOST_CANVAS_RESIZE_SEQ_OFFSET = HOST_SCRATCH_BASE + 0x0008;
+import {
+  HOST_CANVAS_HEIGHT_OFFSET,
+  HOST_CANVAS_RESIZE_SEQ_OFFSET,
+  HOST_CANVAS_SIZE_OFFSET,
+  HOST_IMPORT_NAME,
+} from "./abi.mjs";
 
 export function makeCanvasHost(canvas, memoryView) {
   const context = canvas.getContext("2d", { alpha: false });
@@ -22,7 +25,7 @@ export function makeCanvasHost(canvas, memoryView) {
     const seq = scratch.getUint32(HOST_CANVAS_RESIZE_SEQ_OFFSET, true);
 
     scratch.setUint32(HOST_CANVAS_SIZE_OFFSET, width, true);
-    scratch.setUint32(HOST_CANVAS_SIZE_OFFSET + 4, height, true);
+    scratch.setUint32(HOST_CANVAS_HEIGHT_OFFSET, height, true);
     scratch.setUint32(HOST_CANVAS_RESIZE_SEQ_OFFSET, seq + 1, true);
   }
 
@@ -68,7 +71,7 @@ export function makeCanvasHost(canvas, memoryView) {
   resize();
 
   return {
-    canvas_get_size: canvasGetSize,
-    canvas_listen_resize: canvasListenResize,
+    [HOST_IMPORT_NAME.CANVAS_GET_SIZE]: canvasGetSize,
+    [HOST_IMPORT_NAME.CANVAS_LISTEN_RESIZE]: canvasListenResize,
   };
 }

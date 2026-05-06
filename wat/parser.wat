@@ -1,7 +1,8 @@
 (module
   (import "env" "memory" (memory $memory 1 32768))
-  (import "host" "opfs_source_read"
-    (func $opfs_source_read (param i32) (param i64) (param i32) (param i32) (result i32)))
+  ;; @generated host-imports parser:start
+  (import "host" "opfs_source_read" (func $opfs_source_read (param i32 i64 i32 i32) (result i32)))
+  ;; @generated host-imports parser:end
   (import "mem" "MEM_RING_BASE" (global $MEM_RING_BASE i32))
   (import "mem" "MEM_RING_SIZE" (global $MEM_RING_SIZE i32))
   (import "parser_state" "PARSER_STACK_CAP" (global $PARSER_STACK_CAP i32))

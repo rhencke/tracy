@@ -1,3 +1,5 @@
+import { HOST_IMPORT_NAME } from "./abi.mjs";
+
 export function makeFilePickerHost(memoryView) {
   const files = new Map();
   let fileInput = null;
@@ -71,5 +73,5 @@ export function makeFilePickerHost(memoryView) {
     });
   }
 
-  return { file_picker_open: filePickerOpen, files };
+  return { [HOST_IMPORT_NAME.FILE_PICKER_OPEN]: filePickerOpen, files };
 }
