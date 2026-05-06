@@ -23,18 +23,32 @@ const {
 
 const MiB = 1024 * 1024;
 const GiB = 1024 * MiB;
+const DEFAULT_TRACE_BYTES = 4 * MiB;
+// Seeded fixture generation keeps cold-reload assertions deterministic while
+// still exercising varied JSON payload bytes.
+const DEFAULT_TRACE_SEED = "cold-reload-index-ci";
+// Stable host IDs let the parser and index host stubs reject accidental calls
+// to the wrong OPFS source without needing a real filesystem.
+const SOURCE_ID = 9101;
+const INDEX_ID = 77;
+// Keep the parser state and trace input far enough above null that bad pointer
+// arithmetic shows up as failed reads instead of silently aliasing low memory.
+const PARSER_STATE_PTR = 4096;
+const TRACE_INPUT_PTR = 1 * MiB;
+// The writer owns one OPFS page at this address; the query buffer starts after
+// two full page spans so read/write scratch space cannot overlap query rows.
+const WRITER_PAGE_PTR = WASM_PAGE_SIZE;
+const QUERY_OUTPUT_PAGE_GAP = 2;
+// Parser token output is estimated from fixture bytes. This fixed headroom
+// covers JSON punctuation and final-event shape drift so tokenizer capacity
+// checks fail only when the estimate is genuinely too small.
+const TOKEN_OUTPUT_SAFETY_RECORDS = 1024;
 const targetBytes = Number.parseInt(
-  process.env.TRACY_COLD_RELOAD_TRACE_BYTES ?? String(4 * MiB),
+  process.env.TRACY_COLD_RELOAD_TRACE_BYTES ?? String(DEFAULT_TRACE_BYTES),
   10,
 );
-const seedText = process.env.TRACY_COLD_RELOAD_TRACE_SEED ?? "cold-reload-index-ci";
-const sourceId = 9101;
-const indexId = 77;
-const statePtr = 4096;
-const writerPagePtr = WASM_PAGE_SIZE;
-const inputPtr = 1 * MiB;
-const tokenOutputSafetyRecords = 1024;
-const queryOutPtr = writerPagePtr + 2 * OPFS_PAGE_SIZE;
+const seedText = process.env.TRACY_COLD_RELOAD_TRACE_SEED ?? DEFAULT_TRACE_SEED;
+const queryOutPtr = WRITER_PAGE_PTR + QUERY_OUTPUT_PAGE_GAP * OPFS_PAGE_SIZE;
 const wasmRoot = path.resolve(__dirname, "../dist/wasm");
 const stdRoot = path.join(wasmRoot, "std");
 
@@ -43,19 +57,23 @@ if (!Number.isInteger(targetBytes) || targetBytes <= 0) {
 }
 
 function fnv1a(text) {
-  let hash = 0x811c9dc5;
+  const FNV1A_32_OFFSET_BASIS = 0x811c9dc5;
+  const FNV1A_32_PRIME = 0x01000193;
+  let hash = FNV1A_32_OFFSET_BASIS;
   for (let i = 0; i < text.length; i += 1) {
     hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash = Math.imul(hash, FNV1A_32_PRIME) >>> 0;
   }
   return hash >>> 0;
 }
 
 function createRandom(seed) {
+  const LCG_MULTIPLIER = 1664525;
+  const LCG_INCREMENT = 1013904223;
   let state = seed >>> 0;
 
   return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    state = (Math.imul(state, LCG_MULTIPLIER) + LCG_INCREMENT) >>> 0;
     return state;
   };
 }
@@ -125,6 +143,8 @@ function buildTrace() {
   ];
   let count = 0;
   let sliceCount = 0;
+  // Shapes generated trace-event payloads so the cold-reload check produces a
+  // compact but multi-page index fixture with realistic args payload bytes.
   const basePadLen = 384;
 
   while (true) {
@@ -196,25 +216,40 @@ function globalValue(value) {
 }
 
 async function instantiateModules(trace, indexBytes) {
-  const eventCountEstimate = Math.max(1, Math.ceil(trace.length / 470));
-  const recordCap = eventCountEstimate * 48 + tokenOutputSafetyRecords;
-  const outputPtr = (inputPtr + trace.length + 7) & ~7;
+  // The generated fixture averages roughly this many bytes per trace event;
+  // underestimating here would starve the parser token-output buffer.
+  const GENERATED_FIXTURE_BYTES_PER_EVENT_ESTIMATE = 470;
+  // Conservative token-record capacity per estimated trace event. Trace events
+  // include object fields, nested args, punctuation, and string tokens.
+  const TOKEN_RECORDS_PER_ESTIMATED_EVENT = 48;
+  // Parser/index tests allocate a private bump heap after trace and token
+  // buffers so host stubs and module allocations never compete for fixture data.
+  const MODULE_HEAP_BYTES = 64 * MiB;
+  // Match WebAssembly's 32-bit address-space page ceiling.
+  const WASM_MAX_PAGES = 32768;
+  const eventCountEstimate = Math.max(
+    1,
+    Math.ceil(trace.length / GENERATED_FIXTURE_BYTES_PER_EVENT_ESTIMATE),
+  );
+  const recordCap =
+    eventCountEstimate * TOKEN_RECORDS_PER_ESTIMATED_EVENT + TOKEN_OUTPUT_SAFETY_RECORDS;
+  const outputPtr = (TRACE_INPUT_PTR + trace.length + 7) & ~7;
   const outputBytes = recordCap * TOKEN_RECORD_BYTES;
   const heapPtr = (outputPtr + outputBytes + 7) & ~7;
-  const heapEnd = heapPtr + 64 * MiB;
+  const heapEnd = heapPtr + MODULE_HEAP_BYTES;
   const memory = new WebAssembly.Memory({
     initial: Math.max(pageCount(heapEnd), 1),
-    maximum: 32768,
+    maximum: WASM_MAX_PAGES,
   });
   const memoryBytes = new Uint8Array(memory.buffer);
   let sourceReads = 0;
 
-  memoryBytes.set(trace, inputPtr);
+  memoryBytes.set(trace, TRACE_INPUT_PTR);
 
   const env = { memory };
   const host = {
     opfs_source_read(readSourceId, offset, len, dest) {
-      if (readSourceId !== sourceId) {
+      if (readSourceId !== SOURCE_ID) {
         return -1;
       }
 
@@ -229,7 +264,7 @@ async function instantiateModules(trace, indexBytes) {
       return count;
     },
     opfs_index_read(readIndexId, offset, len, dest) {
-      if (readIndexId !== indexId) {
+      if (readIndexId !== INDEX_ID) {
         return -1;
       }
 
@@ -243,7 +278,7 @@ async function instantiateModules(trace, indexBytes) {
       return count;
     },
     opfs_index_write(writeIndexId, offset, src, len) {
-      if (writeIndexId !== indexId) {
+      if (writeIndexId !== INDEX_ID) {
         return -1;
       }
 
@@ -265,7 +300,7 @@ async function instantiateModules(trace, indexBytes) {
       return len;
     },
     opfs_index_flush(writeIndexId) {
-      return writeIndexId === indexId ? 0 : -1;
+      return writeIndexId === INDEX_ID ? 0 : -1;
     },
   };
 
@@ -411,8 +446,15 @@ function compactPayloadBytes(indexBytes, index, pages) {
 }
 
 function scaledColdReloadBudgetMs(bytes) {
-  const scaled = (bytes / (10 * GiB)) * 30_000;
-  return Math.max(250, Math.ceil(scaled));
+  // v0.1's mobile target is a 10 GiB trace cold-reloaded within 30 seconds.
+  // Small local fixtures keep a minimum budget so process startup noise does
+  // not make this check flaky.
+  const COLD_RELOAD_TARGET_TRACE_BYTES = 10 * GiB;
+  const COLD_RELOAD_TARGET_BUDGET_MS = 30_000;
+  const COLD_RELOAD_MIN_BUDGET_MS = 250;
+  const scaled =
+    (bytes / COLD_RELOAD_TARGET_TRACE_BYTES) * COLD_RELOAD_TARGET_BUDGET_MS;
+  return Math.max(COLD_RELOAD_MIN_BUDGET_MS, Math.ceil(scaled));
 }
 
 async function main() {
@@ -421,10 +463,10 @@ async function main() {
   const ingest = await instantiateModules(trace, indexBytes);
   const ingestView = new DataView(ingest.memory.buffer);
 
-  ingest.parserState.parser_state_init(statePtr, sourceId);
+  ingest.parserState.parser_state_init(PARSER_STATE_PTR, SOURCE_ID);
   const status = ingest.parser.parser_tokenize_bytes(
-    statePtr,
-    inputPtr,
+    PARSER_STATE_PTR,
+    TRACE_INPUT_PTR,
     trace.length,
     ingest.outputPtr,
     ingest.recordCap,
@@ -437,7 +479,7 @@ async function main() {
   );
 
   ingest.parser.extractor_init(ingest.outputPtr);
-  ingest.index.index_writer_init(indexId, writerPagePtr, 1);
+  ingest.index.index_writer_init(INDEX_ID, WRITER_PAGE_PTR, 1);
 
   let extractedCount = 0;
   while (true) {
@@ -462,7 +504,7 @@ async function main() {
   expectEq(ingest.index.track_max_depth(0), 0, "known track max depth");
 
   expectEq(ingest.index.index_reader_configure_cache(2), 2, "warm reader cache slots");
-  ingest.index.index_reader_init(indexId);
+  ingest.index.index_reader_init(INDEX_ID);
   const warmRows = queryRows(ingest.index, ingestView, 0, 0, 50);
   expectEq(warmRows.length, 3, "warm known query row count");
   expectJsonEq(
@@ -477,7 +519,7 @@ async function main() {
 
   const parserCount = readI32(
     ingestView,
-    statePtr + globalValue(ingest.parserState.PARSER_STATE_EVENT_COUNT_OFFSET),
+    PARSER_STATE_PTR + globalValue(ingest.parserState.PARSER_STATE_EVENT_COUNT_OFFSET),
   );
   expectEq(parserCount, generatedCount, "parser event count");
 
@@ -501,10 +543,10 @@ async function main() {
   const readsBeforeReload = cold.sourceReads();
 
   expectEq(cold.index.index_reader_configure_cache(2), 2, "reader cache slots");
-  cold.index.index_reader_init(indexId);
+  cold.index.index_reader_init(INDEX_ID);
   rebuildSliceCatalog(cold.index, coldView, pages);
   expectEq(cold.index.index_slice_page_count(), pages, "cold slice page catalog count");
-  cold.index.index_reader_init(indexId);
+  cold.index.index_reader_init(INDEX_ID);
 
   const coldRows = queryRows(cold.index, coldView, 0, 0, 50);
   expectJsonEq(coldRows, warmRows, "cold query parity");
