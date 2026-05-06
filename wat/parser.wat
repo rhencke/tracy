@@ -1296,6 +1296,1164 @@
     call $process_structural_byte
   )
 
+  (func $set_dfa_state (param $state i32) (param $dfa i32)
+    local.get $state
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    local.get $dfa
+    call $store_i32
+  )
+
+  (func $advance_position (param $state i32) (param $byte i32)
+    local.get $byte
+    i32.const 10
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_STATE_LINE_OFFSET
+      local.get $state
+      global.get $PARSER_STATE_LINE_OFFSET
+      call $load_i32
+      i32.const 1
+      i32.add
+      call $store_i32
+
+      local.get $state
+      global.get $PARSER_STATE_COLUMN_OFFSET
+      i32.const 1
+      call $store_i32
+      return
+    end
+
+    local.get $state
+    global.get $PARSER_STATE_COLUMN_OFFSET
+    local.get $state
+    global.get $PARSER_STATE_COLUMN_OFFSET
+    call $load_i32
+    i32.const 1
+    i32.add
+    call $store_i32
+  )
+
+  (func $tokenizer_error_at_current (param $state i32) (param $out_ptr i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    local.get $state
+    global.get $PARSER_STATE_LINE_OFFSET
+    call $load_i32
+    local.get $state
+    global.get $PARSER_STATE_COLUMN_OFFSET
+    call $load_i32
+    call $parser_emit_error_token
+    drop
+
+    local.get $state
+    global.get $PARSER_STATUS_MALFORMED
+    call $set_status
+  )
+
+  (func $emit_checked_token (param $state i32) (param $out_ptr i32) (param $kind i32) (param $payload_ptr i32) (param $payload_len i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    local.get $kind
+    local.get $payload_ptr
+    local.get $payload_len
+    call $emit_token_record
+    i32.eqz
+    if
+      local.get $state
+      global.get $PARSER_STATUS_YIELDED
+      call $set_status
+      return
+    end
+
+    i32.const 0
+  )
+
+  (func $emit_checked_structural_token (param $state i32) (param $out_ptr i32) (param $kind i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    local.get $kind
+    i32.const 0
+    i32.const 0
+    call $emit_checked_token
+  )
+
+  (func $is_digit (param $byte i32) (result i32)
+    local.get $byte
+    i32.const 48
+    i32.ge_u
+    local.get $byte
+    i32.const 57
+    i32.le_u
+    i32.and
+  )
+
+  (func $is_nonzero_digit (param $byte i32) (result i32)
+    local.get $byte
+    i32.const 49
+    i32.ge_u
+    local.get $byte
+    i32.const 57
+    i32.le_u
+    i32.and
+  )
+
+  (func $is_exp_byte (param $byte i32) (result i32)
+    local.get $byte
+    i32.const 69
+    i32.eq
+    local.get $byte
+    i32.const 101
+    i32.eq
+    i32.or
+  )
+
+  (func $token_matches5 (param $state i32) (param $a i32) (param $b i32) (param $c i32) (param $d i32) (param $e i32) (result i32)
+    local.get $state
+    local.get $a
+    local.get $b
+    local.get $c
+    local.get $d
+    call $token_matches4
+    local.get $state
+    i32.const 4
+    call $token_byte
+    local.get $e
+    i32.eq
+    i32.and
+  )
+
+  (func $begin_tokenizer_token (param $state i32) (param $dfa i32) (param $token i32) (param $start_ptr i32)
+    local.get $state
+    local.get $token
+    call $start_token
+
+    local.get $state
+    local.get $dfa
+    call $set_dfa_state
+
+    local.get $state
+    global.get $PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET
+    local.get $start_ptr
+    call $store_i32
+  )
+
+  (func $finish_string_token (param $state i32) (param $out_ptr i32) (param $end_ptr i32) (result i32)
+    (local $start_ptr i32)
+
+    local.get $state
+    global.get $PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET
+    call $load_i32
+    local.set $start_ptr
+
+    local.get $state
+    global.get $PARSER_TOKEN_NONE
+    call $start_token
+    local.get $state
+    global.get $PARSER_DFA_DEFAULT
+    call $set_dfa_state
+
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_STRING
+    local.get $start_ptr
+    local.get $end_ptr
+    local.get $start_ptr
+    i32.sub
+    call $emit_checked_token
+  )
+
+  (func $is_valid_number_token (param $state i32) (result i32)
+    (local $i i32)
+    (local $len i32)
+    (local $phase i32)
+    (local $byte i32)
+
+    local.get $state
+    global.get $PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET
+    call $load_i32
+    local.tee $len
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    i32.const 0
+    local.set $phase
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+
+        local.get $state
+        local.get $i
+        call $token_byte
+        local.set $byte
+
+        local.get $phase
+        i32.const 0
+        i32.eq
+        if
+          local.get $byte
+          i32.const 45
+          i32.eq
+          if
+            i32.const 1
+            local.set $phase
+          else
+            local.get $byte
+            i32.const 48
+            i32.eq
+            if
+              i32.const 2
+              local.set $phase
+            else
+              local.get $byte
+              call $is_nonzero_digit
+              if
+                i32.const 3
+                local.set $phase
+              else
+                i32.const 0
+                return
+              end
+            end
+          end
+        else
+          local.get $phase
+          i32.const 1
+          i32.eq
+          if
+            local.get $byte
+            i32.const 48
+            i32.eq
+            if
+              i32.const 2
+              local.set $phase
+            else
+              local.get $byte
+              call $is_nonzero_digit
+              if
+                i32.const 3
+                local.set $phase
+              else
+                i32.const 0
+                return
+              end
+            end
+          else
+            local.get $phase
+            i32.const 2
+            i32.eq
+            if
+              local.get $byte
+              i32.const 46
+              i32.eq
+              if
+                i32.const 4
+                local.set $phase
+              else
+                local.get $byte
+                call $is_exp_byte
+                if
+                  i32.const 6
+                  local.set $phase
+                else
+                  i32.const 0
+                  return
+                end
+              end
+            else
+              local.get $phase
+              i32.const 3
+              i32.eq
+              if
+                local.get $byte
+                call $is_digit
+                if
+                  i32.const 3
+                  local.set $phase
+                else
+                  local.get $byte
+                  i32.const 46
+                  i32.eq
+                  if
+                    i32.const 4
+                    local.set $phase
+                  else
+                    local.get $byte
+                    call $is_exp_byte
+                    if
+                      i32.const 6
+                      local.set $phase
+                    else
+                      i32.const 0
+                      return
+                    end
+                  end
+                end
+              else
+                local.get $phase
+                i32.const 4
+                i32.eq
+                if
+                  local.get $byte
+                  call $is_digit
+                  if
+                    i32.const 5
+                    local.set $phase
+                  else
+                    i32.const 0
+                    return
+                  end
+                else
+                  local.get $phase
+                  i32.const 5
+                  i32.eq
+                  if
+                    local.get $byte
+                    call $is_digit
+                    if
+                      i32.const 5
+                      local.set $phase
+                    else
+                      local.get $byte
+                      call $is_exp_byte
+                      if
+                        i32.const 6
+                        local.set $phase
+                      else
+                        i32.const 0
+                        return
+                      end
+                    end
+                  else
+                    local.get $phase
+                    i32.const 6
+                    i32.eq
+                    if
+                      local.get $byte
+                      i32.const 43
+                      i32.eq
+                      local.get $byte
+                      i32.const 45
+                      i32.eq
+                      i32.or
+                      if
+                        i32.const 7
+                        local.set $phase
+                      else
+                        local.get $byte
+                        call $is_digit
+                        if
+                          i32.const 8
+                          local.set $phase
+                        else
+                          i32.const 0
+                          return
+                        end
+                      end
+                    else
+                      local.get $phase
+                      i32.const 7
+                      i32.eq
+                      if
+                        local.get $byte
+                        call $is_digit
+                        if
+                          i32.const 8
+                          local.set $phase
+                        else
+                          i32.const 0
+                          return
+                        end
+                      else
+                        local.get $phase
+                        i32.const 8
+                        i32.eq
+                        if
+                          local.get $byte
+                          call $is_digit
+                          i32.eqz
+                          if
+                            i32.const 0
+                            return
+                          end
+                        else
+                          i32.const 0
+                          return
+                        end
+                      end
+                    end
+                  end
+                end
+              end
+            end
+          end
+        end
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    local.get $phase
+    i32.const 2
+    i32.eq
+    local.get $phase
+    i32.const 3
+    i32.eq
+    i32.or
+    local.get $phase
+    i32.const 5
+    i32.eq
+    i32.or
+    local.get $phase
+    i32.const 8
+    i32.eq
+    i32.or
+  )
+
+  (func $finish_number_token (param $state i32) (param $out_ptr i32) (param $end_ptr i32) (result i32)
+    (local $start_ptr i32)
+
+    local.get $state
+    call $is_valid_number_token
+    i32.eqz
+    if
+      local.get $state
+      local.get $out_ptr
+      call $tokenizer_error_at_current
+      return
+    end
+
+    local.get $state
+    global.get $PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET
+    call $load_i32
+    local.set $start_ptr
+
+    local.get $state
+    global.get $PARSER_TOKEN_NONE
+    call $start_token
+    local.get $state
+    global.get $PARSER_DFA_DEFAULT
+    call $set_dfa_state
+
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_NUMBER
+    local.get $start_ptr
+    local.get $end_ptr
+    local.get $start_ptr
+    i32.sub
+    call $emit_checked_token
+  )
+
+  (func $keyword_token_kind (param $state i32) (result i32)
+    (local $len i32)
+
+    local.get $state
+    global.get $PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET
+    call $load_i32
+    local.set $len
+
+    local.get $len
+    i32.const 4
+    i32.eq
+    if
+      local.get $state
+      i32.const 116
+      i32.const 114
+      i32.const 117
+      i32.const 101
+      call $token_matches4
+      if
+        global.get $PARSER_JSON_TOKEN_TRUE
+        return
+      end
+
+      local.get $state
+      i32.const 110
+      i32.const 117
+      i32.const 108
+      i32.const 108
+      call $token_matches4
+      if
+        global.get $PARSER_JSON_TOKEN_NULL
+        return
+      end
+    end
+
+    local.get $len
+    i32.const 5
+    i32.eq
+    if
+      local.get $state
+      i32.const 102
+      i32.const 97
+      i32.const 108
+      i32.const 115
+      i32.const 101
+      call $token_matches5
+      if
+        global.get $PARSER_JSON_TOKEN_FALSE
+        return
+      end
+    end
+
+    i32.const 0
+  )
+
+  (func $finish_keyword_token (param $state i32) (param $out_ptr i32) (param $end_ptr i32) (result i32)
+    (local $start_ptr i32)
+    (local $kind i32)
+
+    local.get $state
+    call $keyword_token_kind
+    local.tee $kind
+    i32.eqz
+    if
+      local.get $state
+      local.get $out_ptr
+      call $tokenizer_error_at_current
+      return
+    end
+
+    local.get $state
+    global.get $PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET
+    call $load_i32
+    local.set $start_ptr
+
+    local.get $state
+    global.get $PARSER_TOKEN_NONE
+    call $start_token
+    local.get $state
+    global.get $PARSER_DFA_DEFAULT
+    call $set_dfa_state
+
+    local.get $state
+    local.get $out_ptr
+    local.get $kind
+    local.get $start_ptr
+    local.get $end_ptr
+    local.get $start_ptr
+    i32.sub
+    call $emit_checked_token
+  )
+
+  (func $process_default_token_byte (param $state i32) (param $out_ptr i32) (param $byte i32) (param $byte_ptr i32) (result i32)
+    local.get $byte
+    call $is_ws
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $byte
+    i32.const 123
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_STACK_OBJECT
+      call $push_stack
+      local.tee $byte
+      i32.const 0
+      i32.ne
+      if
+        local.get $state
+        local.get $out_ptr
+        call $tokenizer_error_at_current
+        return
+      end
+
+      local.get $state
+      local.get $out_ptr
+      global.get $PARSER_JSON_TOKEN_LBRACE
+      call $emit_checked_structural_token
+      return
+    end
+
+    local.get $byte
+    i32.const 125
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_STACK_OBJECT
+      call $pop_stack
+      local.tee $byte
+      i32.const 0
+      i32.ne
+      if
+        local.get $state
+        local.get $out_ptr
+        call $tokenizer_error_at_current
+        return
+      end
+
+      local.get $state
+      local.get $out_ptr
+      global.get $PARSER_JSON_TOKEN_RBRACE
+      call $emit_checked_structural_token
+      return
+    end
+
+    local.get $byte
+    i32.const 91
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_STACK_ARRAY
+      call $push_stack
+      local.tee $byte
+      i32.const 0
+      i32.ne
+      if
+        local.get $state
+        local.get $out_ptr
+        call $tokenizer_error_at_current
+        return
+      end
+
+      local.get $state
+      local.get $out_ptr
+      global.get $PARSER_JSON_TOKEN_LBRACK
+      call $emit_checked_structural_token
+      return
+    end
+
+    local.get $byte
+    i32.const 93
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_STACK_ARRAY
+      call $pop_stack
+      local.tee $byte
+      i32.const 0
+      i32.ne
+      if
+        local.get $state
+        local.get $out_ptr
+        call $tokenizer_error_at_current
+        return
+      end
+
+      local.get $state
+      local.get $out_ptr
+      global.get $PARSER_JSON_TOKEN_RBRACK
+      call $emit_checked_structural_token
+      return
+    end
+
+    local.get $byte
+    i32.const 58
+    i32.eq
+    if
+      local.get $state
+      local.get $out_ptr
+      global.get $PARSER_JSON_TOKEN_COLON
+      call $emit_checked_structural_token
+      return
+    end
+
+    local.get $byte
+    i32.const 44
+    i32.eq
+    if
+      local.get $state
+      local.get $out_ptr
+      global.get $PARSER_JSON_TOKEN_COMMA
+      call $emit_checked_structural_token
+      return
+    end
+
+    local.get $byte
+    i32.const 34
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_DFA_STRING
+      global.get $PARSER_TOKEN_STRING
+      local.get $byte_ptr
+      i32.const 1
+      i32.add
+      call $begin_tokenizer_token
+      i32.const 0
+      return
+    end
+
+    local.get $byte
+    i32.const 45
+    i32.eq
+    local.get $byte
+    call $is_digit
+    i32.or
+    if
+      local.get $state
+      global.get $PARSER_DFA_NUMBER
+      global.get $PARSER_TOKEN_NUMBER
+      local.get $byte_ptr
+      call $begin_tokenizer_token
+      local.get $state
+      local.get $byte
+      call $append_token_byte
+      i32.const 0
+      return
+    end
+
+    local.get $byte
+    i32.const 116
+    i32.eq
+    local.get $byte
+    i32.const 102
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 110
+    i32.eq
+    i32.or
+    if
+      local.get $state
+      global.get $PARSER_DFA_KEYWORD
+      global.get $PARSER_TOKEN_LITERAL
+      local.get $byte_ptr
+      call $begin_tokenizer_token
+      local.get $state
+      local.get $byte
+      call $append_token_byte
+      i32.const 0
+      return
+    end
+
+    local.get $state
+    local.get $out_ptr
+    call $tokenizer_error_at_current
+  )
+
+  (func $process_string_token_byte (param $state i32) (param $out_ptr i32) (param $byte i32) (param $byte_ptr i32) (result i32)
+    local.get $byte
+    i32.const 92
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_DFA_STRING_ESCAPE
+      call $set_dfa_state
+      local.get $state
+      global.get $PARSER_STATE_STRING_ESCAPE_OFFSET
+      i32.const 1
+      call $store_i32
+      i32.const 0
+      return
+    end
+
+    local.get $byte
+    i32.const 34
+    i32.eq
+    if
+      local.get $state
+      local.get $out_ptr
+      local.get $byte_ptr
+      call $finish_string_token
+      return
+    end
+
+    local.get $byte
+    i32.const 32
+    i32.lt_u
+    if
+      local.get $state
+      local.get $out_ptr
+      call $tokenizer_error_at_current
+      return
+    end
+
+    i32.const 0
+  )
+
+  (func $process_string_escape_token_byte (param $state i32) (param $out_ptr i32) (param $byte i32) (result i32)
+    (local $remaining i32)
+
+    local.get $state
+    global.get $PARSER_STATE_UNICODE_ACCUM_OFFSET
+    call $load_i32
+    local.tee $remaining
+    i32.const 0
+    i32.ne
+    if
+      local.get $byte
+      call $is_hex
+      i32.eqz
+      if
+        local.get $state
+        local.get $out_ptr
+        call $tokenizer_error_at_current
+        return
+      end
+
+      local.get $remaining
+      i32.const 1
+      i32.sub
+      local.set $remaining
+      local.get $state
+      global.get $PARSER_STATE_UNICODE_ACCUM_OFFSET
+      local.get $remaining
+      call $store_i32
+
+      local.get $remaining
+      i32.eqz
+      if
+        local.get $state
+        global.get $PARSER_DFA_STRING
+        call $set_dfa_state
+        local.get $state
+        global.get $PARSER_STATE_STRING_ESCAPE_OFFSET
+        i32.const 0
+        call $store_i32
+      end
+
+      i32.const 0
+      return
+    end
+
+    local.get $byte
+    i32.const 117
+    i32.eq
+    if
+      local.get $state
+      global.get $PARSER_STATE_UNICODE_ACCUM_OFFSET
+      i32.const 4
+      call $store_i32
+      i32.const 0
+      return
+    end
+
+    local.get $byte
+    i32.const 34
+    i32.eq
+    local.get $byte
+    i32.const 92
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 47
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 98
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 102
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 110
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 114
+    i32.eq
+    i32.or
+    local.get $byte
+    i32.const 116
+    i32.eq
+    i32.or
+    if
+      local.get $state
+      global.get $PARSER_DFA_STRING
+      call $set_dfa_state
+      local.get $state
+      global.get $PARSER_STATE_STRING_ESCAPE_OFFSET
+      i32.const 0
+      call $store_i32
+      i32.const 0
+      return
+    end
+
+    local.get $state
+    local.get $out_ptr
+    call $tokenizer_error_at_current
+  )
+
+  (func $finish_tokenizer_eof (param $state i32) (param $out_ptr i32) (param $end_ptr i32) (result i32)
+    (local $status i32)
+    (local $dfa i32)
+
+    local.get $state
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    call $load_i32
+    local.set $dfa
+
+    local.get $dfa
+    global.get $PARSER_DFA_NUMBER
+    i32.eq
+    if
+      local.get $state
+      local.get $out_ptr
+      local.get $end_ptr
+      call $finish_number_token
+      local.tee $status
+      i32.const 0
+      i32.ne
+      if
+        local.get $status
+        return
+      end
+    else
+      local.get $dfa
+      global.get $PARSER_DFA_KEYWORD
+      i32.eq
+      if
+        local.get $state
+        local.get $out_ptr
+        local.get $end_ptr
+        call $finish_keyword_token
+        local.tee $status
+        i32.const 0
+        i32.ne
+        if
+          local.get $status
+          return
+        end
+      else
+        local.get $dfa
+        global.get $PARSER_DFA_DEFAULT
+        i32.ne
+        if
+          local.get $state
+          local.get $out_ptr
+          call $tokenizer_error_at_current
+          return
+        end
+      end
+    end
+
+    local.get $state
+    global.get $PARSER_STATE_DEPTH_OFFSET
+    call $load_i32
+    i32.const 0
+    i32.ne
+    if
+      local.get $state
+      local.get $out_ptr
+      call $tokenizer_error_at_current
+      return
+    end
+
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_EOF
+    i32.const 0
+    i32.const 0
+    call $emit_checked_token
+    local.tee $status
+    i32.const 0
+    i32.ne
+    if
+      local.get $status
+      return
+    end
+
+    local.get $state
+    global.get $PARSER_STATUS_DONE
+    call $set_status
+  )
+
+  (func (export "parser_tokenize_bytes") (param $state i32) (param $input_ptr i32) (param $input_len i32) (param $out_ptr i32) (param $record_cap i32) (result i32)
+    (local $i i32)
+    (local $byte_ptr i32)
+    (local $byte i32)
+    (local $dfa i32)
+    (local $status i32)
+
+    local.get $state
+    call $require_valid_state
+    i32.eqz
+    if
+      global.get $PARSER_STATUS_STATE_INVALID
+      return
+    end
+
+    local.get $state
+    local.get $record_cap
+    call $reset_token_output
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $input_len
+        i32.ge_u
+        br_if $done
+
+        local.get $input_ptr
+        local.get $i
+        i32.add
+        local.tee $byte_ptr
+        i32.load8_u
+        local.set $byte
+
+        local.get $state
+        global.get $PARSER_STATE_DFA_STATE_OFFSET
+        call $load_i32
+        local.set $dfa
+
+        local.get $dfa
+        global.get $PARSER_DFA_DEFAULT
+        i32.eq
+        if
+          local.get $state
+          local.get $out_ptr
+          local.get $byte
+          local.get $byte_ptr
+          call $process_default_token_byte
+          local.set $status
+        else
+          local.get $dfa
+          global.get $PARSER_DFA_STRING
+          i32.eq
+          if
+            local.get $state
+            local.get $out_ptr
+            local.get $byte
+            local.get $byte_ptr
+            call $process_string_token_byte
+            local.set $status
+          else
+            local.get $dfa
+            global.get $PARSER_DFA_STRING_ESCAPE
+            i32.eq
+            if
+              local.get $state
+              local.get $out_ptr
+              local.get $byte
+              call $process_string_escape_token_byte
+              local.set $status
+            else
+              local.get $dfa
+              global.get $PARSER_DFA_NUMBER
+              i32.eq
+              if
+                local.get $byte
+                call $is_number_byte
+                if
+                  local.get $state
+                  local.get $byte
+                  call $append_token_byte
+                  i32.const 0
+                  local.set $status
+                else
+                  local.get $byte
+                  call $is_delim
+                  if
+                    local.get $state
+                    local.get $out_ptr
+                    local.get $byte_ptr
+                    call $finish_number_token
+                    local.set $status
+
+                    local.get $status
+                    i32.eqz
+                    if
+                      local.get $state
+                      local.get $out_ptr
+                      local.get $byte
+                      local.get $byte_ptr
+                      call $process_default_token_byte
+                      local.set $status
+                    end
+                  else
+                    local.get $state
+                    local.get $out_ptr
+                    call $tokenizer_error_at_current
+                    local.set $status
+                  end
+                end
+              else
+                local.get $dfa
+                global.get $PARSER_DFA_KEYWORD
+                i32.eq
+                if
+                  local.get $byte
+                  call $is_alpha
+                  if
+                    local.get $state
+                    local.get $byte
+                    call $append_token_byte
+                    i32.const 0
+                    local.set $status
+                  else
+                    local.get $byte
+                    call $is_delim
+                    if
+                      local.get $state
+                      local.get $out_ptr
+                      local.get $byte_ptr
+                      call $finish_keyword_token
+                      local.set $status
+
+                      local.get $status
+                      i32.eqz
+                      if
+                        local.get $state
+                        local.get $out_ptr
+                        local.get $byte
+                        local.get $byte_ptr
+                        call $process_default_token_byte
+                        local.set $status
+                      end
+                    else
+                      local.get $state
+                      local.get $out_ptr
+                      call $tokenizer_error_at_current
+                      local.set $status
+                    end
+                  end
+                else
+                  local.get $state
+                  local.get $out_ptr
+                  call $tokenizer_error_at_current
+                  local.set $status
+                end
+              end
+            end
+          end
+        end
+
+        local.get $status
+        i32.const 0
+        i32.ne
+        if
+          local.get $status
+          return
+        end
+
+        local.get $state
+        local.get $byte
+        call $advance_position
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    local.get $state
+    local.get $out_ptr
+    local.get $input_ptr
+    local.get $input_len
+    i32.add
+    call $finish_tokenizer_eof
+  )
+
   (func $ensure_ring_memory (param $chunk_len i32)
     (local $needed i32)
     (local $current i32)

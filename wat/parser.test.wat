@@ -10,6 +10,8 @@
     (func $parser_parse (param i32) (param i32) (result i32)))
   (import "parser" "parser_parse_with_budget"
     (func $parser_parse_with_budget (param i32) (param i32) (param i32) (result i32)))
+  (import "parser" "parser_tokenize_bytes"
+    (func $parser_tokenize_bytes (param i32) (param i32) (param i32) (param i32) (param i32) (result i32)))
   (import "parser" "parser_token_output_reset"
     (func $parser_token_output_reset (param i32) (param i32) (result i32)))
   (import "parser" "parser_emit_token"
@@ -67,6 +69,16 @@
   (import "parser_state" "PARSER_TOKEN_NUMBER" (global $PARSER_TOKEN_NUMBER i32))
   (import "parser_state" "PARSER_DFA_DEFAULT" (global $PARSER_DFA_DEFAULT i32))
   (import "parser_state" "PARSER_JSON_TOKEN_LBRACE" (global $PARSER_JSON_TOKEN_LBRACE i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_RBRACE" (global $PARSER_JSON_TOKEN_RBRACE i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_LBRACK" (global $PARSER_JSON_TOKEN_LBRACK i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_RBRACK" (global $PARSER_JSON_TOKEN_RBRACK i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_COLON" (global $PARSER_JSON_TOKEN_COLON i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_COMMA" (global $PARSER_JSON_TOKEN_COMMA i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_STRING" (global $PARSER_JSON_TOKEN_STRING i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_NUMBER" (global $PARSER_JSON_TOKEN_NUMBER i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_TRUE" (global $PARSER_JSON_TOKEN_TRUE i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_FALSE" (global $PARSER_JSON_TOKEN_FALSE i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_NULL" (global $PARSER_JSON_TOKEN_NULL i32))
   (import "parser_state" "PARSER_JSON_TOKEN_EOF" (global $PARSER_JSON_TOKEN_EOF i32))
   (import "parser_state" "PARSER_JSON_TOKEN_NEED_MORE" (global $PARSER_JSON_TOKEN_NEED_MORE i32))
   (import "parser_state" "PARSER_JSON_TOKEN_YIELD" (global $PARSER_JSON_TOKEN_YIELD i32))
@@ -76,6 +88,8 @@
   ;; @generated parser-state-imports parser-test:end
 
   (data (i32.const 1024) "parser test failed")
+  (data (i32.const 2048) "{\"a\":[true,false,null,-12.3e+4]}")
+  (data (i32.const 2100) "{\0a@")
 
   (func (export "message_for") (param $code i32) (result i32 i32)
     i32.const 1024
@@ -390,6 +404,170 @@
     call $parser_emit_structural_token
     i32.const 0
     i32.const 232
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_tokenizes_json_dfa_records")
+    i32.const 55296
+    i32.const 122
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2048
+    i32.const 32
+    i32.const 57344
+    i32.const 16
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 240
+    call $assert_eq_i32
+
+    i32.const 57344
+    i32.const 0
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    i32.const 0
+    i32.const 0
+    i32.const 241
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 1
+    global.get $PARSER_JSON_TOKEN_STRING
+    i32.const 2050
+    i32.const 1
+    i32.const 245
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 2
+    global.get $PARSER_JSON_TOKEN_COLON
+    i32.const 0
+    i32.const 0
+    i32.const 249
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 3
+    global.get $PARSER_JSON_TOKEN_LBRACK
+    i32.const 0
+    i32.const 0
+    i32.const 253
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 4
+    global.get $PARSER_JSON_TOKEN_TRUE
+    i32.const 2054
+    i32.const 4
+    i32.const 257
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 6
+    global.get $PARSER_JSON_TOKEN_FALSE
+    i32.const 2059
+    i32.const 5
+    i32.const 261
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 8
+    global.get $PARSER_JSON_TOKEN_NULL
+    i32.const 2065
+    i32.const 4
+    i32.const 265
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 10
+    global.get $PARSER_JSON_TOKEN_NUMBER
+    i32.const 2070
+    i32.const 8
+    i32.const 269
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 11
+    global.get $PARSER_JSON_TOKEN_RBRACK
+    i32.const 0
+    i32.const 0
+    i32.const 273
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 12
+    global.get $PARSER_JSON_TOKEN_RBRACE
+    i32.const 0
+    i32.const 0
+    i32.const 277
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 13
+    global.get $PARSER_JSON_TOKEN_EOF
+    i32.const 0
+    i32.const 0
+    i32.const 281
+    call $assert_token_record
+
+    i32.const 55296
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    i32.const 14
+    i32.const 285
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    call $load_i32
+    global.get $PARSER_DFA_DEFAULT
+    i32.const 286
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_tokenizer_records_error_position")
+    i32.const 55296
+    i32.const 123
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2100
+    i32.const 3
+    i32.const 57344
+    i32.const 4
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 300
+    call $assert_eq_i32
+
+    i32.const 57344
+    i32.const 0
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    i32.const 0
+    i32.const 0
+    i32.const 301
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 1
+    global.get $PARSER_JSON_TOKEN_ERROR
+    i32.const 2
+    i32.const 1
+    i32.const 305
+    call $assert_token_record
+
+    i32.const 55296
+    global.get $PARSER_STATE_ERROR_LINE_OFFSET
+    call $load_i32
+    i32.const 2
+    i32.const 309
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_ERROR_COLUMN_OFFSET
+    call $load_i32
+    i32.const 1
+    i32.const 310
     call $assert_eq_i32
   )
 
