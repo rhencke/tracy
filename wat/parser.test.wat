@@ -90,6 +90,47 @@
   (data (i32.const 1024) "parser test failed")
   (data (i32.const 2048) "{\"a\":[true,false,null,-12.3e+4]}")
   (data (i32.const 2100) "{\0a@")
+  (data (i32.const 2110) "[0,1,10,-0,-1,1.0,1e2,1E+2,1e-2,1.0e2]")
+  (data (i32.const 2170) "\22a\5cn\5cu0041\22")
+  (data (i32.const 2190) "[-]")
+  (data (i32.const 2198) "[01]")
+  (data (i32.const 2206) "[1.]")
+  (data (i32.const 2214) "[1e]")
+  (data (i32.const 2222) "[1e+]")
+  (data (i32.const 2230) "[tru]")
+  (data (i32.const 2238) "[x]")
+  (data (i32.const 2246) "\22a\00\22")
+  (data (i32.const 2254) "\22a\5cq")
+  (data (i32.const 2262) "\22a\5cu00q")
+  (data (i32.const 2274) "1")
+  (data (i32.const 2278) "true")
+  (data (i32.const 2286) "\22abc")
+  (data (i32.const 2294) "[")
+  (data (i32.const 2298) "{}")
+  (data (i32.const 2304) "}")
+  (data (i32.const 2308) "]")
+  (data (i32.const 2312) "[}")
+  (data (i32.const 2320) "{]")
+  (data (i32.const 2330) "[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[")
+  (data (i32.const 2400) "{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{")
+  (data (i32.const 2470) "[t@]")
+  (data (i32.const 2478) "[-x]")
+  (data (i32.const 2486) "-")
+  (data (i32.const 2490) "tru")
+  (data (i32.const 2494) "x")
+  (data (i32.const 2496) "-x")
+  (data (i32.const 2500) "0.1")
+  (data (i32.const 2504) "0e1")
+  (data (i32.const 2508) "1x")
+  (data (i32.const 2512) "1.x")
+  (data (i32.const 2516) "1.00")
+  (data (i32.const 2522) "1.0x")
+  (data (i32.const 2528) "1e2")
+  (data (i32.const 2532) "1e+2")
+  (data (i32.const 2538) "1e2x")
+  (data (i32.const 2544) " ")
+  (data (i32.const 2548) "1ex")
+  (data (i32.const 2552) "1e+x")
 
   (func (export "message_for") (param $code i32) (result i32 i32)
     i32.const 1024
@@ -107,6 +148,63 @@
     local.get $offset
     call $field
     i32.load
+  )
+
+  (func $store_i32 (param $state i32) (param $offset i32) (param $value i32)
+    local.get $state
+    local.get $offset
+    call $field
+    local.get $value
+    i32.store
+  )
+
+  (func $assert_tokenize_status (param $state i32) (param $source_id i32) (param $input_ptr i32) (param $input_len i32) (param $record_cap i32) (param $expected i32) (param $code i32)
+    local.get $state
+    local.get $source_id
+    call $parser_state_init
+
+    local.get $state
+    local.get $input_ptr
+    local.get $input_len
+    i32.const 57344
+    local.get $record_cap
+    call $parser_tokenize_bytes
+    local.get $expected
+    local.get $code
+    call $assert_eq_i32
+  )
+
+  (func $assert_manual_number_status (param $state i32) (param $source_id i32) (param $token_ptr i32) (param $token_len i32) (param $expected i32) (param $code i32)
+    local.get $state
+    local.get $source_id
+    call $parser_state_init
+
+    local.get $token_ptr
+    local.get $state
+    i32.const 160
+    call $field
+    local.get $token_len
+    call $copy_bytes
+
+    local.get $state
+    global.get $PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET
+    local.get $token_len
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    i32.const 3
+    call $store_i32
+
+    local.get $state
+    i32.const 2544
+    i32.const 1
+    i32.const 57344
+    i32.const 4
+    call $parser_tokenize_bytes
+    local.get $expected
+    local.get $code
+    call $assert_eq_i32
   )
 
   (func $copy_bytes (param $src i32) (param $dst i32) (param $len i32)
@@ -569,6 +667,405 @@
     i32.const 1
     i32.const 310
     call $assert_eq_i32
+  )
+
+  (func (export "test_parser_tokenizer_covers_number_and_eof_paths")
+    i32.const 55296
+    i32.const 124
+    i32.const 2110
+    i32.const 38
+    i32.const 64
+    global.get $PARSER_STATUS_DONE
+    i32.const 320
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 125
+    i32.const 2274
+    i32.const 1
+    i32.const 4
+    global.get $PARSER_STATUS_DONE
+    i32.const 321
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 126
+    i32.const 2486
+    i32.const 1
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 322
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 127
+    i32.const 2190
+    i32.const 3
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 323
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 128
+    i32.const 2198
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 324
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 129
+    i32.const 2206
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 325
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 130
+    i32.const 2214
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 326
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 131
+    i32.const 2222
+    i32.const 5
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 327
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 132
+    i32.const 2478
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 328
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 153
+    i32.const 2494
+    i32.const 0
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 329
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 154
+    i32.const 2494
+    i32.const 1
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 330
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 155
+    i32.const 2496
+    i32.const 2
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 331
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 156
+    i32.const 2500
+    i32.const 3
+    global.get $PARSER_STATUS_DONE
+    i32.const 332
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 157
+    i32.const 2504
+    i32.const 3
+    global.get $PARSER_STATUS_DONE
+    i32.const 333
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 158
+    i32.const 2508
+    i32.const 2
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 334
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 159
+    i32.const 2512
+    i32.const 3
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 335
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 160
+    i32.const 2516
+    i32.const 4
+    global.get $PARSER_STATUS_DONE
+    i32.const 336
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 161
+    i32.const 2522
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 337
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 162
+    i32.const 2528
+    i32.const 3
+    global.get $PARSER_STATUS_DONE
+    i32.const 338
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 163
+    i32.const 2532
+    i32.const 4
+    global.get $PARSER_STATUS_DONE
+    i32.const 339
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 164
+    i32.const 2538
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 349
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 165
+    i32.const 2548
+    i32.const 3
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 347
+    call $assert_manual_number_status
+
+    i32.const 55296
+    i32.const 166
+    i32.const 2552
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 348
+    call $assert_manual_number_status
+  )
+
+  (func (export "test_parser_tokenizer_covers_keyword_and_default_errors")
+    i32.const 55296
+    i32.const 133
+    i32.const 2278
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_DONE
+    i32.const 340
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 134
+    i32.const 2490
+    i32.const 3
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 341
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 135
+    i32.const 2230
+    i32.const 5
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 342
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 136
+    i32.const 2470
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 343
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 137
+    i32.const 2238
+    i32.const 3
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 344
+    call $assert_tokenize_status
+
+    i32.const 64000
+    i32.const 2238
+    i32.const 3
+    i32.const 57344
+    i32.const 4
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_STATE_INVALID
+    i32.const 345
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 138
+    call $parser_state_init
+    i32.const 55296
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    i32.const 99
+    call $store_i32
+    i32.const 55296
+    i32.const 2238
+    i32.const 3
+    i32.const 57344
+    i32.const 4
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 346
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_tokenizer_covers_string_escape_paths")
+    i32.const 55296
+    i32.const 139
+    i32.const 2170
+    i32.const 11
+    i32.const 4
+    global.get $PARSER_STATUS_DONE
+    i32.const 360
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 140
+    i32.const 2246
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 361
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 141
+    i32.const 2254
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 362
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 142
+    i32.const 2262
+    i32.const 7
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 363
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 143
+    i32.const 2286
+    i32.const 4
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 364
+    call $assert_tokenize_status
+  )
+
+  (func (export "test_parser_tokenizer_covers_nesting_and_capacity_errors")
+    i32.const 55296
+    i32.const 144
+    i32.const 2048
+    i32.const 32
+    i32.const 0
+    global.get $PARSER_STATUS_YIELDED
+    i32.const 380
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 145
+    i32.const 2298
+    i32.const 2
+    i32.const 2
+    global.get $PARSER_STATUS_YIELDED
+    i32.const 381
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 146
+    i32.const 2294
+    i32.const 1
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 382
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 147
+    i32.const 2304
+    i32.const 1
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 383
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 148
+    i32.const 2308
+    i32.const 1
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 384
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 149
+    i32.const 2312
+    i32.const 2
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 385
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 150
+    i32.const 2320
+    i32.const 2
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 386
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 151
+    i32.const 2330
+    i32.const 65
+    i32.const 80
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 387
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 152
+    i32.const 2400
+    i32.const 65
+    i32.const 80
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 388
+    call $assert_tokenize_status
   )
 
   (func (export "test_parser_reads_opfs_chunks")

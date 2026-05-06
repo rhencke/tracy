@@ -1672,18 +1672,10 @@
                           return
                         end
                       else
-                        local.get $phase
-                        i32.const 8
-                        i32.eq
+                        local.get $byte
+                        call $is_digit
+                        i32.eqz
                         if
-                          local.get $byte
-                          call $is_digit
-                          i32.eqz
-                          if
-                            i32.const 0
-                            return
-                          end
-                        else
                           i32.const 0
                           return
                         end
