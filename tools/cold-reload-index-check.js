@@ -308,7 +308,7 @@ function expectEq(actual, expected, label) {
   }
 }
 
-function expectDeepEq(actual, expected, label) {
+function expectJsonEq(actual, expected, label) {
   const actualJson = JSON.stringify(actual);
   const expectedJson = JSON.stringify(expected);
   if (actualJson !== expectedJson) {
@@ -443,7 +443,7 @@ async function main() {
   ingest.index.index_reader_init(indexId);
   const warmRows = queryRows(ingest.index, ingest.memory, 0, 0, 50);
   expectEq(warmRows.length, 3, "warm known query row count");
-  expectDeepEq(
+  expectJsonEq(
     warmRows.map(({ start, dur, depth }) => ({ start, dur, depth })),
     [
       { start: 10, dur: 5, depth: 0 },
@@ -484,13 +484,13 @@ async function main() {
   cold.index.index_reader_init(indexId);
 
   const coldRows = queryRows(cold.index, cold.memory, 0, 0, 50);
-  expectDeepEq(coldRows, warmRows, "cold query parity");
+  expectJsonEq(coldRows, warmRows, "cold query parity");
   if (cold.index.index_reader_cache_misses() === 0) {
     throw new Error("cold query did not fault any pages");
   }
 
   const hitsBeforeRepeat = cold.index.index_reader_cache_hits();
-  expectDeepEq(queryRows(cold.index, cold.memory, 0, 0, 50), warmRows, "warm cache query parity");
+  expectJsonEq(queryRows(cold.index, cold.memory, 0, 0, 50), warmRows, "warm cache query parity");
   if (cold.index.index_reader_cache_hits() <= hitsBeforeRepeat) {
     throw new Error("repeated query did not hit the page cache");
   }
