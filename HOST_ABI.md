@@ -19,6 +19,12 @@ Do not edit generated ABI values by hand.
 | `opfs_source_name` | `i32`, `i32`, `i32` | `i32` | no |
 | `opfs_source_size` | `i32` | `i64` | no |
 | `opfs_source_read` | `i32`, `i64`, `i32`, `i32` | `i32` | yes |
+| `opfs_index_create` | `i32`, `i32` | `i32` | yes |
+| `opfs_index_open` | `i32`, `i32` | `i32` | yes |
+| `opfs_index_read` | `i32`, `i64`, `i32`, `i32` | `i32` | yes |
+| `opfs_index_write` | `i32`, `i64`, `i32`, `i32` | `i32` | yes |
+| `opfs_index_flush` | `i32` | `i32` | yes |
+| `opfs_index_size` | `i32` | `i64` | no |
 
 ## Host Constants
 

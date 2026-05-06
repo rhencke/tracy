@@ -4,21 +4,25 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const MiB = 1024 * 1024;
+const GiB = 1024 * MiB;
 const targetBytes = Number.parseInt(
-  process.env.TRACY_GENERATED_TRACE_BYTES ?? String(100 * MiB),
+  process.env.TRACY_COLD_RELOAD_TRACE_BYTES ?? String(4 * MiB),
   10,
 );
-const seedText = process.env.TRACY_GENERATED_TRACE_SEED ?? "generated-trace-ci";
-const sourceId = 9001;
+const seedText = process.env.TRACY_COLD_RELOAD_TRACE_SEED ?? "cold-reload-index-ci";
+const sourceId = 9101;
+const indexId = 77;
 const statePtr = 4096;
+const writerPagePtr = 65536;
 const inputPtr = 1 * MiB;
 const tokenRecordBytes = 12;
 const tokenOutputSafetyRecords = 1024;
+const opfsPageSize = 65536;
 const wasmRoot = path.resolve(__dirname, "../dist/wasm");
 const stdRoot = path.join(wasmRoot, "std");
 
 if (!Number.isInteger(targetBytes) || targetBytes <= 0) {
-  throw new Error("TRACY_GENERATED_TRACE_BYTES must be a positive integer");
+  throw new Error("TRACY_COLD_RELOAD_TRACE_BYTES must be a positive integer");
 }
 
 function fnv1a(text) {
@@ -149,7 +153,11 @@ function pageCount(bytes) {
   return Math.ceil(bytes / 65536);
 }
 
-async function instantiateParser(trace) {
+function globalValue(value) {
+  return value instanceof WebAssembly.Global ? value.value : value;
+}
+
+async function instantiateModules(trace, indexBytes) {
   const eventCountEstimate = Math.max(1, Math.ceil(trace.length / 470));
   const recordCap = eventCountEstimate * 48 + tokenOutputSafetyRecords;
   const outputPtr = (inputPtr + trace.length + 7) & ~7;
@@ -161,6 +169,7 @@ async function instantiateParser(trace) {
     maximum: 32768,
   });
   const memoryBytes = new Uint8Array(memory.buffer);
+  let sourceReads = 0;
 
   memoryBytes.set(trace, inputPtr);
 
@@ -171,6 +180,7 @@ async function instantiateParser(trace) {
         return -1;
       }
 
+      sourceReads += 1;
       const start = Number(offset);
       if (!Number.isInteger(start) || start < 0 || start >= trace.length) {
         return 0;
@@ -180,7 +190,47 @@ async function instantiateParser(trace) {
       new Uint8Array(memory.buffer, dest, count).set(trace.subarray(start, start + count));
       return count;
     },
+    opfs_index_read(readIndexId, offset, len, dest) {
+      if (readIndexId !== indexId) {
+        return -1;
+      }
+
+      const start = Number(offset);
+      if (!Number.isInteger(start) || start < 0 || start >= indexBytes.length) {
+        return 0;
+      }
+
+      const count = Math.max(0, Math.min(len, indexBytes.length - start));
+      new Uint8Array(memory.buffer, dest, count).set(indexBytes.subarray(start, start + count));
+      return count;
+    },
+    opfs_index_write(writeIndexId, offset, src, len) {
+      if (writeIndexId !== indexId) {
+        return -1;
+      }
+
+      const start = Number(offset);
+      if (!Number.isInteger(start) || start < 0) {
+        return -1;
+      }
+
+      const end = start + len;
+      if (end > indexBytes.length) {
+        const next = Buffer.alloc(end);
+        indexBytes.copy(next);
+        indexBytes = next;
+      }
+
+      new Uint8Array(indexBytes.buffer, indexBytes.byteOffset + start, len).set(
+        new Uint8Array(memory.buffer, src, len),
+      );
+      return len;
+    },
+    opfs_index_flush(writeIndexId) {
+      return writeIndexId === indexId ? 0 : -1;
+    },
   };
+
   const alloc = await instantiateWasm(path.join(stdRoot, "alloc.wasm"), { env });
   alloc.bump_init(heapPtr, heapEnd);
   const hash = await instantiateWasm(path.join(stdRoot, "hash.wasm"), { env, alloc });
@@ -200,13 +250,21 @@ async function instantiateParser(trace) {
     parser_state: parserState,
     strtab,
   });
+  const index = await instantiateWasm(path.join(wasmRoot, "index.wasm"), {
+    env,
+    host,
+    mem,
+  });
 
   return {
     memory,
     parser,
     parserState,
+    index,
     outputPtr,
     recordCap,
+    getIndexBytes: () => indexBytes,
+    sourceReads: () => sourceReads,
   };
 }
 
@@ -214,44 +272,115 @@ function readI32(memory, ptr) {
   return new DataView(memory.buffer).getInt32(ptr, true);
 }
 
+function expectEq(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`${label}: got ${actual}, expected ${expected}`);
+  }
+}
+
+function scaledColdReloadBudgetMs(bytes) {
+  const scaled = (bytes / (10 * GiB)) * 30_000;
+  return Math.max(250, Math.ceil(scaled));
+}
+
 async function main() {
   const { trace, count: generatedCount } = buildTrace();
-  const { memory, parser, parserState, outputPtr, recordCap } = await instantiateParser(trace);
+  let indexBytes = Buffer.alloc(0);
+  const ingest = await instantiateModules(trace, indexBytes);
 
-  parserState.parser_state_init(statePtr, sourceId);
-  const status = parser.parser_tokenize_bytes(
+  ingest.parserState.parser_state_init(statePtr, sourceId);
+  const status = ingest.parser.parser_tokenize_bytes(
     statePtr,
     inputPtr,
     trace.length,
-    outputPtr,
-    recordCap,
+    ingest.outputPtr,
+    ingest.recordCap,
   );
 
-  if (status !== parserState.PARSER_STATUS_DONE.value) {
-    throw new Error(`parser status ${status}, expected ${parserState.PARSER_STATUS_DONE.value}`);
-  }
+  expectEq(
+    status,
+    globalValue(ingest.parserState.PARSER_STATUS_DONE),
+    "parser status",
+  );
 
-  parser.extractor_init(outputPtr);
+  ingest.parser.extractor_init(ingest.outputPtr);
+  ingest.index.index_writer_init(indexId, writerPagePtr, 1);
 
   let extractedCount = 0;
-  while (parser.extractor_next() !== -1) {
+  while (true) {
+    const eventPtr = ingest.parser.extractor_next();
+    if (eventPtr === -1) {
+      break;
+    }
+
+    const appendStatus = ingest.index.index_writer_append_event(eventPtr);
+    expectEq(appendStatus, globalValue(ingest.index.INDEX_WRITER_STATUS_OK), "append status");
     extractedCount += 1;
   }
 
-  if (extractedCount !== generatedCount) {
-    throw new Error(`extracted ${extractedCount} events, generated ${generatedCount}`);
-  }
+  expectEq(extractedCount, generatedCount, "extracted event count");
+
+  const flushStatus = ingest.index.index_writer_flush();
+  expectEq(flushStatus, globalValue(ingest.index.INDEX_WRITER_STATUS_OK), "writer flush");
+  expectEq(ingest.index.index_writer_committed_events(), generatedCount, "indexed event count");
 
   const parserCount = readI32(
-    memory,
-    statePtr + parserState.PARSER_STATE_EVENT_COUNT_OFFSET.value,
+    ingest.memory,
+    statePtr + globalValue(ingest.parserState.PARSER_STATE_EVENT_COUNT_OFFSET),
   );
-  if (parserCount !== generatedCount) {
-    throw new Error(`parser counted ${parserCount} events, generated ${generatedCount}`);
+  expectEq(parserCount, generatedCount, "parser event count");
+
+  indexBytes = ingest.getIndexBytes();
+  const pages = ingest.index.index_writer_committed_pages();
+  if (pages < 3) {
+    throw new Error(`cold-reload fixture needs at least 3 pages, got ${pages}`);
+  }
+
+  const reloadStart = process.hrtime.bigint();
+  const cold = await instantiateModules(Buffer.alloc(0), indexBytes);
+  const readsBeforeReload = cold.sourceReads();
+
+  expectEq(cold.index.index_reader_configure_cache(2), 2, "reader cache slots");
+  cold.index.index_reader_init(indexId);
+
+  const page0 = cold.index.read_page(0, 0);
+  expectEq(cold.index.index_reader_status(), globalValue(cold.index.INDEX_READER_STATUS_OK), "page0 status");
+  expectEq(cold.index.index_reader_cache_hit(), 0, "page0 miss");
+  expectEq(
+    cold.index.index_validate_page(page0, opfsPageSize),
+    globalValue(cold.index.INDEX_STATUS_OK),
+    "page0 validates",
+  );
+
+  cold.index.read_page(0, 1);
+  expectEq(cold.index.index_reader_cache_hit(), 0, "page1 miss");
+
+  expectEq(cold.index.read_page(0, 0), page0, "page0 cached pointer");
+  expectEq(cold.index.index_reader_cache_hit(), 1, "page0 hit");
+
+  cold.index.read_page(0, 2);
+  expectEq(cold.index.index_reader_cache_hit(), 0, "page2 miss");
+
+  expectEq(cold.index.read_page(0, 0), page0, "page0 remains hot");
+  expectEq(cold.index.index_reader_cache_hit(), 1, "page0 remains cached");
+
+  cold.index.read_page(0, 1);
+  expectEq(cold.index.index_reader_cache_hit(), 0, "page1 evicted miss");
+
+  expectEq(cold.index.index_reader_evict_cold_pages(1), 1, "memory pressure evicts one");
+  cold.index.read_page(0, 2);
+  expectEq(cold.index.index_reader_cache_hit(), 0, "page2 reloaded after eviction");
+
+  expectEq(cold.sourceReads(), readsBeforeReload, "cold reload avoided JSON source reads");
+
+  const reloadMs = Number(process.hrtime.bigint() - reloadStart) / 1_000_000;
+  const budgetMs = scaledColdReloadBudgetMs(trace.length);
+  if (reloadMs > budgetMs) {
+    throw new Error(`cold reload took ${reloadMs.toFixed(2)}ms, budget ${budgetMs}ms`);
   }
 
   console.log(
-    `generated ${trace.length} bytes with ${generatedCount} events; extracted ${extractedCount}`,
+    `cold reloaded ${pages} TRCI pages from ${trace.length} bytes in ${reloadMs.toFixed(2)}ms (budget ${budgetMs}ms)`,
   );
 }
 

@@ -6,11 +6,14 @@ A trace viewer.  Mobile-first.  Material 3 throughout.  Client-side
 only — your traces never leave your device.  Handles 10 GB+ traces
 without choking.
 
-Hand-rolled in WebAssembly Text format.  No frameworks; the JS
-bootstrap is ≤50 lines and exists only to fetch the wasm and
-mediate the browser API surface.  The streaming JSON parser, the
-columnar index, the time-bucket pyramid, the gesture state machine,
-the HCT colour math behind every Material 3 surface — all `.wat`.
+Hand-rolled in WebAssembly Text format.  No app framework runtime;
+the core trace machinery stays in `.wat`.  JavaScript is still part
+of the project where the browser requires it: the ≤50-line bootstrap,
+the host/browser boundary, build and ABI tooling, browser-boundary
+checks, and the generic `watwat` wasm test runner.  The streaming JSON
+parser, the columnar index, index page codec, cache and eviction policy,
+the time-bucket pyramid, the gesture state machine, and the HCT colour
+math behind every Material 3 surface are all WAT-owned.
 
 ## Status
 
@@ -27,9 +30,9 @@ then [v1.0 — release](https://github.com/rhencke/tracy/issues/35).
 | Input format (v0.1) | Chrome JSON Trace Event Format |
 | Design language | Material 3 (everywhere) |
 | Hosting | Client-side only.  GitHub Pages at <https://rhencke.github.io/tracy/>. |
-| Implementation | Pure WAT.  ≤50 LOC JS bootstrap + thin host shim. |
-| Build | `wat2wasm` (wabt) + `esbuild` for the bootstrap bundle.  Driven by GitHub Actions. |
-| Tests | `watwat` — WAT-native test framework, TAP output. |
+| Implementation | Core app logic in WAT.  JavaScript is used for the bootstrap, host/browser boundary, build tooling, and browser-boundary checks. |
+| Build | `wat2wasm` (wabt) + `esbuild` for the bootstrap bundle, with Node-based tooling for generated ABI/test artifacts.  Driven by GitHub Actions. |
+| Tests | `watwat` — agnostic wasm test runner for WAT modules, TAP output, plus Node/browser-boundary checks where the host surface needs JavaScript. |
 
 ## Why this way
 
@@ -57,7 +60,7 @@ to GitHub Pages on every merge to `main`.  Local dev:
 # install wabt (once)
 brew install wabt   # or: apt install wabt
 
-# install locked JS build tools
+# install locked JS build and test tooling
 npm ci
 
 # build
@@ -66,8 +69,8 @@ bash tools/build.sh
 # produced app shell
 ls dist/index.html dist/bootstrap.bundle.js dist/wasm/app.wasm
 
-# run watwat tests
-node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
+# run WAT module tests through watwat
+node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 
 # serve dist/ locally
 python3 -m http.server -d dist 8000
@@ -116,9 +119,12 @@ stage it is intentionally only a blank full-screen canvas loaded from
 the placeholder wasm module.
 
 `watwat` provides behavioral coverage for hand-written WAT modules in
-CI.  Tracy does not currently report WAT/WASM line or branch coverage;
-that needs a separate tooling evaluation once there is a practical path
-for this stack.
+CI as a generic wasm test runner.  Browser-only boundaries such as OPFS,
+file handles, JSPI, bootstrap wiring, and generated host ABI checks use
+JavaScript tooling because those surfaces are JavaScript/browser APIs.
+Tracy does not currently report WAT/WASM line or branch coverage; that
+needs a separate tooling evaluation once there is a practical path for
+this stack.
 
 ## Contributing
 

@@ -4,6 +4,11 @@ export const WASM_MODULES = Object.freeze({
     aliases: Object.freeze(["app"]),
     dependencies: Object.freeze([]),
   }),
+  index: Object.freeze({
+    wasmPath: "index.wasm",
+    aliases: Object.freeze(["index"]),
+    dependencies: Object.freeze(["std/mem"]),
+  }),
   parser: Object.freeze({
     wasmPath: "parser.wasm",
     aliases: Object.freeze(["parser"]),

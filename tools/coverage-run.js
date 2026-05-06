@@ -93,7 +93,12 @@ async function accessOrThrow(file, message) {
 }
 
 function runWatwat(args) {
-  execFileSync(process.execPath, [path.join(__dirname, "watwat.js"), ...args], {
+  execFileSync(process.execPath, [
+    path.join(__dirname, "watwat.js"),
+    "--harness",
+    path.join(__dirname, "tracy-watwat-harness.js"),
+    ...args,
+  ], {
     stdio: "inherit",
   });
 }

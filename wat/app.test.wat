@@ -19,6 +19,12 @@
   (import "host" "opfs_source_name" (func $opfs_source_name (param i32 i32 i32) (result i32)))
   (import "host" "opfs_source_size" (func $opfs_source_size (param i32) (result i64)))
   (import "host" "opfs_source_read" (func $opfs_source_read (param i32 i64 i32 i32) (result i32)))
+  (import "host" "opfs_index_create" (func $opfs_index_create (param i32 i32) (result i32)))
+  (import "host" "opfs_index_open" (func $opfs_index_open (param i32 i32) (result i32)))
+  (import "host" "opfs_index_read" (func $opfs_index_read (param i32 i64 i32 i32) (result i32)))
+  (import "host" "opfs_index_write" (func $opfs_index_write (param i32 i64 i32 i32) (result i32)))
+  (import "host" "opfs_index_flush" (func $opfs_index_flush (param i32) (result i32)))
+  (import "host" "opfs_index_size" (func $opfs_index_size (param i32) (result i64)))
   ;; @generated host-imports app:end
   (import "app" "tracy_main" (func $tracy_main))
   (import "app" "tracy_tick" (func $tracy_tick))
@@ -111,5 +117,49 @@
     i32.const 64
     i32.const 11
     call $assert_eq_i32
+
+    i32.const 4096
+    i32.const 16
+    call $opfs_index_create
+    i32.const 21
+    i32.const 12
+    call $assert_eq_i32
+
+    i32.const 4096
+    i32.const 16
+    call $opfs_index_open
+    i32.const 22
+    i32.const 13
+    call $assert_eq_i32
+
+    i32.const 21
+    i64.const 0
+    i32.const 65536
+    i32.const 65536
+    call $opfs_index_read
+    i32.const 65536
+    i32.const 14
+    call $assert_eq_i32
+
+    i32.const 21
+    i64.const 0
+    i32.const 65536
+    i32.const 65536
+    call $opfs_index_write
+    i32.const 65536
+    i32.const 15
+    call $assert_eq_i32
+
+    i32.const 21
+    call $opfs_index_flush
+    i32.const 0
+    i32.const 16
+    call $assert_eq_i32
+
+    i32.const 21
+    call $opfs_index_size
+    i64.const 131072
+    i32.const 17
+    call $assert_eq_i64
   )
 )

@@ -239,6 +239,42 @@
       "params": ["i32", "i64", "i32", "i32"],
       "result": "i32",
       "async": true
+    },
+    {
+      "name": "opfs_index_create",
+      "params": ["i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_index_open",
+      "params": ["i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_index_read",
+      "params": ["i32", "i64", "i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_index_write",
+      "params": ["i32", "i64", "i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_index_flush",
+      "params": ["i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_index_size",
+      "params": ["i32"],
+      "result": "i64",
+      "async": false
     }
   ],
   "watImportSets": {
@@ -254,7 +290,13 @@
       "opfs_source_name_len",
       "opfs_source_name",
       "opfs_source_size",
-      "opfs_source_read"
+      "opfs_source_read",
+      "opfs_index_create",
+      "opfs_index_open",
+      "opfs_index_read",
+      "opfs_index_write",
+      "opfs_index_flush",
+      "opfs_index_size"
     ],
     "parser": ["opfs_source_read"]
   }
