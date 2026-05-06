@@ -1,0 +1,121 @@
+{
+  "modules": {
+    "app": {
+      "wasmPath": "app.wasm",
+      "aliases": [
+        "app"
+      ],
+      "dependencies": []
+    },
+    "index": {
+      "wasmPath": "index.wasm",
+      "aliases": [
+        "index"
+      ],
+      "dependencies": [
+        "std/mem"
+      ]
+    },
+    "parser": {
+      "wasmPath": "parser.wasm",
+      "aliases": [
+        "parser"
+      ],
+      "dependencies": [
+        "std/mem",
+        "std/strtab",
+        "parser_state"
+      ]
+    },
+    "parser_state": {
+      "wasmPath": "parser_state.wasm",
+      "aliases": [
+        "parser_state"
+      ],
+      "dependencies": []
+    },
+    "std/alloc": {
+      "wasmPath": "std/alloc.wasm",
+      "aliases": [
+        "alloc",
+        "std/alloc",
+        "wat/std/alloc"
+      ],
+      "dependencies": []
+    },
+    "std/array": {
+      "wasmPath": "std/array.wasm",
+      "aliases": [
+        "array",
+        "std/array",
+        "wat/std/array"
+      ],
+      "dependencies": [
+        "std/alloc"
+      ]
+    },
+    "std/assert": {
+      "wasmPath": "std/assert.wasm",
+      "aliases": [
+        "assert",
+        "std/assert",
+        "wat/std/assert"
+      ],
+      "dependencies": []
+    },
+    "std/hash": {
+      "wasmPath": "std/hash.wasm",
+      "aliases": [
+        "hash",
+        "std/hash",
+        "wat/std/hash"
+      ],
+      "dependencies": [
+        "std/alloc"
+      ]
+    },
+    "std/mem": {
+      "wasmPath": "std/mem.wasm",
+      "aliases": [
+        "mem",
+        "std/mem",
+        "wat/std/mem"
+      ],
+      "dependencies": []
+    },
+    "std/pool": {
+      "wasmPath": "std/pool.wasm",
+      "aliases": [
+        "pool",
+        "std/pool",
+        "wat/std/pool"
+      ],
+      "dependencies": [
+        "std/alloc"
+      ]
+    },
+    "std/ring": {
+      "wasmPath": "std/ring.wasm",
+      "aliases": [
+        "ring",
+        "std/ring",
+        "wat/std/ring"
+      ],
+      "dependencies": [
+        "std/alloc"
+      ]
+    },
+    "std/strtab": {
+      "wasmPath": "std/strtab.wasm",
+      "aliases": [
+        "strtab",
+        "std/strtab",
+        "wat/std/strtab"
+      ],
+      "dependencies": [
+        "std/alloc",
+        "std/hash"
+      ]
+    }
+  }
+}
