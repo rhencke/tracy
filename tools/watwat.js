@@ -15,6 +15,7 @@ class WatwatFailure extends Error {
 
 function usage() {
   console.error("usage: watwat dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
+  console.error("usage: watwat --expect-failure export_name expected_message dist/wasm/foo.test.wasm");
 }
 
 function hasGlobMeta(value) {
@@ -132,6 +133,63 @@ async function runTestFile(file, assertPath) {
   return results;
 }
 
+async function runExpectedFailure(exportName, expectedMessage, file, assertPath) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath);
+  const probe = instance.exports[exportName];
+
+  if (typeof probe !== "function") {
+    return {
+      ok: false,
+      name: exportName,
+      message: `missing export ${exportName}`,
+    };
+  }
+
+  try {
+    probe();
+    return {
+      ok: false,
+      name: exportName,
+      message: "expected failure did not occur",
+    };
+  } catch (error) {
+    if (!(error instanceof WatwatFailure)) {
+      return {
+        ok: false,
+        name: exportName,
+        message: error.message || String(error),
+      };
+    }
+
+    const message = messageFor(instance, memory, error.code);
+    return {
+      ok: message === expectedMessage,
+      name: exportName,
+      message:
+        message === expectedMessage
+          ? ""
+          : `expected ${expectedMessage}, got ${message}`,
+    };
+  }
+}
+
+function emitTap(results) {
+  console.log("TAP version 13");
+  console.log(`1..${results.length}`);
+
+  results.forEach((result, index) => {
+    const number = index + 1;
+    const name = tapEscape(result.name);
+
+    if (result.ok) {
+      console.log(`ok ${number} - ${name}`);
+      return;
+    }
+
+    console.log(`not ok ${number} - ${name} # ${tapEscape(result.message)}`);
+  });
+}
+
 async function main() {
   const files = process.argv.slice(2);
 
@@ -142,6 +200,23 @@ async function main() {
   }
 
   const assertPath = path.resolve(__dirname, "../dist/wasm/std/assert.wasm");
+
+  if (files[0] === "--expect-failure") {
+    if (files.length !== 4) {
+      usage();
+      process.exitCode = 64;
+      return;
+    }
+
+    const [, exportName, expectedMessage, file] = files;
+    const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath);
+    emitTap([result]);
+    if (!result.ok) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const results = [];
   let harnessFailed = false;
 
@@ -163,20 +238,7 @@ async function main() {
     }
   }
 
-  console.log("TAP version 13");
-  console.log(`1..${results.length}`);
-
-  results.forEach((result, index) => {
-    const number = index + 1;
-    const name = tapEscape(result.name);
-
-    if (result.ok) {
-      console.log(`ok ${number} - ${name}`);
-      return;
-    }
-
-    console.log(`not ok ${number} - ${name} # ${tapEscape(result.message)}`);
-  });
+  emitTap(results);
 
   if (harnessFailed || results.some((result) => !result.ok)) {
     process.exitCode = 1;

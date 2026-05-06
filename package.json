@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "build": "bash tools/build.sh",
-    "test": "node tools/watwat.js dist/wasm/*.test.wasm"
+    "test": "npm run test:wat && npm run test:watwat-probe",
+    "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm",
+    "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm"
   },
   "devDependencies": {
     "esbuild": "0.25.3"
