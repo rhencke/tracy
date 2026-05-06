@@ -172,7 +172,37 @@ function memoryMaximumPagesFor(file) {
   return constrainedSuites.has(path.basename(file)) ? 1 : 32768;
 }
 
-function createHostImports() {
+const parserTraceFixture = new TextEncoder().encode(
+  '{"traceEvents":[{"name":"lo\\u0061d","cat":"io","ph":"X","ts":123,"dur":2,"pid":3,"tid":4},{"name":"paint","args":{"layer":"ro\\\"ot"},"ts":5}]}',
+);
+const parserFixtures = new Map([
+  [99, parserTraceFixture],
+  [100, new TextEncoder().encode('{"traceEvents":[}')],
+  [101, new TextEncoder().encode('{"traceEvents":[{"name":"\\q"}]}')],
+  [102, new TextEncoder().encode('{"traceEvents":[{"name":"open}')],
+  [103, new TextEncoder().encode('"root"')],
+  [104, new TextEncoder().encode("[".repeat(65))],
+  [105, new TextEncoder().encode('{"traceEvents":[{"name":"\\u00X0"}]}')],
+  [106, new TextEncoder().encode('{"traceEvents":[{"name":"bad\n"}]}')],
+  [107, new TextEncoder().encode(' \n { } \t')],
+  [108, new TextEncoder().encode('{"a"}')],
+  [109, new TextEncoder().encode('{:"x"}')],
+  [110, new TextEncoder().encode('{"traceEvents":[{"name":true,"ts":123}]}')],
+]);
+
+function writeFixture(memory, bytes, offset, len, dest) {
+  const start = Number(offset);
+  const count = Math.max(0, Math.min(len, bytes.length - start));
+
+  if (count <= 0) {
+    return 0;
+  }
+
+  new Uint8Array(memory.buffer, dest, count).set(bytes.subarray(start, start + count));
+  return count;
+}
+
+function createHostImports(memory) {
   return {
     canvas_get_size() {
       return (BigInt(600) << 32n) | BigInt(800);
@@ -203,7 +233,16 @@ function createHostImports() {
     opfs_source_size() {
       return BigInt(1048576);
     },
-    opfs_source_read() {
+    opfs_source_read(sourceId, offset, len, dest) {
+      if (sourceId === 111) {
+        return -1;
+      }
+
+      const fixture = parserFixtures.get(sourceId);
+      if (fixture !== undefined) {
+        return writeFixture(memory, fixture, offset, len, dest);
+      }
+
       return 64;
     },
   };
@@ -230,6 +269,34 @@ function importsForModule(imports, coverage, modulePath) {
   return path.basename(modulePath, ".wasm") === coverage.moduleBase
     ? imports
     : dependencyImportsFor(imports);
+}
+
+function wasmRootFor(modulePath) {
+  const dir = path.dirname(modulePath);
+  return path.basename(dir) === "std" ? path.dirname(dir) : dir;
+}
+
+async function instantiateDependency(moduleImports, aliases, imports, coverage, wasmPath, names) {
+  try {
+    await fs.access(wasmPath);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  const bytes = await fs.readFile(wasmPath);
+  const { instance } = await WebAssembly.instantiate(
+    bytes,
+    importsForModule(moduleImports, coverage, wasmPath),
+  );
+
+  for (const name of names) {
+    moduleImports[name] = instance.exports;
+    aliases[name] = instance.exports;
+  }
 }
 
 async function instantiateSiblingModule(file, imports, coverage = null) {
@@ -293,6 +360,30 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
     }
   }
 
+  const rootDir = wasmRootFor(modulePath);
+
+  if (path.basename(modulePath) !== "mem.wasm") {
+    await instantiateDependency(
+      moduleImports,
+      aliases,
+      imports,
+      coverage,
+      path.join(rootDir, "std", "mem.wasm"),
+      ["mem", "std/mem", "wat/std/mem"],
+    );
+  }
+
+  if (path.basename(modulePath) !== "parser_state.wasm") {
+    await instantiateDependency(
+      moduleImports,
+      aliases,
+      imports,
+      coverage,
+      path.join(rootDir, "parser_state.wasm"),
+      ["parser_state"],
+    );
+  }
+
   const bytes = await fs.readFile(modulePath);
   const { instance } = await WebAssembly.instantiate(
     bytes,
@@ -320,7 +411,7 @@ async function instantiateTestModule(file, assertPath, coverage = null) {
   Object.assign(watwat, assert);
   const imports = {
     env: { memory },
-    host: createHostImports(),
+    host: createHostImports(memory),
     watwat,
     assert,
   };
