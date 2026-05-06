@@ -46,6 +46,13 @@
   (global $INDEX_RAW_COLUMN_CAT_ID (export "INDEX_RAW_COLUMN_CAT_ID") i32 (i32.const 5))
   (global $INDEX_RAW_COLUMN_PHASE (export "INDEX_RAW_COLUMN_PHASE") i32 (i32.const 6))
   (global $INDEX_RAW_COLUMN_FLAGS (export "INDEX_RAW_COLUMN_FLAGS") i32 (i32.const 7))
+  (global $INDEX_SLICE_COLUMN_START_TS (export "INDEX_SLICE_COLUMN_START_TS") i32 (i32.const 1))
+  (global $INDEX_SLICE_COLUMN_DUR (export "INDEX_SLICE_COLUMN_DUR") i32 (i32.const 2))
+  (global $INDEX_SLICE_COLUMN_NAME_ID (export "INDEX_SLICE_COLUMN_NAME_ID") i32 (i32.const 3))
+  (global $INDEX_SLICE_COLUMN_DEPTH (export "INDEX_SLICE_COLUMN_DEPTH") i32 (i32.const 4))
+  (global $INDEX_SLICE_COLUMN_CAT_ID (export "INDEX_SLICE_COLUMN_CAT_ID") i32 (i32.const 5))
+  (global $INDEX_SLICE_COLUMN_COLOR (export "INDEX_SLICE_COLUMN_COLOR") i32 (i32.const 6))
+  (global $INDEX_DECODE_HINT_COMPACT_SLICES (export "INDEX_DECODE_HINT_COMPACT_SLICES") i32 (i32.const 1))
 
   (global $INDEX_ENCODING_ABSENT (export "INDEX_ENCODING_ABSENT") i32 (i32.const 0))
   (global $INDEX_ENCODING_UVARINT (export "INDEX_ENCODING_UVARINT") i32 (i32.const 1))
@@ -72,6 +79,14 @@
   (global $INDEX_WRITER_CAT_OFFSET i32 (i32.const 46580))
   (global $INDEX_WRITER_PHASE_OFFSET i32 (i32.const 58180))
   (global $INDEX_WRITER_FLAGS_OFFSET i32 (i32.const 61080))
+  (global $INDEX_SLICE_WRITER_DIRECTORY_BYTES i32 (i32.const 100))
+  (global $INDEX_SLICE_WRITER_COLUMN_BASE i32 (i32.const 164))
+  (global $INDEX_SLICE_WRITER_START_OFFSET i32 (i32.const 164))
+  (global $INDEX_SLICE_WRITER_DUR_OFFSET i32 (i32.const 14664))
+  (global $INDEX_SLICE_WRITER_NAME_OFFSET i32 (i32.const 29164))
+  (global $INDEX_SLICE_WRITER_DEPTH_OFFSET i32 (i32.const 34964))
+  (global $INDEX_SLICE_WRITER_CAT_OFFSET i32 (i32.const 37864))
+  (global $INDEX_SLICE_WRITER_COLOR_OFFSET i32 (i32.const 43664))
   (global $INDEX_READER_SLOT_META_BASE i32 (i32.const 0x00080000))
   (global $INDEX_READER_SLOT_META_BYTES i32 (i32.const 16))
   (global $INDEX_TRACK_TABLE_BASE i32 (i32.const 0x00090000))
@@ -99,6 +114,11 @@
   (global $index_writer_previous_page_id (mut i32) (i32.const -1))
   (global $index_writer_commit_sequence (mut i32) (i32.const 0))
   (global $index_writer_bucket_start (mut i32) (i32.const 0))
+  (global $index_writer_mode (mut i32) (i32.const 0))
+  (global $index_writer_page_track (mut i32) (i32.const -1))
+  (global $index_slice_writer_start_len (mut i32) (i32.const 0))
+  (global $index_slice_writer_dur_len (mut i32) (i32.const 0))
+  (global $index_slice_writer_color_len (mut i32) (i32.const 0))
 
   (global $index_reader_file (mut i32) (i32.const 0))
   (global $index_reader_cached_level (mut i32) (i32.const -1))
@@ -1197,6 +1217,14 @@
     i32.sub
   )
 
+  (func $index_slice_writer_payload_len (result i32)
+    global.get $INDEX_SLICE_WRITER_COLOR_OFFSET
+    global.get $index_slice_writer_color_len
+    i32.add
+    global.get $INDEX_HEADER_BYTES
+    i32.sub
+  )
+
   (func $index_writer_row_ptr (param $offset i32) (param $row i32) (param $width i32) (result i32)
     global.get $index_writer_page
     local.get $offset
@@ -1312,10 +1340,107 @@
     call $write_directory_entry
   )
 
+  (func $index_slice_writer_write_directory
+    (local $dir i32)
+
+    global.get $index_writer_page
+    global.get $INDEX_HEADER_BYTES
+    i32.add
+    local.set $dir
+
+    local.get $dir
+    global.get $INDEX_DIRECTORY_VERSION
+    i32.store8
+
+    local.get $dir
+    i32.const 1
+    i32.add
+    i32.const 6
+    i32.store8
+
+    local.get $dir
+    i32.const 2
+    i32.add
+    global.get $INDEX_SLICE_WRITER_DIRECTORY_BYTES
+    i32.store16
+
+    local.get $dir
+    i32.const 4
+    i32.add
+    global.get $INDEX_SLICE_COLUMN_START_TS
+    global.get $INDEX_ENCODING_UVARINT
+    global.get $INDEX_SLICE_WRITER_START_OFFSET
+    global.get $index_slice_writer_start_len
+    global.get $index_writer_count
+    call $write_directory_entry
+
+    local.get $dir
+    i32.const 20
+    i32.add
+    global.get $INDEX_SLICE_COLUMN_DUR
+    global.get $INDEX_ENCODING_UVARINT
+    global.get $INDEX_SLICE_WRITER_DUR_OFFSET
+    global.get $index_slice_writer_dur_len
+    global.get $index_writer_count
+    call $write_directory_entry
+
+    local.get $dir
+    i32.const 36
+    i32.add
+    global.get $INDEX_SLICE_COLUMN_NAME_ID
+    global.get $INDEX_ENCODING_DICT16
+    global.get $INDEX_SLICE_WRITER_NAME_OFFSET
+    global.get $index_writer_count
+    i32.const 2
+    i32.mul
+    global.get $index_writer_count
+    call $write_directory_entry
+
+    local.get $dir
+    i32.const 52
+    i32.add
+    global.get $INDEX_SLICE_COLUMN_DEPTH
+    global.get $INDEX_ENCODING_FIXED8
+    global.get $INDEX_SLICE_WRITER_DEPTH_OFFSET
+    global.get $index_writer_count
+    global.get $index_writer_count
+    call $write_directory_entry
+
+    local.get $dir
+    i32.const 68
+    i32.add
+    global.get $INDEX_SLICE_COLUMN_CAT_ID
+    global.get $INDEX_ENCODING_DICT16
+    global.get $INDEX_SLICE_WRITER_CAT_OFFSET
+    global.get $index_writer_count
+    i32.const 2
+    i32.mul
+    global.get $index_writer_count
+    call $write_directory_entry
+
+    local.get $dir
+    i32.const 84
+    i32.add
+    global.get $INDEX_SLICE_COLUMN_COLOR
+    global.get $INDEX_ENCODING_UVARINT
+    global.get $INDEX_SLICE_WRITER_COLOR_OFFSET
+    global.get $index_slice_writer_color_len
+    global.get $index_writer_count
+    call $write_directory_entry
+  )
+
   (func $index_writer_prepare_page
     global.get $index_writer_page
     global.get $OPFS_PAGE_SIZE
     call $zero_bytes
+    i32.const 0
+    global.set $index_slice_writer_start_len
+    i32.const 0
+    global.set $index_slice_writer_dur_len
+    i32.const 0
+    global.set $index_slice_writer_color_len
+    i32.const -1
+    global.set $index_writer_page_track
   )
 
   (func $index_writer_commit_page (result i32)
@@ -1331,8 +1456,14 @@
       return
     end
 
-    call $index_writer_write_directory
-    call $index_writer_payload_len
+    global.get $index_writer_mode
+    if (result i32)
+      call $index_slice_writer_write_directory
+      call $index_slice_writer_payload_len
+    else
+      call $index_writer_write_directory
+      call $index_writer_payload_len
+    end
     local.set $payload_len
 
     global.get $index_writer_page
@@ -1354,7 +1485,16 @@
     i64.extend_i32_u
     global.get $index_writer_count
     local.get $payload_len
-    i32.const 0
+    global.get $index_writer_mode
+    if (result i32)
+      global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+      global.get $index_writer_page_track
+      i32.const 8
+      i32.shl
+      i32.or
+    else
+      i32.const 0
+    end
     global.get $index_writer_dict_epoch
     global.get $index_writer_next_page_id
     i64.extend_i32_u
@@ -1419,6 +1559,8 @@
     global.set $index_writer_commit_sequence
     i32.const 0
     global.set $index_writer_count
+    i32.const -1
+    global.set $index_writer_page_track
 
     global.get $INDEX_WRITER_STATUS_OK
   )
@@ -1934,6 +2076,145 @@
     global.get $INDEX_WRITER_STATUS_OK
   )
 
+  (func $index_writer_append_compact_slice
+    (param $track i32)
+    (param $ts i32)
+    (param $dur i32)
+    (param $name i32)
+    (param $depth i32)
+    (param $cat i32)
+    (param $color i32)
+    (result i32)
+    (local $status i32)
+    (local $written i32)
+
+    i32.const 1
+    global.set $index_writer_mode
+
+    global.get $index_writer_count
+    i32.const 0
+    i32.gt_u
+    global.get $index_writer_page_track
+    local.get $track
+    i32.ne
+    i32.and
+    if
+      call $index_writer_commit_page
+      local.tee $status
+      global.get $INDEX_WRITER_STATUS_OK
+      i32.ne
+      if
+        local.get $status
+        return
+      end
+    end
+
+    global.get $index_writer_count
+    global.get $INDEX_WRITER_ROWS_PER_PAGE
+    i32.ge_u
+    if
+      call $index_writer_commit_page
+      local.tee $status
+      global.get $INDEX_WRITER_STATUS_OK
+      i32.ne
+      if
+        local.get $status
+        return
+      end
+    end
+
+    global.get $index_writer_count
+    i32.eqz
+    if
+      call $index_writer_prepare_page
+      i32.const 1
+      global.set $index_writer_mode
+      local.get $track
+      global.set $index_writer_page_track
+      local.get $ts
+      global.set $index_writer_bucket_start
+    end
+
+    global.get $index_writer_page
+    global.get $INDEX_SLICE_WRITER_START_OFFSET
+    i32.add
+    global.get $index_slice_writer_start_len
+    i32.add
+    local.get $ts
+    global.get $index_writer_bucket_start
+    i32.ge_u
+    if (result i32)
+      local.get $ts
+      global.get $index_writer_bucket_start
+      i32.sub
+    else
+      i32.const 0
+    end
+    call $index_uvarint_write
+    local.tee $written
+    global.get $index_slice_writer_start_len
+    i32.add
+    global.set $index_slice_writer_start_len
+
+    global.get $index_writer_page
+    global.get $INDEX_SLICE_WRITER_DUR_OFFSET
+    i32.add
+    global.get $index_slice_writer_dur_len
+    i32.add
+    local.get $dur
+    call $index_uvarint_write
+    local.tee $written
+    global.get $index_slice_writer_dur_len
+    i32.add
+    global.set $index_slice_writer_dur_len
+
+    global.get $index_writer_page
+    global.get $INDEX_SLICE_WRITER_NAME_OFFSET
+    i32.add
+    global.get $index_writer_count
+    i32.const 2
+    i32.mul
+    i32.add
+    local.get $name
+    i32.store16
+
+    global.get $index_writer_page
+    global.get $INDEX_SLICE_WRITER_DEPTH_OFFSET
+    i32.add
+    global.get $index_writer_count
+    i32.add
+    local.get $depth
+    i32.store8
+
+    global.get $index_writer_page
+    global.get $INDEX_SLICE_WRITER_CAT_OFFSET
+    i32.add
+    global.get $index_writer_count
+    i32.const 2
+    i32.mul
+    i32.add
+    local.get $cat
+    i32.store16
+
+    global.get $index_writer_page
+    global.get $INDEX_SLICE_WRITER_COLOR_OFFSET
+    i32.add
+    global.get $index_slice_writer_color_len
+    i32.add
+    local.get $color
+    call $index_uvarint_write
+    global.get $index_slice_writer_color_len
+    i32.add
+    global.set $index_slice_writer_color_len
+
+    global.get $index_writer_count
+    i32.const 1
+    i32.add
+    global.set $index_writer_count
+
+    global.get $INDEX_WRITER_STATUS_OK
+  )
+
   (func (export "index_writer_init")
     (param $index_file i32)
     (param $page_ptr i32)
@@ -1956,6 +2237,8 @@
     global.set $index_writer_previous_page_id
     i32.const 0
     global.set $index_writer_commit_sequence
+    i32.const 0
+    global.set $index_writer_mode
     call $index_tracks_reset
     call $index_writer_prepare_page
   )
@@ -1965,6 +2248,9 @@
     (local $dur i32)
     (local $track i32)
     (local $flags i32)
+
+    i32.const 0
+    global.set $index_writer_mode
 
     local.get $event_ptr
     i32.const 8
@@ -2116,9 +2402,10 @@
       local.get $ts
       local.get $dur
       local.get $name
-      i32.const 88
+      local.get $depth
       i32.const 0
-      call $index_writer_append_row
+      i32.const 0
+      call $index_writer_append_compact_slice
       return
     end
 
@@ -2217,9 +2504,10 @@
     i32.load
     local.get $dur
     local.get $name
-    i32.const 88
+    local.get $depth
     i32.const 0
-    call $index_writer_append_row
+    i32.const 0
+    call $index_writer_append_compact_slice
   )
 
   (func (export "index_writer_flush") (result i32)
@@ -2909,6 +3197,7 @@
     (local $encoding i32)
     (local $rows i32)
     (local $record_count i32)
+    (local $required_count i32)
 
     local.get $page
     call $load_payload_len
@@ -3121,12 +3410,25 @@
     i32.load
     local.set $record_count
 
+    local.get $page
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.and
+    if (result i32)
+      i32.const 6
+    else
+      i32.const 7
+    end
+    local.set $required_count
+
     i32.const 1
     local.set $col
     block $required_done
       loop $required
         local.get $col
-        i32.const 7
+        local.get $required_count
         i32.gt_u
         br_if $required_done
 

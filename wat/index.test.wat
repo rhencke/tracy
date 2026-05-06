@@ -37,6 +37,13 @@
   (import "index" "INDEX_RAW_COLUMN_CAT_ID" (global $INDEX_RAW_COLUMN_CAT_ID i32))
   (import "index" "INDEX_RAW_COLUMN_PHASE" (global $INDEX_RAW_COLUMN_PHASE i32))
   (import "index" "INDEX_RAW_COLUMN_FLAGS" (global $INDEX_RAW_COLUMN_FLAGS i32))
+  (import "index" "INDEX_SLICE_COLUMN_START_TS" (global $INDEX_SLICE_COLUMN_START_TS i32))
+  (import "index" "INDEX_SLICE_COLUMN_DUR" (global $INDEX_SLICE_COLUMN_DUR i32))
+  (import "index" "INDEX_SLICE_COLUMN_NAME_ID" (global $INDEX_SLICE_COLUMN_NAME_ID i32))
+  (import "index" "INDEX_SLICE_COLUMN_DEPTH" (global $INDEX_SLICE_COLUMN_DEPTH i32))
+  (import "index" "INDEX_SLICE_COLUMN_CAT_ID" (global $INDEX_SLICE_COLUMN_CAT_ID i32))
+  (import "index" "INDEX_SLICE_COLUMN_COLOR" (global $INDEX_SLICE_COLUMN_COLOR i32))
+  (import "index" "INDEX_DECODE_HINT_COMPACT_SLICES" (global $INDEX_DECODE_HINT_COMPACT_SLICES i32))
   (import "index" "INDEX_ENCODING_UVARINT" (global $INDEX_ENCODING_UVARINT i32))
   (import "index" "INDEX_ENCODING_ZIGZAG_VARINT" (global $INDEX_ENCODING_ZIGZAG_VARINT i32))
   (import "index" "INDEX_ENCODING_DICT8" (global $INDEX_ENCODING_DICT8 i32))
@@ -954,31 +961,70 @@
     call $assert_eq_i32
 
     global.get $ALT_PAGE
-    global.get $INDEX_RAW_COLUMN_NAME_ID
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.and
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.const 341
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    global.get $INDEX_SLICE_COLUMN_NAME_ID
     call $index_column_span
     local.set $rows
     local.set $encoding
     local.set $len
     local.set $ptr
 
+    local.get $encoding
+    global.get $INDEX_ENCODING_DICT16
+    i32.const 342
+    call $assert_eq_i32
+
     local.get $ptr
-    i32.load
+    i32.load16_u
     i32.const 321
     i32.const 306
     call $assert_eq_i32
 
     global.get $ALT_PAGE
-    global.get $INDEX_RAW_COLUMN_DUR
+    global.get $INDEX_SLICE_COLUMN_DUR
     call $index_column_span
     local.set $rows
     local.set $encoding
     local.set $len
     local.set $ptr
 
+    local.get $encoding
+    global.get $INDEX_ENCODING_UVARINT
+    i32.const 343
+    call $assert_eq_i32
+
     local.get $ptr
-    i32.load
+    i32.load8_u
     i32.const 7
     i32.const 307
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    global.get $INDEX_SLICE_COLUMN_DEPTH
+    call $index_column_span
+    local.set $rows
+    local.set $encoding
+    local.set $len
+    local.set $ptr
+
+    local.get $encoding
+    global.get $INDEX_ENCODING_FIXED8
+    i32.const 344
+    call $assert_eq_i32
+
+    local.get $ptr
+    i32.load8_u
+    i32.const 0
+    i32.const 345
     call $assert_eq_i32
   )
 
@@ -1059,7 +1105,7 @@
     call $assert_eq_i32
 
     global.get $ALT_PAGE
-    global.get $INDEX_RAW_COLUMN_NAME_ID
+    global.get $INDEX_SLICE_COLUMN_NAME_ID
     call $index_column_span
     local.set $rows
     local.set $encoding
@@ -1072,13 +1118,13 @@
     call $assert_eq_i32
 
     local.get $ptr
-    i32.load
+    i32.load16_u
     i32.const 900
     i32.const 317
     call $assert_eq_i32
 
     global.get $ALT_PAGE
-    global.get $INDEX_RAW_COLUMN_DUR
+    global.get $INDEX_SLICE_COLUMN_DUR
     call $index_column_span
     local.set $rows
     local.set $encoding
@@ -1086,7 +1132,7 @@
     local.set $ptr
 
     local.get $ptr
-    i32.load
+    i32.load8_u
     i32.const 25
     i32.const 318
     call $assert_eq_i32
@@ -1354,6 +1400,144 @@
     call $track_max_ts
     i32.const 100
     i32.const 336
+    call $assert_eq_i32
+
+    i32.const 0
+    global.get $ALT_PAGE
+    i32.const 0
+    call $index_writer_init
+  )
+
+  (func (export "test_compact_slice_writer_splits_track_pages")
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 13
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 1
+    f64.const 10
+    f64.const 1
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 346
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 2
+    f64.const 20
+    f64.const 1
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 347
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 1
+    i32.const 348
+    call $assert_eq_i32
+
+    call $index_writer_pending_rows
+    i32.const 1
+    i32.const 349
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 350
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 2
+    i32.const 351
+    call $assert_eq_i32
+  )
+
+  (func (export "test_compact_slice_writer_propagates_commit_failures")
+    (local $i i32)
+
+    i32.const 111
+    global.get $ALT_PAGE
+    i32.const 14
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 1
+    f64.const 10
+    f64.const 1
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 352
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 2
+    f64.const 20
+    f64.const 1
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
+    i32.const 353
+    call $assert_eq_i32
+
+    i32.const 111
+    global.get $ALT_PAGE
+    i32.const 15
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 3
+    f64.const 30
+    f64.const 1
+    i32.const 2
+    i32.const 1
+    i32.const 0
+    call $write_event
+
+    block $done
+      loop $fill
+        local.get $i
+        global.get $INDEX_WRITER_ROWS_PER_PAGE
+        i32.ge_u
+        br_if $done
+
+        global.get $EVENT
+        call $index_add_event
+        global.get $INDEX_INGEST_STATUS_OK
+        i32.const 354
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $fill
+      end
+    end
+
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
+    i32.const 355
     call $assert_eq_i32
 
     i32.const 0
