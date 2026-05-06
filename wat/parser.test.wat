@@ -131,6 +131,7 @@
   (data (i32.const 2544) " ")
   (data (i32.const 2548) "1ex")
   (data (i32.const 2552) "1e+x")
+  (data (i32.const 2558) ",")
 
   (func (export "message_for") (param $code i32) (result i32 i32)
     i32.const 1024
@@ -1005,6 +1006,24 @@
     call $assert_tokenize_status
 
     i32.const 55296
+    i32.const 167
+    i32.const 2170
+    i32.const 11
+    i32.const 0
+    global.get $PARSER_STATUS_YIELDED
+    i32.const 389
+    call $assert_tokenize_status
+
+    i32.const 55296
+    i32.const 168
+    i32.const 2558
+    i32.const 1
+    i32.const 4
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 390
+    call $assert_tokenize_status
+
+    i32.const 55296
     i32.const 146
     i32.const 2294
     i32.const 1
@@ -1144,6 +1163,85 @@
     i64.gt_u
     i32.const 9
     call $assert_true
+
+    i32.const 0x00500000
+    i32.load
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    i32.const 10
+    call $assert_eq_i32
+
+    i32.const 4096
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    i32.const 0
+    i32.gt_u
+    i32.const 11
+    call $assert_true
+  )
+
+  (func (export "test_parser_ring_refill_wraps_free_span")
+    i32.const 4096
+    i32.const 103
+    call $parser_state_init
+
+    i32.const 4096
+    global.get $PARSER_STATE_RING_READ_OFFSET
+    i32.const 4194303
+    call $store_i32
+
+    i32.const 4096
+    global.get $PARSER_STATE_RING_WRITE_OFFSET
+    i32.const 4194303
+    call $store_i32
+
+    i32.const 4096
+    i32.const 8
+    call $parser_parse
+    global.get $PARSER_STATUS_DONE
+    i32.const 12
+    call $assert_eq_i32
+
+    i32.const 4096
+    global.get $PARSER_STATE_RING_WRITE_OFFSET
+    call $load_i32
+    i32.const 8
+    i32.lt_u
+    i32.const 13
+    call $assert_true
+
+    i32.const 4096
+    global.get $PARSER_STATE_RING_COUNT_OFFSET
+    call $load_i32
+    i32.const 0
+    i32.const 14
+    call $assert_eq_i32
+
+    i32.const 4096
+    i32.const 103
+    call $parser_state_init
+
+    i32.const 4096
+    global.get $PARSER_STATE_STATUS_OFFSET
+    global.get $PARSER_STATUS_YIELDED
+    call $store_i32
+
+    i32.const 4096
+    i32.const 1
+    call $parser_parse
+    global.get $PARSER_STATUS_YIELDED
+    i32.const 15
+    call $assert_eq_i32
+
+    i32.const 4096
+    i32.const 103
+    call $parser_state_init
+
+    i32.const 4096
+    i32.const 4194304
+    call $parser_parse
+    global.get $PARSER_STATUS_DONE
+    i32.const 16
+    call $assert_eq_i32
   )
 
   (func (export "test_parser_rejects_mismatched_nesting")
