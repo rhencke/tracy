@@ -59,6 +59,14 @@ function uncoveredIds(report) {
     .filter((id) => id !== -1);
 }
 
+function percent(covered, total) {
+  if (total === 0) {
+    return "100.00%";
+  }
+
+  return `${((covered / total) * 100).toFixed(2)}%`;
+}
+
 function formatBlock(manifest, blocks, id) {
   const block = blocks.get(id);
 
@@ -78,6 +86,7 @@ function formatBlock(manifest, blocks, id) {
 async function checkManifest(manifestPath) {
   const manifest = await readJson(manifestPath);
   const coveragePath = coveragePathFor(manifestPath);
+  const total = manifest.blocks?.length ?? 0;
 
   let report;
   try {
@@ -90,15 +99,23 @@ async function checkManifest(manifestPath) {
     return {
       manifestPath,
       missingCoverage: true,
+      module: manifest.module ?? manifestPath,
+      covered: 0,
+      total,
       uncovered: [],
     };
   }
 
   const blocks = blockById(manifest);
+  const uncovered = uncoveredIds(report);
+  const covered = Math.max(0, total - uncovered.length);
   return {
     manifestPath,
     missingCoverage: false,
-    uncovered: uncoveredIds(report).map((id) => formatBlock(manifest, blocks, id)),
+    module: manifest.module ?? manifestPath,
+    covered,
+    total,
+    uncovered: uncovered.map((id) => formatBlock(manifest, blocks, id)),
   };
 }
 
@@ -125,18 +142,36 @@ async function main() {
 
   const results = await Promise.all(manifests.map(checkManifest));
   let failed = false;
+  let covered = 0;
+  let total = 0;
 
   for (const result of results) {
+    covered += result.covered;
+    total += result.total;
+
     if (result.missingCoverage) {
       failed = true;
       console.error(`coverage-check: missing ${coveragePathFor(result.manifestPath)}`);
+      console.error(
+        `coverage-check: ${result.module} 0/${result.total} blocks covered (0.00%)`,
+      );
     }
 
     for (const uncovered of result.uncovered) {
       failed = true;
       console.error(`coverage-check: uncovered ${uncovered}`);
     }
+
+    if (!result.missingCoverage) {
+      console.error(
+        `coverage-check: ${result.module} ${result.covered}/${result.total} blocks covered (${percent(result.covered, result.total)})`,
+      );
+    }
   }
+
+  console.error(
+    `coverage-check: total ${covered}/${total} blocks covered (${percent(covered, total)})`,
+  );
 
   if (failed) {
     process.exitCode = 1;

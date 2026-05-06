@@ -98,6 +98,8 @@ async function assertCoverageCheckReportsUncovered(tmpDir) {
     assert(stderr.includes("wat/sample.wat:8:9"), "checker output missing source location");
     assert(stderr.includes("$branchy"), "checker output missing function name");
     assert(stderr.includes("if-else"), "checker output missing block kind");
+    assert(stderr.includes("wat/sample.wat 1/2 blocks covered (50.00%)"), "checker output missing module percentage");
+    assert(stderr.includes("total 1/2 blocks covered (50.00%)"), "checker output missing total percentage");
     return;
   }
 
