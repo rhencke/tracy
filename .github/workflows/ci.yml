@@ -135,6 +135,23 @@ jobs:
       - name: Build
         run: bash tools/build.sh
 
+      - name: Derive generated trace seed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            seed="${{ github.event.pull_request.base.sha }}"
+          else
+            seed="${{ github.event.before }}"
+          fi
+
+          if [ -z "${seed}" ] || [ "${seed}" = "0000000000000000000000000000000000000000" ]; then
+            seed="$(git rev-parse HEAD)"
+          fi
+
+          echo "TRACY_GENERATED_TRACE_SEED=${seed}" >> "$GITHUB_ENV"
+          echo "generated trace seed: ${seed}"
+
       - name: Test generated 100 MB trace extractor
         run: npm run test:generated-trace
 
