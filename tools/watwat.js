@@ -2,8 +2,11 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { pathToFileURL } = require("node:url");
 
 const testNamePattern = /^test_/;
+const wasmModulesUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
+const wasmModules = import(wasmModulesUrl);
 
 class WatwatFailure extends Error {
   constructor(code) {
@@ -158,14 +161,6 @@ function modulePathForTest(file) {
   return path.join(parsed.dir, `${parsed.name.replace(/\.test$/, "")}.wasm`);
 }
 
-function moduleImportAliases(file) {
-  const parsed = path.parse(file);
-  const name = parsed.name;
-  const parent = path.basename(parsed.dir);
-
-  return [name, `${parent}/${name}`, `wat/${parent}/${name}`];
-}
-
 function memoryMaximumPagesFor(file) {
   const constrainedSuites = new Set(["array.test.wasm", "hash.test.wasm", "pool.test.wasm"]);
 
@@ -278,15 +273,47 @@ function wasmRootFor(modulePath) {
   return path.basename(dir) === "std" ? path.dirname(dir) : dir;
 }
 
-async function instantiateDependency(moduleImports, aliases, imports, coverage, wasmPath, names) {
+function modulePathForId(rootDir, moduleId, wasmModulePath) {
+  return path.join(rootDir, wasmModulePath(moduleId));
+}
+
+async function instantiateManifestModule(
+  moduleId,
+  moduleImports,
+  aliases,
+  imports,
+  coverage,
+  rootDir,
+  manifest,
+  instantiated,
+) {
+  if (instantiated.has(moduleId)) {
+    return true;
+  }
+
+  const wasmPath = modulePathForId(rootDir, moduleId, manifest.wasmModulePath);
+
   try {
     await fs.access(wasmPath);
   } catch (error) {
     if (error.code === "ENOENT") {
-      return;
+      return false;
     }
 
     throw error;
+  }
+
+  for (const dependency of manifest.wasmModuleDependencies(moduleId)) {
+    await instantiateManifestModule(
+      dependency,
+      moduleImports,
+      aliases,
+      imports,
+      coverage,
+      rootDir,
+      manifest,
+      instantiated,
+    );
   }
 
   const bytes = await fs.readFile(wasmPath);
@@ -295,10 +322,13 @@ async function instantiateDependency(moduleImports, aliases, imports, coverage, 
     importsForModule(moduleImports, coverage, wasmPath),
   );
 
-  for (const name of names) {
-    moduleImports[name] = instance.exports;
-    aliases[name] = instance.exports;
+  for (const alias of manifest.wasmModuleAliases(moduleId)) {
+    moduleImports[alias] = instance.exports;
+    aliases[alias] = instance.exports;
   }
+
+  instantiated.add(moduleId);
+  return true;
 }
 
 async function instantiateSiblingModule(file, imports, coverage = null) {
@@ -319,101 +349,26 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
   }
 
   const rootDir = wasmRootFor(modulePath);
-  const allocPath = path.join(rootDir, "std", "alloc.wasm");
+  const manifest = await wasmModules;
+  const moduleId = manifest.wasmModuleIdForPath(modulePath);
   const moduleImports = { ...imports };
   const aliases = {};
+  const instantiated = new Set();
 
-  if (path.basename(modulePath) !== "alloc.wasm") {
-    try {
-      await fs.access(allocPath);
-      const allocBytes = await fs.readFile(allocPath);
-      const { instance } = await WebAssembly.instantiate(
-        allocBytes,
-        importsForModule(imports, coverage, allocPath),
-      );
-      moduleImports.alloc = instance.exports;
-      aliases.alloc = instance.exports;
-      aliases["std/alloc"] = instance.exports;
-      aliases["wat/std/alloc"] = instance.exports;
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        throw error;
-      }
-    }
+  if (moduleId === null) {
+    return {};
   }
 
-  const hashPath = path.join(rootDir, "std", "hash.wasm");
-
-  if (path.basename(modulePath) === "strtab.wasm") {
-    try {
-      await fs.access(hashPath);
-      const hashBytes = await fs.readFile(hashPath);
-      const { instance } = await WebAssembly.instantiate(
-        hashBytes,
-        importsForModule(moduleImports, coverage, hashPath),
-      );
-      moduleImports.hash = instance.exports;
-      aliases.hash = instance.exports;
-      aliases["std/hash"] = instance.exports;
-      aliases["wat/std/hash"] = instance.exports;
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-
-  if (path.basename(modulePath) !== "mem.wasm") {
-    await instantiateDependency(
-      moduleImports,
-      aliases,
-      imports,
-      coverage,
-      path.join(rootDir, "std", "mem.wasm"),
-      ["mem", "std/mem", "wat/std/mem"],
-    );
-  }
-
-  if (path.basename(modulePath) !== "parser_state.wasm") {
-    await instantiateDependency(
-      moduleImports,
-      aliases,
-      imports,
-      coverage,
-      path.join(rootDir, "parser_state.wasm"),
-      ["parser_state"],
-    );
-  }
-
-  if (path.basename(modulePath) === "parser.wasm") {
-    await instantiateDependency(
-      moduleImports,
-      aliases,
-      imports,
-      coverage,
-      hashPath,
-      ["hash", "std/hash", "wat/std/hash"],
-    );
-
-    await instantiateDependency(
-      moduleImports,
-      aliases,
-      imports,
-      coverage,
-      path.join(rootDir, "std", "strtab.wasm"),
-      ["strtab", "std/strtab", "wat/std/strtab"],
-    );
-  }
-
-  const bytes = await fs.readFile(modulePath);
-  const { instance } = await WebAssembly.instantiate(
-    bytes,
-    importsForModule(moduleImports, coverage, modulePath),
+  await instantiateManifestModule(
+    moduleId,
+    moduleImports,
+    aliases,
+    imports,
+    coverage,
+    rootDir,
+    manifest,
+    instantiated,
   );
-
-  for (const name of moduleImportAliases(modulePath)) {
-    aliases[name] = instance.exports;
-  }
 
   return aliases;
 }

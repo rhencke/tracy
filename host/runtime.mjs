@@ -1,4 +1,5 @@
 import { HOST_ASYNC_IMPORTS } from "./abi.mjs";
+import { instantiateWasmModule } from "./wasm-modules.mjs";
 
 const asyncHostImports = new Set(HOST_ASYNC_IMPORTS);
 
@@ -47,11 +48,8 @@ async function loadApp(memory, host) {
   }
 
   const imports = { env: { memory }, host: wrapAsyncHostImports(host) };
-  const { instance } = await WebAssembly.instantiateStreaming(
-    fetch("wasm/app.wasm"),
-    imports,
-  );
-  const { tracy_main, tracy_tick } = instance.exports;
+  const { exports } = await instantiateWasmModule("app", imports);
+  const { tracy_main, tracy_tick } = exports;
 
   tracy_main();
 
