@@ -312,6 +312,41 @@
     call $assert_eq_i32
   )
 
+  (func $count_token_kind (param $out i32) (param $count i32) (param $kind i32) (result i32)
+    (local $i i32)
+    (local $matches i32)
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $count
+        i32.ge_u
+        br_if $done
+
+        local.get $out
+        local.get $i
+        call $record_ptr
+        i32.load
+        local.get $kind
+        i32.eq
+        if
+          local.get $matches
+          i32.const 1
+          i32.add
+          local.set $matches
+        end
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    local.get $matches
+  )
+
   (func (export "test_parser_writes_fixed_token_records")
     i32.const 55296
     i32.const 120
@@ -1246,6 +1281,260 @@
     global.get $PARSER_STATUS_DONE
     i32.const 16
     call $assert_eq_i32
+  )
+
+  (func (export "test_parser_streams_64_byte_chunks_and_need_more")
+    (local $output_count i32)
+
+    i32.const 4096
+    i32.const 99
+    call $parser_state_init
+
+    i32.const 4096
+    i32.const 64
+    call $parser_parse
+    global.get $PARSER_STATUS_DONE
+    i32.const 17
+    call $assert_eq_i32
+
+    i32.const 4096
+    global.get $PARSER_STATE_FILE_OFFSET_OFFSET
+    call $field
+    i64.load
+    i64.const 141
+    i32.const 18
+    call $assert_eq_i64
+
+    i32.const 4096
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    local.tee $output_count
+    i32.const 0
+    i32.gt_u
+    i32.const 19
+    call $assert_true
+
+    i32.const 0x00500000
+    local.get $output_count
+    global.get $PARSER_JSON_TOKEN_NEED_MORE
+    call $count_token_kind
+    i32.const 2
+    i32.ge_u
+    i32.const 21
+    call $assert_true
+
+    i32.const 0x00500000
+    local.get $output_count
+    global.get $PARSER_JSON_TOKEN_STRING
+    call $count_token_kind
+    i32.const 0
+    i32.gt_u
+    i32.const 22
+    call $assert_true
+
+    i32.const 0x00500000
+    local.get $output_count
+    global.get $PARSER_JSON_TOKEN_NUMBER
+    call $count_token_kind
+    i32.const 0
+    i32.gt_u
+    i32.const 23
+    call $assert_true
+
+    i32.const 0x00500000
+    local.get $output_count
+    global.get $PARSER_JSON_TOKEN_EOF
+    call $count_token_kind
+    i32.const 1
+    i32.const 24
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_streaming_save_restore_matches_single_pass")
+    (local $status i32)
+    (local $turns i32)
+
+    i32.const 61440
+    i32.const 99
+    call $parser_state_init
+
+    i32.const 61440
+    i32.const 64
+    call $parser_parse
+    global.get $PARSER_STATUS_DONE
+    i32.const 25
+    call $assert_eq_i32
+
+    i32.const 62000
+    i32.const 99
+    call $parser_state_init
+
+    i32.const 62000
+    i32.const 64
+    i32.const 20
+    call $parser_parse_with_budget
+    global.get $PARSER_STATUS_YIELDED
+    i32.const 26
+    call $assert_eq_i32
+
+    i32.const 62512
+    call $parser_save_state
+
+    i32.const 62000
+    global.get $PARSER_STATE_FILE_OFFSET_OFFSET
+    call $field
+    i64.const 0
+    i64.store
+
+    i32.const 62000
+    global.get $PARSER_STATE_RING_READ_OFFSET
+    i32.const 0
+    call $store_i32
+
+    i32.const 62512
+    call $parser_restore_state
+
+    block $done
+      loop $resume_loop
+        i32.const 62000
+        i32.const 64
+        i32.const 20
+        call $parser_parse_with_budget
+        local.tee $status
+        global.get $PARSER_STATUS_DONE
+        i32.eq
+        if
+          br $done
+        end
+
+        local.get $status
+        global.get $PARSER_STATUS_YIELDED
+        i32.const 27
+        call $assert_eq_i32
+
+        local.get $turns
+        i32.const 1
+        i32.add
+        local.tee $turns
+        i32.const 16
+        i32.lt_u
+        i32.const 28
+        call $assert_true
+
+        br $resume_loop
+      end
+    end
+
+    i32.const 61440
+    global.get $PARSER_STATE_FILE_OFFSET_OFFSET
+    call $field
+    i64.load
+    i32.const 62000
+    global.get $PARSER_STATE_FILE_OFFSET_OFFSET
+    call $field
+    i64.load
+    i32.const 29
+    call $assert_eq_i64
+
+    i32.const 61440
+    global.get $PARSER_STATE_EVENT_COUNT_OFFSET
+    call $load_i32
+    i32.const 62000
+    global.get $PARSER_STATE_EVENT_COUNT_OFFSET
+    call $load_i32
+    i32.const 31
+    call $assert_eq_i32
+
+    i32.const 61440
+    global.get $PARSER_STATE_DEPTH_OFFSET
+    call $load_i32
+    i32.const 62000
+    global.get $PARSER_STATE_DEPTH_OFFSET
+    call $load_i32
+    i32.const 32
+    call $assert_eq_i32
+
+    ;; Yield markers are host-visible turn boundaries, not parser progress.
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    i32.const 61440
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    call $store_i32
+
+    i32.const 61440
+    i32.const 62000
+    i32.const 33
+    call $assert_state_bytes_eq
+  )
+
+  (func (export "test_parser_malformed_across_chunk_boundary_emits_error")
+    (local $output_count i32)
+
+    i32.const 8192
+    i32.const 105
+    call $parser_state_init
+
+    i32.const 8192
+    i32.const 8
+    call $parser_parse
+    global.get $PARSER_STATUS_MALFORMED
+    i32.const 34
+    call $assert_eq_i32
+
+    i32.const 8192
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    local.tee $output_count
+    i32.const 0
+    i32.gt_u
+    i32.const 35
+    call $assert_true
+
+    i32.const 0x00500000
+    local.get $output_count
+    global.get $PARSER_JSON_TOKEN_ERROR
+    call $count_token_kind
+    i32.const 1
+    i32.const 36
+    call $assert_eq_i32
+
+    i32.const 8192
+    global.get $PARSER_STATE_ERROR_LINE_OFFSET
+    call $load_i32
+    i32.const 0
+    i32.gt_u
+    i32.const 37
+    call $assert_true
+
+    i32.const 8192
+    global.get $PARSER_STATE_ERROR_COLUMN_OFFSET
+    call $load_i32
+    i32.const 0
+    i32.gt_u
+    i32.const 38
+    call $assert_true
   )
 
   (func (export "test_parser_rejects_mismatched_nesting")
