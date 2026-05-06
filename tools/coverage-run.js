@@ -38,6 +38,27 @@ async function findManifests(root) {
   return manifests;
 }
 
+async function findTestWasms(root) {
+  const tests = [];
+
+  async function walk(dir) {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith(".test.wasm")) {
+        tests.push(entryPath);
+      }
+    }
+  }
+
+  await walk(root);
+  tests.sort();
+  return tests;
+}
+
 function coveragePathFor(manifestPath) {
   return path.join(
     path.dirname(manifestPath),
@@ -104,13 +125,15 @@ function expectedFailureRunsFor(manifestPath, testPath) {
   ]);
 }
 
-async function runManifest(manifestPath) {
+async function runManifest(manifestPath, testPaths) {
   const manifest = await readJson(manifestPath);
   const testPath = testPathFor(manifestPath);
   await accessOrThrow(testPath, "coverage test wasm missing");
 
   const hits = new Array(manifest.blocks?.length ?? 0).fill(0);
-  mergeHits(hits, await runWithCoverage(manifestPath, [testPath]));
+  for (const suiteTestPath of testPaths) {
+    mergeHits(hits, await runWithCoverage(manifestPath, [suiteTestPath]));
+  }
 
   for (const args of expectedFailureRunsFor(manifestPath, testPath)) {
     mergeHits(hits, await runWithCoverage(manifestPath, args));
@@ -148,13 +171,18 @@ async function main() {
   }
 
   const manifests = await findManifests(root);
+  const testPaths = await findTestWasms(root);
 
   if (manifests.length === 0) {
     throw new Error(`no coverage manifests found in ${root}`);
   }
 
+  if (testPaths.length === 0) {
+    throw new Error(`no coverage test wasm files found in ${root}`);
+  }
+
   for (const manifestPath of manifests) {
-    await runManifest(manifestPath);
+    await runManifest(manifestPath, testPaths);
   }
 
   if (check) {

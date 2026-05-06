@@ -96,9 +96,11 @@ function coverageOutputPath(manifestPath) {
 function createCoverageContext(manifest) {
   const blockCount = Array.isArray(manifest.blocks) ? manifest.blocks.length : 0;
   const counters = new Uint8Array(blockCount);
+  const moduleBase = path.basename(manifest.module ?? "", ".wat");
 
   return {
     counters,
+    moduleBase,
     imports: {
       hit(id) {
         if (!Number.isInteger(id) || id < 0 || id >= counters.length) {
@@ -177,7 +179,17 @@ function dependencyImportsFor(imports) {
   };
 }
 
-async function instantiateSiblingModule(file, imports) {
+function importsForModule(imports, coverage, modulePath) {
+  if (coverage === null || imports.cov === undefined) {
+    return imports;
+  }
+
+  return path.basename(modulePath, ".wasm") === coverage.moduleBase
+    ? imports
+    : dependencyImportsFor(imports);
+}
+
+async function instantiateSiblingModule(file, imports, coverage = null) {
   const modulePath = modulePathForTest(file);
 
   if (modulePath === null) {
@@ -196,14 +208,16 @@ async function instantiateSiblingModule(file, imports) {
 
   const allocPath = path.join(path.dirname(modulePath), "alloc.wasm");
   const moduleImports = { ...imports };
-  const dependencyImports = dependencyImportsFor(imports);
   const aliases = {};
 
   if (path.basename(modulePath) !== "alloc.wasm") {
     try {
       await fs.access(allocPath);
       const allocBytes = await fs.readFile(allocPath);
-      const { instance } = await WebAssembly.instantiate(allocBytes, dependencyImports);
+      const { instance } = await WebAssembly.instantiate(
+        allocBytes,
+        importsForModule(imports, coverage, allocPath),
+      );
       moduleImports.alloc = instance.exports;
       aliases.alloc = instance.exports;
       aliases["std/alloc"] = instance.exports;
@@ -221,10 +235,10 @@ async function instantiateSiblingModule(file, imports) {
     try {
       await fs.access(hashPath);
       const hashBytes = await fs.readFile(hashPath);
-      const { instance } = await WebAssembly.instantiate(hashBytes, {
-        ...moduleImports,
-        cov: dependencyImports.cov,
-      });
+      const { instance } = await WebAssembly.instantiate(
+        hashBytes,
+        importsForModule(moduleImports, coverage, hashPath),
+      );
       moduleImports.hash = instance.exports;
       aliases.hash = instance.exports;
       aliases["std/hash"] = instance.exports;
@@ -237,7 +251,10 @@ async function instantiateSiblingModule(file, imports) {
   }
 
   const bytes = await fs.readFile(modulePath);
-  const { instance } = await WebAssembly.instantiate(bytes, moduleImports);
+  const { instance } = await WebAssembly.instantiate(
+    bytes,
+    importsForModule(moduleImports, coverage, modulePath),
+  );
 
   for (const name of moduleImportAliases(modulePath)) {
     aliases[name] = instance.exports;
@@ -263,7 +280,7 @@ async function instantiateTestModule(file, assertPath, coverage = null) {
   if (coverage !== null) {
     imports.cov = coverage.imports;
   }
-  Object.assign(imports, await instantiateSiblingModule(file, imports));
+  Object.assign(imports, await instantiateSiblingModule(file, imports, coverage));
 
   const bytes = await fs.readFile(file);
   const { instance } = await WebAssembly.instantiate(bytes, imports);

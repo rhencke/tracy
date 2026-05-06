@@ -521,6 +521,12 @@ async function parseBranchOperands(reader, writer, opcode) {
   }
 }
 
+async function hasPostBranchInstruction(reader) {
+  const token = await reader.peek();
+
+  return token.type !== ")" && !(token.type === "atom" && controlBoundaryAtoms.has(token.value));
+}
+
 async function parseSequence(reader, writer, state, context) {
   while ((await reader.peek()).type !== ")") {
     const token = await reader.peek();
@@ -543,10 +549,12 @@ async function parseSequence(reader, writer, state, context) {
       const item = await reader.next();
       await writer.token(item);
       await parseBranchOperands(reader, writer, item.value);
-      await streamCounter(writer, state, context.func, "post-branch", item);
+      if (await hasPostBranchInstruction(reader)) {
+        await streamCounter(writer, state, context.func, "post-branch", item);
+      }
     } else {
       const head = await parseAny(reader, writer, state, context);
-      if (context.func !== null && branchOpcodes.has(head)) {
+      if (context.func !== null && branchOpcodes.has(head) && (await hasPostBranchInstruction(reader))) {
         await streamCounter(writer, state, context.func, "post-branch", token);
       }
     }
