@@ -248,7 +248,26 @@ function createHostImports(memory) {
     opfs_index_open() {
       return 22;
     },
-    opfs_index_read() {
+    opfs_index_read(indexId, offset, len, dest) {
+      if (indexId === 113) {
+        return -1;
+      }
+
+      if (indexId === 114) {
+        new Uint8Array(memory.buffer, dest, len).fill(0);
+        return len;
+      }
+
+      if (indexId === 21 && Number(offset) === 0) {
+        const source = 65536;
+        const sourceEnd = source + len;
+        const destEnd = dest + len;
+
+        if (sourceEnd <= memory.buffer.byteLength && destEnd <= memory.buffer.byteLength) {
+          new Uint8Array(memory.buffer, dest, len).set(new Uint8Array(memory.buffer, source, len));
+        }
+      }
+
       return 65536;
     },
     opfs_index_write(indexId) {

@@ -24,6 +24,11 @@
   (import "index" "INDEX_WRITER_STATUS_NOT_INITIALIZED" (global $INDEX_WRITER_STATUS_NOT_INITIALIZED i32))
   (import "index" "INDEX_WRITER_STATUS_HOST_WRITE_FAILED" (global $INDEX_WRITER_STATUS_HOST_WRITE_FAILED i32))
   (import "index" "INDEX_WRITER_STATUS_HOST_FLUSH_FAILED" (global $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED i32))
+  (import "index" "INDEX_READER_STATUS_OK" (global $INDEX_READER_STATUS_OK i32))
+  (import "index" "INDEX_READER_STATUS_NOT_INITIALIZED" (global $INDEX_READER_STATUS_NOT_INITIALIZED i32))
+  (import "index" "INDEX_READER_STATUS_MISSING_PAGE" (global $INDEX_READER_STATUS_MISSING_PAGE i32))
+  (import "index" "INDEX_READER_STATUS_CORRUPT_PAGE" (global $INDEX_READER_STATUS_CORRUPT_PAGE i32))
+  (import "index" "INDEX_READER_STATUS_LEVEL_MISMATCH" (global $INDEX_READER_STATUS_LEVEL_MISMATCH i32))
   (import "index" "INDEX_WRITER_ROWS_PER_PAGE" (global $INDEX_WRITER_ROWS_PER_PAGE i32))
   (import "index" "INDEX_RAW_COLUMN_TRACK_ID" (global $INDEX_RAW_COLUMN_TRACK_ID i32))
   (import "index" "INDEX_RAW_COLUMN_TS_DELTA" (global $INDEX_RAW_COLUMN_TS_DELTA i32))
@@ -60,6 +65,17 @@
     (func $index_writer_committed_events (result i32)))
   (import "index" "index_writer_next_page_id"
     (func $index_writer_next_page_id (result i32)))
+  (import "index" "index_reader_init"
+    (func $index_reader_init (param i32)))
+  (import "index" "read_page"
+    (func $read_page (param i32 i32) (result i32)))
+  (import "index" "index_reader_status"
+    (func $index_reader_status (result i32)))
+  (import "index" "index_reader_cache_hit"
+    (func $index_reader_cache_hit (result i32)))
+  (import "index" "index_reader_cached_page_id"
+    (func $index_reader_cached_page_id (result i32)))
+  (import "mem" "MEM_INDEX_CACHE_BASE" (global $MEM_INDEX_CACHE_BASE i32))
 
   (global $PAGE i32 (i32.const 0))
   (global $ALT_PAGE i32 (i32.const 65536))
@@ -244,7 +260,7 @@
         i32.ge_u
         br_if $done
 
-        global.get $PAGE
+        global.get $ALT_PAGE
         local.get $i
         i32.add
         global.get $PAGE
@@ -259,6 +275,30 @@
         local.set $i
         br $loop
       end
+    end
+  )
+
+  (func $grow_to_index_cache
+    (local $needed i32)
+
+    global.get $MEM_INDEX_CACHE_BASE
+    global.get $PAGE_BYTES
+    i32.add
+    i32.const 65535
+    i32.add
+    i32.const 16
+    i32.shr_u
+    local.set $needed
+
+    local.get $needed
+    memory.size
+    i32.gt_u
+    if
+      local.get $needed
+      memory.size
+      i32.sub
+      memory.grow
+      drop
     end
   )
 
@@ -1210,6 +1250,204 @@
     i32.load
     i32.const 0
     i32.const 72
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_loads_miss_and_hits_cache")
+    (local $page i32)
+    (local $ptr i32)
+    (local $len i32)
+    (local $encoding i32)
+    (local $rows i32)
+
+    call $grow_to_index_cache
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 6
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 1234
+    f64.const 1000
+    f64.const 25
+    i32.const 7
+    i32.const 9
+    i32.const 12
+    call $write_event
+
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 73
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 74
+    call $assert_eq_i32
+
+    i32.const 21
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    local.tee $page
+    global.get $MEM_INDEX_CACHE_BASE
+    i32.const 75
+    call $assert_eq_i32
+
+    call $index_reader_status
+    global.get $INDEX_READER_STATUS_OK
+    i32.const 76
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 0
+    i32.const 77
+    call $assert_eq_i32
+
+    call $index_reader_cached_page_id
+    i32.const 0
+    i32.const 78
+    call $assert_eq_i32
+
+    local.get $page
+    global.get $PAGE_BYTES
+    call $index_validate_page
+    global.get $INDEX_STATUS_OK
+    i32.const 79
+    call $assert_eq_i32
+
+    local.get $page
+    global.get $INDEX_RAW_COLUMN_NAME_ID
+    call $index_column_span
+    local.set $rows
+    local.set $encoding
+    local.set $len
+    local.set $ptr
+
+    local.get $ptr
+    i32.load
+    i32.const 1234
+    i32.const 80
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    global.get $MEM_INDEX_CACHE_BASE
+    i32.const 81
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 1
+    i32.const 82
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_reports_not_initialized")
+    i32.const 0
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    i32.const 0
+    i32.const 83
+    call $assert_eq_i32
+
+    call $index_reader_status
+    global.get $INDEX_READER_STATUS_NOT_INITIALIZED
+    i32.const 84
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 0
+    i32.const 85
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_reports_missing_page")
+    call $grow_to_index_cache
+
+    i32.const 113
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    i32.const 0
+    i32.const 86
+    call $assert_eq_i32
+
+    call $index_reader_status
+    global.get $INDEX_READER_STATUS_MISSING_PAGE
+    i32.const 87
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_reports_corrupt_page")
+    call $grow_to_index_cache
+
+    i32.const 114
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    i32.const 0
+    i32.const 88
+    call $assert_eq_i32
+
+    call $index_reader_status
+    global.get $INDEX_READER_STATUS_CORRUPT_PAGE
+    i32.const 89
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_reports_level_mismatch")
+    call $grow_to_index_cache
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 7
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 20
+    f64.const 1000
+    f64.const 1
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 90
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 91
+    call $assert_eq_i32
+
+    i32.const 21
+    call $index_reader_init
+
+    i32.const 1
+    i32.const 0
+    call $read_page
+    i32.const 0
+    i32.const 92
+    call $assert_eq_i32
+
+    call $index_reader_status
+    global.get $INDEX_READER_STATUS_LEVEL_MISMATCH
+    i32.const 93
     call $assert_eq_i32
   )
 )

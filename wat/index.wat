@@ -1,7 +1,9 @@
 (module
   (import "env" "memory" (memory $memory 1 32768))
+  (import "host" "opfs_index_read" (func $opfs_index_read (param i32 i64 i32 i32) (result i32)))
   (import "host" "opfs_index_write" (func $opfs_index_write (param i32 i64 i32 i32) (result i32)))
   (import "host" "opfs_index_flush" (func $opfs_index_flush (param i32) (result i32)))
+  (import "mem" "MEM_INDEX_CACHE_BASE" (global $MEM_INDEX_CACHE_BASE i32))
   (import "mem" "OPFS_PAGE_SIZE" (global $OPFS_PAGE_SIZE i32))
 
   (global $INDEX_PAGE_MAGIC_TRCI (export "INDEX_PAGE_MAGIC_TRCI") i32 (i32.const 0x49435254))
@@ -29,6 +31,12 @@
   (global $INDEX_WRITER_STATUS_NOT_INITIALIZED (export "INDEX_WRITER_STATUS_NOT_INITIALIZED") i32 (i32.const 20))
   (global $INDEX_WRITER_STATUS_HOST_WRITE_FAILED (export "INDEX_WRITER_STATUS_HOST_WRITE_FAILED") i32 (i32.const 21))
   (global $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED (export "INDEX_WRITER_STATUS_HOST_FLUSH_FAILED") i32 (i32.const 22))
+
+  (global $INDEX_READER_STATUS_OK (export "INDEX_READER_STATUS_OK") i32 (i32.const 0))
+  (global $INDEX_READER_STATUS_NOT_INITIALIZED (export "INDEX_READER_STATUS_NOT_INITIALIZED") i32 (i32.const 30))
+  (global $INDEX_READER_STATUS_MISSING_PAGE (export "INDEX_READER_STATUS_MISSING_PAGE") i32 (i32.const 31))
+  (global $INDEX_READER_STATUS_CORRUPT_PAGE (export "INDEX_READER_STATUS_CORRUPT_PAGE") i32 (i32.const 32))
+  (global $INDEX_READER_STATUS_LEVEL_MISMATCH (export "INDEX_READER_STATUS_LEVEL_MISMATCH") i32 (i32.const 33))
 
   (global $INDEX_RAW_COLUMN_TRACK_ID (export "INDEX_RAW_COLUMN_TRACK_ID") i32 (i32.const 1))
   (global $INDEX_RAW_COLUMN_TS_DELTA (export "INDEX_RAW_COLUMN_TS_DELTA") i32 (i32.const 2))
@@ -62,6 +70,12 @@
   (global $index_writer_previous_page_id (mut i32) (i32.const -1))
   (global $index_writer_commit_sequence (mut i32) (i32.const 0))
   (global $index_writer_bucket_start (mut i32) (i32.const 0))
+
+  (global $index_reader_file (mut i32) (i32.const 0))
+  (global $index_reader_cached_level (mut i32) (i32.const -1))
+  (global $index_reader_cached_page_id (mut i32) (i32.const -1))
+  (global $index_reader_last_status (mut i32) (i32.const 0))
+  (global $index_reader_last_hit (mut i32) (i32.const 0))
 
   (func $load_payload_len (param $page i32) (result i32)
     local.get $page
@@ -854,6 +868,126 @@
 
   (func (export "index_writer_next_page_id") (result i32)
     global.get $index_writer_next_page_id
+  )
+
+  (func $index_reader_clear_cache
+    i32.const -1
+    global.set $index_reader_cached_level
+    i32.const -1
+    global.set $index_reader_cached_page_id
+    i32.const 0
+    global.set $index_reader_last_hit
+  )
+
+  (func (export "index_reader_init") (param $index_file i32)
+    local.get $index_file
+    global.set $index_reader_file
+    global.get $INDEX_READER_STATUS_OK
+    global.set $index_reader_last_status
+    call $index_reader_clear_cache
+  )
+
+  (func (export "read_page") (param $level i32) (param $page_id i32) (result i32)
+    (local $read_bytes i32)
+    (local $status i32)
+
+    global.get $index_reader_file
+    i32.eqz
+    if
+      global.get $INDEX_READER_STATUS_NOT_INITIALIZED
+      global.set $index_reader_last_status
+      call $index_reader_clear_cache
+      i32.const 0
+      return
+    end
+
+    local.get $level
+    global.get $index_reader_cached_level
+    i32.eq
+    local.get $page_id
+    global.get $index_reader_cached_page_id
+    i32.eq
+    i32.and
+    if
+      global.get $INDEX_READER_STATUS_OK
+      global.set $index_reader_last_status
+      i32.const 1
+      global.set $index_reader_last_hit
+      global.get $MEM_INDEX_CACHE_BASE
+      return
+    end
+
+    i32.const 0
+    global.set $index_reader_last_hit
+
+    global.get $index_reader_file
+    local.get $page_id
+    i64.extend_i32_u
+    i64.const 65536
+    i64.mul
+    global.get $OPFS_PAGE_SIZE
+    global.get $MEM_INDEX_CACHE_BASE
+    call $opfs_index_read
+    local.set $read_bytes
+
+    local.get $read_bytes
+    global.get $OPFS_PAGE_SIZE
+    i32.ne
+    if
+      global.get $INDEX_READER_STATUS_MISSING_PAGE
+      global.set $index_reader_last_status
+      call $index_reader_clear_cache
+      i32.const 0
+      return
+    end
+
+    global.get $MEM_INDEX_CACHE_BASE
+    global.get $OPFS_PAGE_SIZE
+    call $index_validate_page
+    local.tee $status
+    global.get $INDEX_STATUS_OK
+    i32.ne
+    if
+      global.get $INDEX_READER_STATUS_CORRUPT_PAGE
+      global.set $index_reader_last_status
+      call $index_reader_clear_cache
+      i32.const 0
+      return
+    end
+
+    global.get $MEM_INDEX_CACHE_BASE
+    i32.const 8
+    i32.add
+    i32.load
+    local.get $level
+    i32.ne
+    if
+      global.get $INDEX_READER_STATUS_LEVEL_MISMATCH
+      global.set $index_reader_last_status
+      call $index_reader_clear_cache
+      i32.const 0
+      return
+    end
+
+    local.get $level
+    global.set $index_reader_cached_level
+    local.get $page_id
+    global.set $index_reader_cached_page_id
+    global.get $INDEX_READER_STATUS_OK
+    global.set $index_reader_last_status
+    global.get $MEM_INDEX_CACHE_BASE
+  )
+
+  (func (export "index_reader_status") (result i32)
+    global.get $index_reader_last_status
+  )
+
+  (func (export "index_reader_cache_hit") (result i32)
+    global.get $index_reader_last_hit
+  )
+
+  (func (export "index_reader_cached_page_id") (result i32)
+    global.get $index_reader_cached_page_id
   )
 
   (func $index_column_span (export "index_column_span") (param $page i32) (param $column_id i32) (result i32 i32 i32 i32)
