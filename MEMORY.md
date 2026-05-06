@@ -483,7 +483,7 @@ the record; every location is an offset, id, enum, count, or inline byte span
 that remains meaningful after reload.
 
 The parser state format is versioned by `PARSER_STATE_MAGIC` (`TRPJ`) and
-`PARSER_STATE_VERSION` (`1`).  A parser must reject resume records whose magic
+`PARSER_STATE_VERSION` (`2`).  A parser must reject resume records whose magic
 or version do not match, and return `PARSER_STATUS_STATE_INVALID` rather than
 guessing how to interpret old bytes.
 
@@ -497,7 +497,7 @@ the page.
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 4 | Magic `TRPJ` as little-endian `0x5452504A`. |
-| 4 | 4 | Format version, currently `1`. |
+| 4 | 4 | Format version, currently `2`. |
 | 8 | 4 | Parser status enum. |
 | 12 | 4 | Yield budget in milliseconds. |
 | 16 | 4 | Opaque OPFS source id from the host shim. |
@@ -516,11 +516,21 @@ the page.
 | 72 | 4 | Current Chrome trace event field enum. |
 | 76 | 4 | Bitmask of fields already seen in the current event. |
 | 80 | 4 | Current object key hash. |
-| 84 | 4 | Reserved, zero for v0.1. |
+| 84 | 4 | Tokenizer DFA state enum. |
 | 88 | 8 | Count of complete trace events emitted so far. |
 | 96 | 64 | Inline stack bytes, one enum byte per JSON container. |
 | 160 | 256 | Inline partial-token byte buffer. |
-| 416 | 96 | Reserved, zero for v0.1. |
+| 416 | 4 | Token output record capacity advertised by the caller for this turn. |
+| 420 | 4 | Next token output record index relative to the current output buffer. |
+| 424 | 4 | Next token output byte offset relative to the current output buffer base. |
+| 428 | 4 | Number of complete token records emitted in the current output buffer. |
+| 432 | 4 | One-based source line for the next byte to tokenize. |
+| 436 | 4 | One-based source column for the next byte to tokenize. |
+| 440 | 4 | One-based source line recorded for the last tokenizer error. |
+| 444 | 4 | One-based source column recorded for the last tokenizer error. |
+| 448 | 4 | Ring-relative offset where the current token payload started, or zero. |
+| 456 | 8 | Absolute file byte offset where the current token payload started. |
+| 464 | 48 | Reserved, zero for v0.1. |
 
 The inline stack capacity is `PARSER_STACK_CAP = 64`.  Stack entries are
 `PARSER_STACK_ARRAY = 1` or `PARSER_STACK_OBJECT = 2`; unused bytes are zero.
@@ -533,6 +543,12 @@ bytes, escaped string substates, number text, and literal text.  A token that
 cannot fit in the buffer must be rejected or routed through a later explicit
 large-token path; the resume record must never contain a borrowed pointer into
 the ring.
+
+Tokenizer output records are fixed-width `PARSER_TOKEN_RECORD_BYTES = 12`
+byte records: token kind, payload pointer, and payload length.  The resume
+record stores output cursors as offsets, record counts, and capacities; it
+never stores the caller's output buffer pointer, so crash recovery does not
+depend on a stale borrowed pointer.
 
 ### Parser status and field enums
 
@@ -551,6 +567,32 @@ Partial token kinds are:
 - `PARSER_TOKEN_STRING = 1`: A string token crosses a chunk or yield boundary.
 - `PARSER_TOKEN_NUMBER = 2`: A number token crosses a chunk or yield boundary.
 - `PARSER_TOKEN_LITERAL = 3`: A literal token crosses a chunk or yield boundary.
+
+Tokenizer DFA states are:
+
+- `PARSER_DFA_DEFAULT = 0`: Tokenizer is between JSON tokens.
+- `PARSER_DFA_STRING = 1`: Tokenizer is inside a JSON string.
+- `PARSER_DFA_STRING_ESCAPE = 2`: Tokenizer is processing a JSON string escape.
+- `PARSER_DFA_NUMBER = 3`: Tokenizer is scanning a JSON number.
+- `PARSER_DFA_KEYWORD = 4`: Tokenizer is scanning true, false, or null.
+
+Tokenizer output token kinds are:
+
+- `PARSER_JSON_TOKEN_LBRACE = 1`: JSON `{` token.
+- `PARSER_JSON_TOKEN_RBRACE = 2`: JSON `}` token.
+- `PARSER_JSON_TOKEN_LBRACK = 3`: JSON `[` token.
+- `PARSER_JSON_TOKEN_RBRACK = 4`: JSON `]` token.
+- `PARSER_JSON_TOKEN_COLON = 5`: JSON `:` token.
+- `PARSER_JSON_TOKEN_COMMA = 6`: JSON `,` token.
+- `PARSER_JSON_TOKEN_STRING = 7`: JSON string token.
+- `PARSER_JSON_TOKEN_NUMBER = 8`: JSON number token.
+- `PARSER_JSON_TOKEN_TRUE = 9`: JSON `true` token.
+- `PARSER_JSON_TOKEN_FALSE = 10`: JSON `false` token.
+- `PARSER_JSON_TOKEN_NULL = 11`: JSON `null` token.
+- `PARSER_JSON_TOKEN_EOF = 12`: Tokenizer reached a valid end of file.
+- `PARSER_JSON_TOKEN_NEED_MORE = 13`: Tokenizer needs another OPFS chunk before it can continue.
+- `PARSER_JSON_TOKEN_YIELD = 14`: Tokenizer yielded cooperatively to the host.
+- `PARSER_JSON_TOKEN_ERROR = 15`: Tokenizer detected malformed JSON and recorded line and column.
 
 Stack entry kinds are:
 
