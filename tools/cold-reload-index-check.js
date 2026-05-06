@@ -294,12 +294,12 @@ async function instantiateModules(trace, indexBytes) {
   };
 }
 
-function readI32(memory, ptr) {
-  return new DataView(memory.buffer).getInt32(ptr, true);
+function readI32(view, ptr) {
+  return view.getInt32(ptr, true);
 }
 
-function readU32(memory, ptr) {
-  return new DataView(memory.buffer).getUint32(ptr, true);
+function readU32(view, ptr) {
+  return view.getUint32(ptr, true);
 }
 
 function expectEq(actual, expected, label) {
@@ -316,7 +316,7 @@ function expectJsonEq(actual, expected, label) {
   }
 }
 
-function queryRows(index, memory, trackId, tsMin, tsMax) {
+function queryRows(index, view, trackId, tsMin, tsMax) {
   const count = index.index_query_range(trackId, tsMin, tsMax, queryOutPtr);
   expectEq(
     index.index_reader_status(),
@@ -329,19 +329,19 @@ function queryRows(index, memory, trackId, tsMin, tsMax) {
   for (let i = 0; i < count; i += 1) {
     const ptr = queryOutPtr + i * rowBytes;
     rows.push({
-      start: readU32(memory, ptr),
-      dur: readU32(memory, ptr + 4),
-      name: readU32(memory, ptr + 8),
-      depth: readU32(memory, ptr + 12),
-      cat: readU32(memory, ptr + 16),
-      color: readU32(memory, ptr + 20),
+      start: readU32(view, ptr),
+      dur: readU32(view, ptr + 4),
+      name: readU32(view, ptr + 8),
+      depth: readU32(view, ptr + 12),
+      cat: readU32(view, ptr + 16),
+      color: readU32(view, ptr + 20),
     });
   }
 
   return rows;
 }
 
-function rebuildSliceCatalog(index, memory, pages) {
+function rebuildSliceCatalog(index, view, pages) {
   index.index_page_catalog_reset();
   for (let pageId = 0; pageId < pages; pageId += 1) {
     const page = index.read_page(0, pageId);
@@ -356,7 +356,7 @@ function rebuildSliceCatalog(index, memory, pages) {
       `catalog page ${pageId} validates`,
     );
 
-    const hints = readU32(memory, page + 36);
+    const hints = readU32(view, page + 36);
     if ((hints & globalValue(index.INDEX_DECODE_HINT_COMPACT_SLICES)) === 0) {
       continue;
     }
@@ -364,9 +364,9 @@ function rebuildSliceCatalog(index, memory, pages) {
     index.index_page_catalog_add_slice_page(
       hints >>> 8,
       pageId,
-      readU32(memory, page + 12),
-      readU32(memory, page + 20),
-      readU32(memory, page + 28),
+      readU32(view, page + 12),
+      readU32(view, page + 20),
+      readU32(view, page + 28),
     );
   }
 }
@@ -398,6 +398,7 @@ async function main() {
   const { trace, count: generatedCount, sliceCount } = buildTrace();
   let indexBytes = Buffer.alloc(0);
   const ingest = await instantiateModules(trace, indexBytes);
+  const ingestView = new DataView(ingest.memory.buffer);
 
   ingest.parserState.parser_state_init(statePtr, sourceId);
   const status = ingest.parser.parser_tokenize_bytes(
@@ -441,7 +442,7 @@ async function main() {
 
   expectEq(ingest.index.index_reader_configure_cache(2), 2, "warm reader cache slots");
   ingest.index.index_reader_init(indexId);
-  const warmRows = queryRows(ingest.index, ingest.memory, 0, 0, 50);
+  const warmRows = queryRows(ingest.index, ingestView, 0, 0, 50);
   expectEq(warmRows.length, 3, "warm known query row count");
   expectJsonEq(
     warmRows.map(({ start, dur, depth }) => ({ start, dur, depth })),
@@ -454,7 +455,7 @@ async function main() {
   );
 
   const parserCount = readI32(
-    ingest.memory,
+    ingestView,
     statePtr + globalValue(ingest.parserState.PARSER_STATE_EVENT_COUNT_OFFSET),
   );
   expectEq(parserCount, generatedCount, "parser event count");
@@ -475,22 +476,23 @@ async function main() {
 
   const reloadStart = process.hrtime.bigint();
   const cold = await instantiateModules(Buffer.alloc(0), indexBytes);
+  const coldView = new DataView(cold.memory.buffer);
   const readsBeforeReload = cold.sourceReads();
 
   expectEq(cold.index.index_reader_configure_cache(2), 2, "reader cache slots");
   cold.index.index_reader_init(indexId);
-  rebuildSliceCatalog(cold.index, cold.memory, pages);
+  rebuildSliceCatalog(cold.index, coldView, pages);
   expectEq(cold.index.index_slice_page_count(), pages, "cold slice page catalog count");
   cold.index.index_reader_init(indexId);
 
-  const coldRows = queryRows(cold.index, cold.memory, 0, 0, 50);
+  const coldRows = queryRows(cold.index, coldView, 0, 0, 50);
   expectJsonEq(coldRows, warmRows, "cold query parity");
   if (cold.index.index_reader_cache_misses() === 0) {
     throw new Error("cold query did not fault any pages");
   }
 
   const hitsBeforeRepeat = cold.index.index_reader_cache_hits();
-  expectJsonEq(queryRows(cold.index, cold.memory, 0, 0, 50), warmRows, "warm cache query parity");
+  expectJsonEq(queryRows(cold.index, coldView, 0, 0, 50), warmRows, "warm cache query parity");
   if (cold.index.index_reader_cache_hits() <= hitsBeforeRepeat) {
     throw new Error("repeated query did not hit the page cache");
   }
