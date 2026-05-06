@@ -247,9 +247,13 @@
     (local $keys_ptr i32)
     (local $values_ptr i32)
     (local $states_ptr i32)
+    (local $slots_bytes i32)
 
     local.get $cap
     i32.const 2
+    i32.shl
+    local.tee $slots_bytes
+    i32.const 1
     i32.shl
     call $alloc
     local.tee $keys_ptr
@@ -259,16 +263,10 @@
       return
     end
 
-    local.get $cap
-    i32.const 2
-    i32.shl
-    call $alloc
-    local.tee $values_ptr
-    i32.eqz
-    if
-      i32.const 0
-      return
-    end
+    local.get $keys_ptr
+    local.get $slots_bytes
+    i32.add
+    local.set $values_ptr
 
     local.get $cap
     call $alloc

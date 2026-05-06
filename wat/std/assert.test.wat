@@ -94,6 +94,15 @@
     call $assert_eq_str
   )
 
+  (func (export "probe_assert_eq_str_value_failure")
+    i32.const 2048
+    i32.const 5
+    i32.const 2080
+    i32.const 5
+    i32.const 14
+    call $assert_eq_str
+  )
+
   (func (export "probe_assert_true_failure")
     i32.const 0
     i32.const 12

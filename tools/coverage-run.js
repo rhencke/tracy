@@ -9,6 +9,7 @@ const assertFailureProbes = [
   ["probe_assert_eq_i64_failure", "assert test failed"],
   ["probe_assert_eq_f64_failure", "assert test failed"],
   ["probe_assert_eq_str_length_failure", "assert test failed"],
+  ["probe_assert_eq_str_value_failure", "assert test failed"],
   ["probe_assert_true_failure", "assert test failed"],
   ["probe_assert_false_failure", "assert test failed"],
 ];
