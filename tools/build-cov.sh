@@ -28,7 +28,11 @@ if [ -d "${WAT_DIR}" ]; then
     cov_wasm_path="${cov_wat_path%.wat}.wasm"
 
     mkdir -p "$(dirname "${cov_wat_path}")"
-    node "${ROOT_DIR}/tools/instrument.js" "${wat_file}" "${cov_wat_path}" "${cov_manifest_path}"
+    if [ "${rel_path}" = "watwat.cov.test.wat" ]; then
+      cp "${wat_file}" "${cov_wat_path}"
+    else
+      node "${ROOT_DIR}/tools/instrument.js" "${wat_file}" "${cov_wat_path}" "${cov_manifest_path}"
+    fi
     wat2wasm "${cov_wat_path}" -o "${cov_wasm_path}"
   done < <(find "${WAT_DIR}" -type f -name '*.wat' -print0 | sort -z)
 fi

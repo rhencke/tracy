@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "build": "bash tools/build.sh",
-    "test": "npm run test:wat && npm run test:watwat-probe",
+    "test": "npm run test:wat && npm run test:watwat-probe && npm run test:coverage-selftest",
     "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
-    "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm"
+    "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
+    "test:coverage-selftest": "node tools/coverage-selftest.js"
   },
   "devDependencies": {
     "esbuild": "0.25.3"
