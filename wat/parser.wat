@@ -117,6 +117,203 @@
     local.get $status
   )
 
+  (func $require_valid_state (param $state i32) (result i32)
+    local.get $state
+    call $parser_state_is_valid
+    if (result i32)
+      i32.const 1
+    else
+      local.get $state
+      global.get $PARSER_STATUS_STATE_INVALID
+      call $set_status
+      drop
+      i32.const 0
+    end
+  )
+
+  (func $token_record_ptr (param $out_ptr i32) (param $record_index i32) (result i32)
+    local.get $out_ptr
+    local.get $record_index
+    global.get $PARSER_TOKEN_RECORD_BYTES
+    i32.mul
+    i32.add
+  )
+
+  (func $reset_token_output (param $state i32) (param $record_cap i32)
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
+    local.get $record_cap
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    i32.const 0
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    i32.const 0
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    i32.const 0
+    call $store_i32
+  )
+
+  (func $emit_token_record (param $state i32) (param $out_ptr i32) (param $kind i32) (param $payload_ptr i32) (param $payload_len i32) (result i32)
+    (local $record_index i32)
+    (local $record_ptr i32)
+    (local $next_record i32)
+
+    local.get $state
+    call $require_valid_state
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    call $load_i32
+    local.tee $record_index
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
+    call $load_i32
+    i32.ge_u
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $out_ptr
+    local.get $record_index
+    call $token_record_ptr
+    local.tee $record_ptr
+    local.get $kind
+    i32.store
+
+    local.get $record_ptr
+    i32.const 4
+    i32.add
+    local.get $payload_ptr
+    i32.store
+
+    local.get $record_ptr
+    i32.const 8
+    i32.add
+    local.get $payload_len
+    i32.store
+
+    local.get $record_index
+    i32.const 1
+    i32.add
+    local.set $next_record
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    local.get $next_record
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    local.get $next_record
+    global.get $PARSER_TOKEN_RECORD_BYTES
+    i32.mul
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    local.get $state
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    i32.const 1
+    i32.add
+    call $store_i32
+
+    i32.const 1
+  )
+
+  (func (export "parser_token_output_reset") (param $state i32) (param $record_cap i32) (result i32)
+    local.get $state
+    call $require_valid_state
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $state
+    local.get $record_cap
+    call $reset_token_output
+    i32.const 1
+  )
+
+  (func (export "parser_emit_token") (param $state i32) (param $out_ptr i32) (param $kind i32) (param $payload_ptr i32) (param $payload_len i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    local.get $kind
+    local.get $payload_ptr
+    local.get $payload_len
+    call $emit_token_record
+  )
+
+  (func (export "parser_emit_structural_token") (param $state i32) (param $out_ptr i32) (param $kind i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    local.get $kind
+    i32.const 0
+    i32.const 0
+    call $emit_token_record
+  )
+
+  (func (export "parser_emit_eof_token") (param $state i32) (param $out_ptr i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_EOF
+    i32.const 0
+    i32.const 0
+    call $emit_token_record
+  )
+
+  (func (export "parser_emit_need_more_token") (param $state i32) (param $out_ptr i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_NEED_MORE
+    i32.const 0
+    i32.const 0
+    call $emit_token_record
+  )
+
+  (func (export "parser_emit_yield_token") (param $state i32) (param $out_ptr i32) (result i32)
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_YIELD
+    i32.const 0
+    i32.const 0
+    call $emit_token_record
+  )
+
+  (func (export "parser_emit_error_token") (param $state i32) (param $out_ptr i32) (param $line i32) (param $column i32) (result i32)
+    local.get $state
+    global.get $PARSER_STATE_ERROR_LINE_OFFSET
+    local.get $line
+    call $store_i32
+
+    local.get $state
+    global.get $PARSER_STATE_ERROR_COLUMN_OFFSET
+    local.get $column
+    call $store_i32
+
+    local.get $state
+    local.get $out_ptr
+    global.get $PARSER_JSON_TOKEN_ERROR
+    local.get $line
+    local.get $column
+    call $emit_token_record
+  )
+
   (func $set_flag (param $state i32) (param $flag i32)
     local.get $state
     global.get $PARSER_STATE_FLAGS_OFFSET

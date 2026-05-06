@@ -10,6 +10,20 @@
     (func $parser_parse (param i32) (param i32) (result i32)))
   (import "parser" "parser_parse_with_budget"
     (func $parser_parse_with_budget (param i32) (param i32) (param i32) (result i32)))
+  (import "parser" "parser_token_output_reset"
+    (func $parser_token_output_reset (param i32) (param i32) (result i32)))
+  (import "parser" "parser_emit_token"
+    (func $parser_emit_token (param i32) (param i32) (param i32) (param i32) (param i32) (result i32)))
+  (import "parser" "parser_emit_structural_token"
+    (func $parser_emit_structural_token (param i32) (param i32) (param i32) (result i32)))
+  (import "parser" "parser_emit_eof_token"
+    (func $parser_emit_eof_token (param i32) (param i32) (result i32)))
+  (import "parser" "parser_emit_need_more_token"
+    (func $parser_emit_need_more_token (param i32) (param i32) (result i32)))
+  (import "parser" "parser_emit_yield_token"
+    (func $parser_emit_yield_token (param i32) (param i32) (result i32)))
+  (import "parser" "parser_emit_error_token"
+    (func $parser_emit_error_token (param i32) (param i32) (param i32) (param i32) (result i32)))
   (import "parser_state" "parser_state_init"
     (func $parser_state_init (param i32) (param i32)))
   ;; @generated parser-state-imports parser-test:start
@@ -53,6 +67,9 @@
   (import "parser_state" "PARSER_TOKEN_NUMBER" (global $PARSER_TOKEN_NUMBER i32))
   (import "parser_state" "PARSER_DFA_DEFAULT" (global $PARSER_DFA_DEFAULT i32))
   (import "parser_state" "PARSER_JSON_TOKEN_LBRACE" (global $PARSER_JSON_TOKEN_LBRACE i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_EOF" (global $PARSER_JSON_TOKEN_EOF i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_NEED_MORE" (global $PARSER_JSON_TOKEN_NEED_MORE i32))
+  (import "parser_state" "PARSER_JSON_TOKEN_YIELD" (global $PARSER_JSON_TOKEN_YIELD i32))
   (import "parser_state" "PARSER_JSON_TOKEN_ERROR" (global $PARSER_JSON_TOKEN_ERROR i32))
   (import "parser_state" "PARSER_EVENT_FIELD_NONE" (global $PARSER_EVENT_FIELD_NONE i32))
   (import "parser_state" "PARSER_EVENT_FIELD_TS" (global $PARSER_EVENT_FIELD_TS i32))
@@ -134,6 +151,246 @@
         br $loop
       end
     end
+  )
+
+  (func $record_ptr (param $out i32) (param $index i32) (result i32)
+    local.get $out
+    local.get $index
+    global.get $PARSER_TOKEN_RECORD_BYTES
+    i32.mul
+    i32.add
+  )
+
+  (func $assert_token_record (param $out i32) (param $index i32) (param $kind i32) (param $payload_ptr i32) (param $payload_len i32) (param $code i32)
+    local.get $out
+    local.get $index
+    call $record_ptr
+    i32.load
+    local.get $kind
+    local.get $code
+    call $assert_eq_i32
+
+    local.get $out
+    local.get $index
+    call $record_ptr
+    i32.const 4
+    i32.add
+    i32.load
+    local.get $payload_ptr
+    local.get $code
+    i32.const 1
+    i32.add
+    call $assert_eq_i32
+
+    local.get $out
+    local.get $index
+    call $record_ptr
+    i32.const 8
+    i32.add
+    i32.load
+    local.get $payload_len
+    local.get $code
+    i32.const 2
+    i32.add
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_writes_fixed_token_records")
+    i32.const 55296
+    i32.const 120
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 5
+    call $parser_token_output_reset
+    i32.const 1
+    i32.const 180
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    call $parser_emit_structural_token
+    i32.const 1
+    i32.const 181
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_EOF
+    i32.const 0
+    i32.const 0
+    call $parser_emit_token
+    i32.const 1
+    i32.const 182
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    call $parser_emit_need_more_token
+    i32.const 1
+    i32.const 183
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    call $parser_emit_yield_token
+    i32.const 1
+    i32.const 184
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    i32.const 12
+    i32.const 34
+    call $parser_emit_error_token
+    i32.const 1
+    i32.const 185
+    call $assert_eq_i32
+
+    i32.const 57344
+    i32.const 0
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    i32.const 0
+    i32.const 0
+    i32.const 186
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 1
+    global.get $PARSER_JSON_TOKEN_EOF
+    i32.const 0
+    i32.const 0
+    i32.const 190
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 2
+    global.get $PARSER_JSON_TOKEN_NEED_MORE
+    i32.const 0
+    i32.const 0
+    i32.const 194
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 3
+    global.get $PARSER_JSON_TOKEN_YIELD
+    i32.const 0
+    i32.const 0
+    i32.const 198
+    call $assert_token_record
+
+    i32.const 57344
+    i32.const 4
+    global.get $PARSER_JSON_TOKEN_ERROR
+    i32.const 12
+    i32.const 34
+    i32.const 202
+    call $assert_token_record
+
+    i32.const 55296
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    call $load_i32
+    i32.const 5
+    i32.const 206
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
+    call $load_i32
+    global.get $PARSER_TOKEN_RECORD_BYTES
+    i32.const 5
+    i32.mul
+    i32.const 207
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    i32.const 5
+    i32.const 208
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_ERROR_LINE_OFFSET
+    call $load_i32
+    i32.const 12
+    i32.const 209
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_ERROR_COLUMN_OFFSET
+    call $load_i32
+    i32.const 34
+    i32.const 210
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_token_output_respects_capacity")
+    i32.const 55296
+    i32.const 121
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 1
+    call $parser_token_output_reset
+    i32.const 1
+    i32.const 220
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    call $parser_emit_structural_token
+    i32.const 1
+    i32.const 221
+    call $assert_eq_i32
+
+    i32.const 55296
+    i32.const 57344
+    call $parser_emit_eof_token
+    i32.const 0
+    i32.const 222
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
+    call $load_i32
+    i32.const 1
+    i32.const 223
+    call $assert_eq_i32
+
+    i32.const 55296
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+    i32.const 1
+    i32.const 224
+    call $assert_eq_i32
+  )
+
+  (func (export "test_parser_token_output_rejects_invalid_state")
+    i32.const 64000
+    i32.const 2
+    call $parser_token_output_reset
+    i32.const 0
+    i32.const 230
+    call $assert_eq_i32
+
+    i32.const 64000
+    global.get $PARSER_STATE_STATUS_OFFSET
+    call $field
+    i32.load
+    global.get $PARSER_STATUS_STATE_INVALID
+    i32.const 231
+    call $assert_eq_i32
+
+    i32.const 64000
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    call $parser_emit_structural_token
+    i32.const 0
+    i32.const 232
+    call $assert_eq_i32
   )
 
   (func (export "test_parser_reads_opfs_chunks")
