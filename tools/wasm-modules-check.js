@@ -14,10 +14,10 @@ async function main() {
 
   assert.deepEqual(wasmModuleGraphIds("parser"), [
     "std/mem",
-    "parser_state",
     "std/alloc",
     "std/hash",
     "std/strtab",
+    "parser_state",
     "parser",
   ]);
   assert.equal(wasmModuleUrl("std/strtab", "/assets/wasm"), "/assets/wasm/std/strtab.wasm");
@@ -45,10 +45,10 @@ async function main() {
 
   assert.deepEqual(compiledIds, [
     "std/mem",
-    "parser_state",
     "std/alloc",
     "std/hash",
     "std/strtab",
+    "parser_state",
     "parser",
   ]);
   assert.deepEqual(instantiatedIds, compiledIds);
