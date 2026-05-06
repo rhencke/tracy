@@ -295,7 +295,7 @@
     call $emit_token_record
   )
 
-  (func (export "parser_emit_error_token") (param $state i32) (param $out_ptr i32) (param $line i32) (param $column i32) (result i32)
+  (func $parser_emit_error_token (export "parser_emit_error_token") (param $state i32) (param $out_ptr i32) (param $line i32) (param $column i32) (result i32)
     local.get $state
     global.get $PARSER_STATE_ERROR_LINE_OFFSET
     local.get $line
