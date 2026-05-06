@@ -16,6 +16,7 @@ require_command() {
 }
 
 require_command wat2wasm
+require_command node
 require_command esbuild
 require_command sha256sum
 
@@ -25,13 +26,17 @@ node "${ROOT_DIR}/tools/generate-parser-state-abi.js" --check
 
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}/wasm"
+ASSEMBLED_WAT_DIR="$(mktemp -d)"
+trap 'rm -rf "${ASSEMBLED_WAT_DIR}"' EXIT
 
 if [ -d "${WAT_DIR}" ]; then
   while IFS= read -r -d '' wat_file; do
     rel_path="${wat_file#"${WAT_DIR}/"}"
     wasm_path="${DIST_DIR}/wasm/${rel_path%.wat}.wasm"
+    assembled_wat_path="${ASSEMBLED_WAT_DIR}/${rel_path}"
     mkdir -p "$(dirname "${wasm_path}")"
-    wat2wasm "${wat_file}" -o "${wasm_path}"
+    node "${ROOT_DIR}/tools/assemble-wat.js" "${wat_file}" "${assembled_wat_path}"
+    wat2wasm "${assembled_wat_path}" -o "${wasm_path}"
   done < <(find "${WAT_DIR}" -type f -name '*.wat' -print0 | sort -z)
 fi
 
