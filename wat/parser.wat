@@ -91,7 +91,14 @@
   (global $FLAG_AFTER_KEY i32 (i32.const 2))
   (global $DEFAULT_CHUNK_BYTES i32 (i32.const 4096))
   (global $DEFAULT_PARSE_OUTPUT_RECORDS i32 (i32.const 4096))
+  (global $EXTRACTOR_EVENT_BYTES i32 (i32.const 40))
+  (global $EXTRACTOR_EVENT_PTR i32 (i32.const 32768))
   (global $active_state (mut i32) (i32.const 0))
+  (global $extractor_token_base (mut i32) (i32.const 0))
+  (global $extractor_cursor (mut i32) (i32.const 0))
+  (global $extractor_in_trace_events (mut i32) (i32.const 0))
+  (global $extractor_after_trace_events_key (mut i32) (i32.const 0))
+  (global $extractor_after_trace_events_colon (mut i32) (i32.const 0))
 
   (func $field (param $state i32) (param $offset i32) (result i32)
     local.get $state
@@ -148,6 +155,369 @@
         br $loop
       end
     end
+  )
+
+  (func $zero_bytes (param $ptr i32) (param $len i32)
+    (local $i i32)
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+
+        local.get $ptr
+        local.get $i
+        i32.add
+        i32.const 0
+        i32.store8
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+  )
+
+  (func $extractor_record_ptr (param $index i32) (result i32)
+    global.get $extractor_token_base
+    local.get $index
+    global.get $PARSER_TOKEN_RECORD_BYTES
+    i32.mul
+    i32.add
+  )
+
+  (func $extractor_token_kind (param $index i32) (result i32)
+    local.get $index
+    call $extractor_record_ptr
+    i32.load
+  )
+
+  (func $extractor_token_payload_ptr (param $index i32) (result i32)
+    local.get $index
+    call $extractor_record_ptr
+    i32.const 4
+    i32.add
+    i32.load
+  )
+
+  (func $extractor_token_payload_len (param $index i32) (result i32)
+    local.get $index
+    call $extractor_record_ptr
+    i32.const 8
+    i32.add
+    i32.load
+  )
+
+  (func $extractor_token_count (result i32)
+    global.get $active_state
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    global.get $active_state
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    call $load_i32
+  )
+
+  (func $extractor_token_matches_trace_events (param $index i32) (result i32)
+    (local $ptr i32)
+
+    local.get $index
+    call $extractor_token_payload_len
+    i32.const 11
+    i32.ne
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $index
+    call $extractor_token_payload_ptr
+    local.set $ptr
+
+    local.get $ptr
+    i32.load8_u
+    i32.const 116
+    i32.eq
+    local.get $ptr
+    i32.const 1
+    i32.add
+    i32.load8_u
+    i32.const 114
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 2
+    i32.add
+    i32.load8_u
+    i32.const 97
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 3
+    i32.add
+    i32.load8_u
+    i32.const 99
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 4
+    i32.add
+    i32.load8_u
+    i32.const 101
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 5
+    i32.add
+    i32.load8_u
+    i32.const 69
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 6
+    i32.add
+    i32.load8_u
+    i32.const 118
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 7
+    i32.add
+    i32.load8_u
+    i32.const 101
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 8
+    i32.add
+    i32.load8_u
+    i32.const 110
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 9
+    i32.add
+    i32.load8_u
+    i32.const 116
+    i32.eq
+    i32.and
+    local.get $ptr
+    i32.const 10
+    i32.add
+    i32.load8_u
+    i32.const 115
+    i32.eq
+    i32.and
+  )
+
+  (func $extractor_zero_event
+    global.get $EXTRACTOR_EVENT_PTR
+    global.get $EXTRACTOR_EVENT_BYTES
+    call $zero_bytes
+  )
+
+  (func $extractor_skip_object (param $start_index i32) (result i32)
+    (local $i i32)
+    (local $count i32)
+    (local $depth i32)
+    (local $kind i32)
+
+    local.get $start_index
+    local.set $i
+    call $extractor_token_count
+    local.set $count
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $count
+        i32.ge_u
+        br_if $done
+
+        local.get $i
+        call $extractor_token_kind
+        local.set $kind
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_LBRACE
+        i32.eq
+        if
+          local.get $depth
+          i32.const 1
+          i32.add
+          local.set $depth
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_RBRACE
+        i32.eq
+        if
+          local.get $depth
+          i32.const 1
+          i32.sub
+          local.tee $depth
+          i32.eqz
+          if
+            local.get $i
+            i32.const 1
+            i32.add
+            return
+          end
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_EOF
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_NEED_MORE
+        i32.eq
+        i32.or
+        if
+          i32.const -1
+          return
+        end
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    local.get $i
+  )
+
+  (func (export "extractor_init") (param $ring_ptr i32)
+    local.get $ring_ptr
+    global.set $extractor_token_base
+    i32.const 0
+    global.set $extractor_cursor
+    i32.const 0
+    global.set $extractor_in_trace_events
+    i32.const 0
+    global.set $extractor_after_trace_events_key
+    i32.const 0
+    global.set $extractor_after_trace_events_colon
+  )
+
+  (func (export "extractor_next") (result i32)
+    (local $count i32)
+    (local $kind i32)
+    (local $next_index i32)
+
+    call $extractor_token_count
+    local.set $count
+
+    block $done
+      loop $scan
+        global.get $extractor_cursor
+        local.get $count
+        i32.ge_u
+        br_if $done
+
+        global.get $extractor_cursor
+        call $extractor_token_kind
+        local.set $kind
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_EOF
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_NEED_MORE
+        i32.eq
+        i32.or
+        if
+          i32.const -1
+          return
+        end
+
+        global.get $extractor_in_trace_events
+        if
+          local.get $kind
+          global.get $PARSER_JSON_TOKEN_LBRACE
+          i32.eq
+          if
+            call $extractor_zero_event
+            global.get $extractor_cursor
+            call $extractor_skip_object
+            local.tee $next_index
+            i32.const -1
+            i32.eq
+            if
+              i32.const -1
+              return
+            end
+
+            local.get $next_index
+            global.set $extractor_cursor
+            global.get $EXTRACTOR_EVENT_PTR
+            return
+          end
+
+          local.get $kind
+          global.get $PARSER_JSON_TOKEN_RBRACK
+          i32.eq
+          if
+            i32.const 0
+            global.set $extractor_in_trace_events
+          end
+        else
+          local.get $kind
+          global.get $PARSER_JSON_TOKEN_LBRACK
+          i32.eq
+          if
+            global.get $extractor_after_trace_events_colon
+            if
+              i32.const 0
+              global.set $extractor_after_trace_events_colon
+            end
+
+            i32.const 1
+            global.set $extractor_in_trace_events
+          else
+            local.get $kind
+            global.get $PARSER_JSON_TOKEN_STRING
+            i32.eq
+            if
+              global.get $extractor_cursor
+              call $extractor_token_matches_trace_events
+              if
+                i32.const 1
+                global.set $extractor_after_trace_events_key
+              end
+            end
+
+            local.get $kind
+            global.get $PARSER_JSON_TOKEN_COLON
+            i32.eq
+            global.get $extractor_after_trace_events_key
+            i32.and
+            if
+              i32.const 0
+              global.set $extractor_after_trace_events_key
+              i32.const 1
+              global.set $extractor_after_trace_events_colon
+            end
+          end
+        end
+
+        global.get $extractor_cursor
+        i32.const 1
+        i32.add
+        global.set $extractor_cursor
+        br $scan
+      end
+    end
+
+    i32.const -1
   )
 
   (func (export "parser_save_state") (param $out_ptr i32)

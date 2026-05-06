@@ -30,6 +30,10 @@
     (func $parser_emit_yield_token (param i32) (param i32) (result i32)))
   (import "parser" "parser_emit_error_token"
     (func $parser_emit_error_token (param i32) (param i32) (param i32) (param i32) (result i32)))
+  (import "parser" "extractor_init"
+    (func $extractor_init (param i32)))
+  (import "parser" "extractor_next"
+    (func $extractor_next (result i32)))
   (import "parser_state" "parser_state_init"
     (func $parser_state_init (param i32) (param i32)))
   ;; @generated parser-state-imports parser-test:start
@@ -136,6 +140,10 @@
   (data (i32.const 2548) "1ex")
   (data (i32.const 2552) "1e+x")
   (data (i32.const 2558) ",")
+  (data (i32.const 2600) "[{},{}]")
+  (data (i32.const 2610) "{\22traceEvents\22:[{}]}")
+  (data (i32.const 2632) "{\22other\22:[]}")
+  (data (i32.const 2648) "[]")
 
   (func (export "message_for") (param $code i32) (result i32 i32)
     i32.const 1024
@@ -345,6 +353,216 @@
     end
 
     local.get $matches
+  )
+
+  (func $assert_zero_event_record (param $event_ptr i32) (param $code i32)
+    (local $i i32)
+
+    block $done
+      loop $loop
+        local.get $i
+        i32.const 40
+        i32.ge_u
+        br_if $done
+
+        local.get $event_ptr
+        local.get $i
+        i32.add
+        i32.load8_u
+        i32.const 0
+        local.get $code
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+  )
+
+  (func (export "test_extractor_returns_minus_one_without_active_state")
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    i32.const -1
+    i32.const 140
+    call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_returns_zeroed_events_from_top_level_array")
+    (local $event_ptr i32)
+
+    i32.const 55296
+    i32.const 170
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2600
+    i32.const 7
+    i32.const 57344
+    i32.const 16
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 150
+    call $assert_eq_i32
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 151
+    call $assert_true
+
+    local.get $event_ptr
+    i32.const 152
+    call $assert_zero_event_record
+
+    local.get $event_ptr
+    i32.const 99
+    i32.store8
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 153
+    call $assert_true
+
+    local.get $event_ptr
+    i32.const 154
+    call $assert_zero_event_record
+
+    call $extractor_next
+    i32.const -1
+    i32.const 155
+    call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_finds_trace_events_wrapper")
+    (local $event_ptr i32)
+
+    i32.const 55296
+    i32.const 171
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2610
+    i32.const 20
+    i32.const 57344
+    i32.const 16
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 160
+    call $assert_eq_i32
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 161
+    call $assert_true
+
+    local.get $event_ptr
+    i32.const 162
+    call $assert_zero_event_record
+
+    call $extractor_next
+    i32.const -1
+    i32.const 163
+    call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_ignores_non_trace_events_wrapper")
+    i32.const 55296
+    i32.const 172
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2632
+    i32.const 12
+    i32.const 57344
+    i32.const 16
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 164
+    call $assert_eq_i32
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    i32.const -1
+    i32.const 165
+    call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_returns_minus_one_for_empty_array")
+    i32.const 55296
+    i32.const 173
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2648
+    i32.const 2
+    i32.const 57344
+    i32.const 16
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 166
+    call $assert_eq_i32
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    i32.const -1
+    i32.const 167
+    call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_waits_for_incomplete_event_object")
+    i32.const 55296
+    i32.const 174
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 4
+    call $parser_token_output_reset
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACK
+    call $parser_emit_structural_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    call $parser_emit_structural_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    call $parser_emit_need_more_token
+    drop
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    i32.const -1
+    i32.const 168
+    call $assert_eq_i32
   )
 
   (func (export "test_parser_writes_fixed_token_records")
