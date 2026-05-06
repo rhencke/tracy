@@ -302,6 +302,19 @@ function readU32(view, ptr) {
   return view.getUint32(ptr, true);
 }
 
+function cursorAt(view, ptr) {
+  return {
+    skip(bytes) {
+      ptr += bytes;
+    },
+    u32() {
+      const value = readU32(view, ptr);
+      ptr += 4;
+      return value;
+    },
+  };
+}
+
 function expectEq(actual, expected, label) {
   if (actual !== expected) {
     throw new Error(`${label}: got ${actual}, expected ${expected}`);
@@ -327,14 +340,14 @@ function queryRows(index, view, trackId, tsMin, tsMax) {
   const rowBytes = globalValue(index.INDEX_QUERY_RESULT_BYTES);
   const rows = [];
   for (let i = 0; i < count; i += 1) {
-    const ptr = queryOutPtr + i * rowBytes;
+    const row = cursorAt(view, queryOutPtr + i * rowBytes);
     rows.push({
-      start: readU32(view, ptr),
-      dur: readU32(view, ptr + 4),
-      name: readU32(view, ptr + 8),
-      depth: readU32(view, ptr + 12),
-      cat: readU32(view, ptr + 16),
-      color: readU32(view, ptr + 20),
+      start: row.u32(),
+      dur: row.u32(),
+      name: row.u32(),
+      depth: row.u32(),
+      cat: row.u32(),
+      color: row.u32(),
     });
   }
 
