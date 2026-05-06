@@ -493,6 +493,7 @@
   ],
   "importSets": {
     "parser": [
+      "PARSER_STATE_BYTES",
       "PARSER_STACK_CAP",
       "PARSER_PARTIAL_TOKEN_CAP",
       "PARSER_TOKEN_RECORD_BYTES",

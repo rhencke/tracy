@@ -6,6 +6,7 @@
   (import "mem" "MEM_RING_BASE" (global $MEM_RING_BASE i32))
   (import "mem" "MEM_RING_SIZE" (global $MEM_RING_SIZE i32))
   ;; @generated parser-state-imports parser:start
+  (import "parser_state" "PARSER_STATE_BYTES" (global $PARSER_STATE_BYTES i32))
   (import "parser_state" "PARSER_STACK_CAP" (global $PARSER_STACK_CAP i32))
   (import "parser_state" "PARSER_PARTIAL_TOKEN_CAP" (global $PARSER_PARTIAL_TOKEN_CAP i32))
   (import "parser_state" "PARSER_TOKEN_RECORD_BYTES" (global $PARSER_TOKEN_RECORD_BYTES i32))
@@ -88,6 +89,7 @@
   (global $FLAG_AFTER_KEY i32 (i32.const 2))
   (global $DEFAULT_CHUNK_BYTES i32 (i32.const 4096))
   (global $DEFAULT_PARSE_OUTPUT_RECORDS i32 (i32.const 4096))
+  (global $active_state (mut i32) (i32.const 0))
 
   (func $field (param $state i32) (param $offset i32) (result i32)
     local.get $state
@@ -116,6 +118,59 @@
     local.get $status
     call $store_i32
     local.get $status
+  )
+
+  (func $copy_bytes (param $src i32) (param $dst i32) (param $len i32)
+    (local $i i32)
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+
+        local.get $dst
+        local.get $i
+        i32.add
+        local.get $src
+        local.get $i
+        i32.add
+        i32.load8_u
+        i32.store8
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+  )
+
+  (func (export "parser_save_state") (param $out_ptr i32)
+    global.get $active_state
+    local.get $out_ptr
+    global.get $PARSER_STATE_BYTES
+    call $copy_bytes
+  )
+
+  (func (export "parser_restore_state") (param $in_ptr i32)
+    local.get $in_ptr
+    call $parser_state_is_valid
+    i32.eqz
+    if
+      global.get $active_state
+      global.get $PARSER_STATUS_STATE_INVALID
+      call $set_status
+      drop
+      return
+    end
+
+    local.get $in_ptr
+    global.get $active_state
+    global.get $PARSER_STATE_BYTES
+    call $copy_bytes
   )
 
   (func $require_valid_state (param $state i32) (result i32)
@@ -244,6 +299,9 @@
       i32.const 0
       return
     end
+
+    local.get $state
+    global.set $active_state
 
     local.get $state
     local.get $record_cap
@@ -2117,6 +2175,9 @@
     end
 
     local.get $state
+    global.set $active_state
+
+    local.get $state
     local.get $record_cap
     call $reset_token_output
 
@@ -2256,6 +2317,9 @@
       return
     end
 
+    local.get $state
+    global.set $active_state
+
     local.get $requested_chunk_len
     call $normal_chunk_len
     local.tee $chunk_len
@@ -2353,18 +2417,6 @@
             return
           end
 
-          local.get $state
-          global.get $PARSER_STATE_FILE_OFFSET_OFFSET
-          call $field
-          local.get $state
-          global.get $PARSER_STATE_FILE_OFFSET_OFFSET
-          call $field
-          i64.load
-          local.get $read_len
-          i64.extend_i32_u
-          i64.add
-          i64.store
-
           local.get $write_pos
           local.get $read_len
           i32.add
@@ -2411,6 +2463,17 @@
         local.get $state
         local.get $byte
         call $advance_position
+
+        local.get $state
+        global.get $PARSER_STATE_FILE_OFFSET_OFFSET
+        call $field
+        local.get $state
+        global.get $PARSER_STATE_FILE_OFFSET_OFFSET
+        call $field
+        i64.load
+        i64.const 1
+        i64.add
+        i64.store
 
         local.get $read_pos
         i32.const 1

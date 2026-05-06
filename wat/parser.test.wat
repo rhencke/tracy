@@ -10,6 +10,10 @@
     (func $parser_parse (param i32) (param i32) (result i32)))
   (import "parser" "parser_parse_with_budget"
     (func $parser_parse_with_budget (param i32) (param i32) (param i32) (result i32)))
+  (import "parser" "parser_save_state"
+    (func $parser_save_state (param i32)))
+  (import "parser" "parser_restore_state"
+    (func $parser_restore_state (param i32)))
   (import "parser" "parser_tokenize_bytes"
     (func $parser_tokenize_bytes (param i32) (param i32) (param i32) (param i32) (param i32) (result i32)))
   (import "parser" "parser_token_output_reset"
@@ -1581,6 +1585,91 @@
     i32.const 62000
     i32.const 162
     call $assert_state_bytes_eq
+  )
+
+  (func (export "test_parser_save_restore_state_exports")
+    i32.const 62000
+    i32.const 99
+    call $parser_state_init
+
+    i32.const 62000
+    i32.const 8
+    i32.const 1
+    call $parser_parse_with_budget
+    global.get $PARSER_STATUS_YIELDED
+    i32.const 163
+    call $assert_eq_i32
+
+    i32.const 62512
+    call $parser_save_state
+
+    i32.const 62000
+    global.get $PARSER_STATE_STATUS_OFFSET
+    global.get $PARSER_STATUS_MALFORMED
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_RING_READ_OFFSET
+    i32.const 0
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_RING_WRITE_OFFSET
+    i32.const 0
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_RING_COUNT_OFFSET
+    i32.const 0
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    global.get $PARSER_DFA_DEFAULT
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET
+    i32.const 0
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_LINE_OFFSET
+    i32.const 99
+    call $store_i32
+
+    i32.const 62000
+    global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
+    i32.const 0
+    call $store_i32
+
+    i32.const 62512
+    call $parser_restore_state
+
+    i32.const 62000
+    i32.const 62512
+    i32.const 164
+    call $assert_state_bytes_eq
+
+    i32.const 62000
+    i32.const 8
+    call $parser_parse
+    global.get $PARSER_STATUS_DONE
+    i32.const 165
+    call $assert_eq_i32
+
+    i32.const 62512
+    i32.const 0
+    i32.store
+    i32.const 62512
+    call $parser_restore_state
+
+    i32.const 62000
+    global.get $PARSER_STATE_STATUS_OFFSET
+    call $load_i32
+    global.get $PARSER_STATUS_STATE_INVALID
+    i32.const 166
+    call $assert_eq_i32
   )
 
   (func (export "test_parser_default_yield_budget_can_force_turns")
