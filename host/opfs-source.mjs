@@ -4,6 +4,20 @@ export function makeOpfsSourceHost(memoryView, files) {
   const sources = new Map();
   let nextSourceId = 1;
 
+  function errorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  function requireSource(operation, sourceId) {
+    const entry = sources.get(sourceId);
+
+    if (entry === undefined) {
+      throw new Error(`${operation}: unknown OPFS source id ${sourceId}`);
+    }
+
+    return entry;
+  }
+
   async function opfsRoot() {
     return navigator.storage?.getDirectory?.() ?? null;
   }
@@ -41,8 +55,12 @@ export function makeOpfsSourceHost(memoryView, files) {
     const file = files.get(fileHandle);
     const root = await opfsRoot();
 
-    if (file === undefined || root === null) {
-      return -1;
+    if (file === undefined) {
+      throw new Error(`opfs_source_from_file: unknown file handle ${fileHandle}`);
+    }
+
+    if (root === null) {
+      throw new Error("opfs_source_from_file: OPFS root is unavailable");
     }
 
     try {
@@ -57,7 +75,7 @@ export function makeOpfsSourceHost(memoryView, files) {
 
       return reserveSource(handle, opfsName, file.size, sourceId);
     } catch (error) {
-      return -1;
+      throw new Error(`opfs_source_from_file: ${errorMessage(error)}`);
     }
   }
 
@@ -65,8 +83,12 @@ export function makeOpfsSourceHost(memoryView, files) {
     const name = memoryView.decodeString(namePtr, nameLen).trim();
     const root = await opfsRoot();
 
-    if (name.length === 0 || root === null) {
-      return -1;
+    if (name.length === 0) {
+      throw new Error("opfs_source_open: source name is empty");
+    }
+
+    if (root === null) {
+      throw new Error("opfs_source_open: OPFS root is unavailable");
     }
 
     try {
@@ -75,28 +97,30 @@ export function makeOpfsSourceHost(memoryView, files) {
 
       return cacheSource(handle, name, file.size);
     } catch (error) {
-      return -1;
+      throw new Error(`opfs_source_open: ${errorMessage(error)}`);
     }
   }
 
   function opfsSourceNameLen(sourceId) {
-    const entry = sources.get(sourceId);
+    const entry = requireSource("opfs_source_name_len", sourceId);
 
-    return entry === undefined ? -1 : new TextEncoder().encode(entry.name).byteLength;
+    return new TextEncoder().encode(entry.name).byteLength;
   }
 
   function opfsSourceName(sourceId, destPtr, destLen) {
-    const entry = sources.get(sourceId);
+    const entry = requireSource("opfs_source_name", sourceId);
     const dest = memoryView.span(destPtr, destLen);
 
-    if (entry === undefined || dest === null) {
-      return -1;
+    if (dest === null) {
+      throw new Error(`opfs_source_name: invalid destination span ${destPtr}:${destLen}`);
     }
 
     const encoded = new TextEncoder().encode(entry.name);
 
     if (destLen < encoded.byteLength) {
-      return -1;
+      throw new Error(
+        `opfs_source_name: destination length ${destLen} is smaller than source name length ${encoded.byteLength}`,
+      );
     }
 
     dest.set(encoded);
@@ -104,18 +128,22 @@ export function makeOpfsSourceHost(memoryView, files) {
   }
 
   function opfsSourceSize(sourceId) {
-    const entry = sources.get(sourceId);
+    const entry = requireSource("opfs_source_size", sourceId);
 
-    return entry === undefined ? -1n : BigInt(entry.size);
+    return BigInt(entry.size);
   }
 
   async function opfsSourceRead(sourceId, offset, len, destPtr) {
-    const entry = sources.get(sourceId);
+    const entry = requireSource("opfs_source_read", sourceId);
     const start = u64ToNumber(offset);
     const dest = memoryView.span(destPtr, len);
 
-    if (entry === undefined || start < 0 || dest === null) {
-      return -1;
+    if (start < 0) {
+      throw new Error(`opfs_source_read: invalid offset ${offset}`);
+    }
+
+    if (dest === null) {
+      throw new Error(`opfs_source_read: invalid destination span ${destPtr}:${len}`);
     }
 
     try {
@@ -132,7 +160,7 @@ export function makeOpfsSourceHost(memoryView, files) {
       dest.set(src);
       return src.byteLength;
     } catch (error) {
-      return -1;
+      throw new Error(`opfs_source_read: ${errorMessage(error)}`);
     }
   }
 
