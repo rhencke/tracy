@@ -12,6 +12,7 @@
     (func $parser_parse_with_budget (param i32) (param i32) (param i32) (result i32)))
   (import "parser_state" "parser_state_init"
     (func $parser_state_init (param i32) (param i32)))
+  ;; @generated parser-state-imports parser-test:start
   (import "parser_state" "PARSER_STATE_BYTES" (global $PARSER_STATE_BYTES i32))
   (import "parser_state" "PARSER_STATE_STATUS_OFFSET" (global $PARSER_STATE_STATUS_OFFSET i32))
   (import "parser_state" "PARSER_STATE_YIELD_BUDGET_MS_OFFSET" (global $PARSER_STATE_YIELD_BUDGET_MS_OFFSET i32))
@@ -40,6 +41,7 @@
   (import "parser_state" "PARSER_TOKEN_NUMBER" (global $PARSER_TOKEN_NUMBER i32))
   (import "parser_state" "PARSER_EVENT_FIELD_NONE" (global $PARSER_EVENT_FIELD_NONE i32))
   (import "parser_state" "PARSER_EVENT_FIELD_TS" (global $PARSER_EVENT_FIELD_TS i32))
+  ;; @generated parser-state-imports parser-test:end
 
   (data (i32.const 1024) "parser test failed")
 

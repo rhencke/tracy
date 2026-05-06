@@ -1,6 +1,7 @@
 (module
   (import "env" "memory" (memory $memory 1 32768))
 
+  ;; @generated parser-state-globals:start
   (global $PARSER_STATE_MAGIC (export "PARSER_STATE_MAGIC") i32 (i32.const 0x5452504A))
   (global $PARSER_STATE_VERSION (export "PARSER_STATE_VERSION") i32 (i32.const 1))
   (global $PARSER_STATE_BYTES (export "PARSER_STATE_BYTES") i32 (i32.const 512))
@@ -57,6 +58,7 @@
   (global $PARSER_EVENT_FIELD_TID (export "PARSER_EVENT_FIELD_TID") i32 (i32.const 7))
   (global $PARSER_EVENT_FIELD_ARGS (export "PARSER_EVENT_FIELD_ARGS") i32 (i32.const 8))
   (global $PARSER_EVENT_FIELD_OTHER (export "PARSER_EVENT_FIELD_OTHER") i32 (i32.const 9))
+  ;; @generated parser-state-globals:end
 
   (func $zero_bytes (param $ptr i32) (param $len i32)
     (local $i i32)

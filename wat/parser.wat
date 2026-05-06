@@ -5,6 +5,7 @@
   ;; @generated host-imports parser:end
   (import "mem" "MEM_RING_BASE" (global $MEM_RING_BASE i32))
   (import "mem" "MEM_RING_SIZE" (global $MEM_RING_SIZE i32))
+  ;; @generated parser-state-imports parser:start
   (import "parser_state" "PARSER_STACK_CAP" (global $PARSER_STACK_CAP i32))
   (import "parser_state" "PARSER_PARTIAL_TOKEN_CAP" (global $PARSER_PARTIAL_TOKEN_CAP i32))
   (import "parser_state" "PARSER_STATE_STATUS_OFFSET" (global $PARSER_STATE_STATUS_OFFSET i32))
@@ -47,6 +48,7 @@
   (import "parser_state" "PARSER_EVENT_FIELD_TID" (global $PARSER_EVENT_FIELD_TID i32))
   (import "parser_state" "PARSER_EVENT_FIELD_ARGS" (global $PARSER_EVENT_FIELD_ARGS i32))
   (import "parser_state" "PARSER_EVENT_FIELD_OTHER" (global $PARSER_EVENT_FIELD_OTHER i32))
+  ;; @generated parser-state-imports parser:end
   (import "parser_state" "parser_state_is_valid"
     (func $parser_state_is_valid (param i32) (result i32)))
 

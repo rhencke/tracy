@@ -20,6 +20,7 @@ require_command esbuild
 require_command sha256sum
 
 node "${ROOT_DIR}/tools/generate-host-abi.js" --check
+node "${ROOT_DIR}/tools/generate-parser-state-abi.js" --check
 
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}/wasm"

@@ -469,7 +469,12 @@ the fixture) / event_count <= 12.0`.  The measurement uses committed OPFS byte
 lengths, not just in-memory payload lengths, so page padding and resumability
 metadata stay visible.
 
+<!-- @generated parser-state-abi:start -->
 ## Parser resume state ABI
+
+This section is generated from `abi/parser-state.json` by
+`tools/generate-parser-state-abi.js`.  The same source generates WAT
+parser-state constants/imports and test assertions.
 
 The streaming JSON parser state is a fixed 512-byte little-endian record.
 It may be stored anywhere the caller owns memory, then serialized byte-for-byte
@@ -531,21 +536,43 @@ the ring.
 
 ### Parser status and field enums
 
-`PARSER_STATUS_READY = 0` means the state is valid and can continue parsing.
-`PARSER_STATUS_NEED_CHUNK = 1` means the ring is exhausted and the host should
-read more bytes from the OPFS source.  `PARSER_STATUS_YIELDED = 2` means the
-parser stopped because its time budget expired.  `PARSER_STATUS_DONE = 3`
-means the source reached a valid end.  `PARSER_STATUS_MALFORMED = 4` means the
-input JSON cannot be parsed as the v0.1 trace format.
-`PARSER_STATUS_STATE_INVALID = 5` means the serialized state itself is not a
-valid resume point.
+Parser statuses are:
 
-Partial token kinds are `none`, `string`, `number`, and `literal`.  Event field
-ids cover the Chrome trace fields the v0.1 parser needs to recognize while
-streaming: `name`, `cat`, `ph`, `ts`, `dur`, `pid`, `tid`, `args`, and
-`other`.  The current field and seen-field bitmask let the parser yield in the
-middle of one event object without losing which output column the next token
-belongs to.
+- `PARSER_STATUS_READY = 0`: State is valid and can continue parsing.
+- `PARSER_STATUS_NEED_CHUNK = 1`: The ring is exhausted and the host should read more bytes.
+- `PARSER_STATUS_YIELDED = 2`: The parser stopped because its time budget expired.
+- `PARSER_STATUS_DONE = 3`: The source reached a valid end.
+- `PARSER_STATUS_MALFORMED = 4`: The input JSON cannot be parsed as the v0.1 trace format.
+- `PARSER_STATUS_STATE_INVALID = 5`: The serialized state itself is not a valid resume point.
+
+Partial token kinds are:
+
+- `PARSER_TOKEN_NONE = 0`: No partial token is buffered.
+- `PARSER_TOKEN_STRING = 1`: A string token crosses a chunk or yield boundary.
+- `PARSER_TOKEN_NUMBER = 2`: A number token crosses a chunk or yield boundary.
+- `PARSER_TOKEN_LITERAL = 3`: A literal token crosses a chunk or yield boundary.
+
+Stack entry kinds are:
+
+- `PARSER_STACK_ARRAY = 1`: JSON array container.
+- `PARSER_STACK_OBJECT = 2`: JSON object container.
+
+Event field ids are:
+
+- `PARSER_EVENT_FIELD_NONE = 0`: No current trace event field.
+- `PARSER_EVENT_FIELD_NAME = 1`: Chrome trace `name` field.
+- `PARSER_EVENT_FIELD_CAT = 2`: Chrome trace `cat` field.
+- `PARSER_EVENT_FIELD_PHASE = 3`: Chrome trace `ph` field.
+- `PARSER_EVENT_FIELD_TS = 4`: Chrome trace `ts` field.
+- `PARSER_EVENT_FIELD_DUR = 5`: Chrome trace `dur` field.
+- `PARSER_EVENT_FIELD_PID = 6`: Chrome trace `pid` field.
+- `PARSER_EVENT_FIELD_TID = 7`: Chrome trace `tid` field.
+- `PARSER_EVENT_FIELD_ARGS = 8`: Chrome trace `args` field.
+- `PARSER_EVENT_FIELD_OTHER = 9`: Any other Chrome trace event field.
+
+The current field and seen-field bitmask let the parser yield in the middle
+of one event object without losing which output column the next token belongs to.
+<!-- @generated parser-state-abi:end -->
 
 ### Decoder API contract
 
