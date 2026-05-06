@@ -1,0 +1,153 @@
+{
+  "pageSizes": [
+    {
+      "name": "WASM_PAGE_SIZE",
+      "value": 65536,
+      "hex": true,
+      "description": "WebAssembly linear-memory page size."
+    },
+    {
+      "name": "OPFS_PAGE_SIZE",
+      "value": 65536,
+      "hex": true,
+      "description": "Fixed OPFS page size for index and renderer page files."
+    }
+  ],
+  "memoryRegions": [
+    {
+      "label": "Scratch (per-tick)",
+      "baseConstant": "MEM_SCRATCH_BASE",
+      "sizeConstant": "MEM_SCRATCH_SIZE",
+      "base": 0,
+      "size": 1048576,
+      "owner": "app",
+      "growthPolicy": "Fixed",
+      "notes": "Reset every `tracy_tick`; no persistent pointers.",
+      "description": "Per-tick app scratch base."
+    },
+    {
+      "label": "Token ring buffer",
+      "baseConstant": "MEM_RING_BASE",
+      "sizeConstant": "MEM_RING_SIZE",
+      "base": 1048576,
+      "size": 4194304,
+      "owner": "parser",
+      "growthPolicy": "Fixed",
+      "notes": "Streaming JSON input from OPFS and the host shim.",
+      "description": "Parser token ring base."
+    },
+    {
+      "label": "String/dict table",
+      "baseConstant": "MEM_DICT_BASE",
+      "sizeConstant": "MEM_DICT_SIZE",
+      "base": 5242880,
+      "size": 16777216,
+      "owner": "parser/index",
+      "growthPolicy": "Fixed for v0.1",
+      "notes": "Dictionary-coded names, categories, process ids, and thread ids.",
+      "description": "Shared dictionary table base."
+    },
+    {
+      "label": "Index page LRU cache",
+      "baseConstant": "MEM_INDEX_CACHE_BASE",
+      "sizeConstant": "MEM_INDEX_CACHE_SIZE",
+      "base": 22020096,
+      "size": 268435456,
+      "owner": "index",
+      "growthPolicy": "Fixed cache window",
+      "notes": "Demand-paged from OPFS by the columnar index.",
+      "description": "Index page cache base."
+    },
+    {
+      "label": "LOD pyramid page cache",
+      "baseConstant": "MEM_PYRAMID_CACHE_BASE",
+      "sizeConstant": "MEM_PYRAMID_CACHE_SIZE",
+      "base": 290455552,
+      "size": 134217728,
+      "owner": "renderer",
+      "growthPolicy": "Fixed cache window",
+      "notes": "Demand-paged from OPFS by later renderer work.",
+      "description": "LOD pyramid page cache base."
+    },
+    {
+      "label": "Render scratch",
+      "baseConstant": "MEM_RENDER_SCRATCH",
+      "sizeConstant": "MEM_RENDER_SCRATCH_SIZE",
+      "base": 424673280,
+      "size": 33554432,
+      "owner": "renderer",
+      "growthPolicy": "Fixed",
+      "notes": "Per-frame compositing and transient draw preparation.",
+      "description": "Renderer scratch base."
+    },
+    {
+      "label": "Bump-allocator heap",
+      "baseConstant": "MEM_HEAP_BASE",
+      "sizeConstant": "MEM_HEAP_SIZE",
+      "base": 458227712,
+      "size": 67108864,
+      "owner": "shared",
+      "growthPolicy": "Grow only through `app.wat`",
+      "notes": "Short-lived allocations; modules request extension through `grow_heap(pages)`.",
+      "description": "Shared bump heap base."
+    },
+    {
+      "label": "Wasm stack + globals",
+      "baseConstant": "MEM_STACK_BASE",
+      "sizeConstant": "MEM_STACK_SIZE",
+      "base": 525336576,
+      "size": 16777216,
+      "owner": "wasm",
+      "growthPolicy": "Fixed initial reservation",
+      "notes": "Stack, globals, and module-private runtime state.",
+      "description": "Wasm stack base."
+    }
+  ],
+  "memoryBudgets": [
+    {
+      "name": "MEM_INITIAL_BYTES",
+      "value": 542113792,
+      "hex": true,
+      "description": "Minimum initial memory for the v0.1 layout."
+    },
+    {
+      "name": "MEM_INITIAL_PAGES",
+      "value": 8272,
+      "description": "Minimum initial memory in WebAssembly pages."
+    },
+    {
+      "name": "MEM_WORKING_TARGET_BYTES",
+      "value": 629145600,
+      "hex": true,
+      "description": "600 MiB working target."
+    },
+    {
+      "name": "MEM_WORKING_TARGET_PAGES",
+      "value": 9600,
+      "description": "600 MiB working target in WebAssembly pages."
+    },
+    {
+      "name": "MEM_HEAP_CEILING_BYTES",
+      "value": 1073741824,
+      "hex": true,
+      "description": "1 GiB heap ceiling."
+    },
+    {
+      "name": "MEM_HEAP_CEILING_PAGES",
+      "value": 16384,
+      "description": "1 GiB heap ceiling in WebAssembly pages."
+    }
+  ],
+  "parser": {
+    "TOKEN_RECORD_BYTES": {
+      "value": 12,
+      "description": "Parser token output record byte length."
+    }
+  },
+  "index": {
+    "INDEX_TARGET_ENCODED_BYTES_PER_EVENT": {
+      "value": 12,
+      "description": "Maximum average compact index payload bytes per event."
+    }
+  }
+}
