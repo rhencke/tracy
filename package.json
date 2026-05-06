@@ -4,11 +4,14 @@
   "private": true,
   "scripts": {
     "build": "bash tools/build.sh",
+    "build:cov": "bash tools/build-cov.sh",
     "test": "npm run test:wat && npm run test:watwat-probe && npm run test:assert-probes && npm run test:coverage-selftest",
     "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
     "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
     "test:assert-probes": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"assert test failed\" dist/wasm/std/assert.test.wasm && node tools/watwat.js --expect-failure probe_assert_eq_i64_failure \"assert test failed\" dist/wasm/std/assert.test.wasm && node tools/watwat.js --expect-failure probe_assert_eq_f64_failure \"assert test failed\" dist/wasm/std/assert.test.wasm && node tools/watwat.js --expect-failure probe_assert_eq_str_length_failure \"assert test failed\" dist/wasm/std/assert.test.wasm && node tools/watwat.js --expect-failure probe_assert_true_failure \"assert test failed\" dist/wasm/std/assert.test.wasm && node tools/watwat.js --expect-failure probe_assert_false_failure \"assert test failed\" dist/wasm/std/assert.test.wasm",
-    "test:coverage-selftest": "node tools/coverage-selftest.js"
+    "test:coverage-selftest": "node tools/coverage-selftest.js",
+    "test:coverage": "node tools/coverage-run.js dist/wasm-cov",
+    "coverage": "npm run build:cov && npm run test:coverage"
   },
   "devDependencies": {
     "esbuild": "0.25.3"

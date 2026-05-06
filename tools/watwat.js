@@ -164,6 +164,19 @@ function moduleImportAliases(file) {
   return [name, `${parent}/${name}`, `wat/${parent}/${name}`];
 }
 
+function dependencyImportsFor(imports) {
+  if (imports.cov === undefined) {
+    return imports;
+  }
+
+  return {
+    ...imports,
+    cov: {
+      hit() {},
+    },
+  };
+}
+
 async function instantiateSiblingModule(file, imports) {
   const modulePath = modulePathForTest(file);
 
@@ -183,13 +196,14 @@ async function instantiateSiblingModule(file, imports) {
 
   const allocPath = path.join(path.dirname(modulePath), "alloc.wasm");
   const moduleImports = { ...imports };
+  const dependencyImports = dependencyImportsFor(imports);
   const aliases = {};
 
   if (path.basename(modulePath) !== "alloc.wasm") {
     try {
       await fs.access(allocPath);
       const allocBytes = await fs.readFile(allocPath);
-      const { instance } = await WebAssembly.instantiate(allocBytes, moduleImports);
+      const { instance } = await WebAssembly.instantiate(allocBytes, dependencyImports);
       moduleImports.alloc = instance.exports;
       aliases.alloc = instance.exports;
       aliases["std/alloc"] = instance.exports;
@@ -207,7 +221,10 @@ async function instantiateSiblingModule(file, imports) {
     try {
       await fs.access(hashPath);
       const hashBytes = await fs.readFile(hashPath);
-      const { instance } = await WebAssembly.instantiate(hashBytes, moduleImports);
+      const { instance } = await WebAssembly.instantiate(hashBytes, {
+        ...moduleImports,
+        cov: dependencyImports.cov,
+      });
       moduleImports.hash = instance.exports;
       aliases.hash = instance.exports;
       aliases["std/hash"] = instance.exports;
@@ -277,8 +294,8 @@ async function runTestFile(file, assertPath, coverage = null) {
   return results;
 }
 
-async function runExpectedFailure(exportName, expectedMessage, file, assertPath) {
-  const { instance, memory } = await instantiateTestModule(file, assertPath);
+async function runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage = null) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage);
   const probe = instance.exports[exportName];
 
   if (typeof probe !== "function") {
@@ -376,6 +393,25 @@ async function main() {
     coverageManifest = await readJson(coverageManifestPath);
     coverage = createCoverageContext(coverageManifest);
     files = files.slice(2);
+
+    if (files[0] === "--expect-failure") {
+      if (files.length !== 4) {
+        usage();
+        process.exitCode = 64;
+        return;
+      }
+
+      const [, exportName, expectedMessage, file] = files;
+      const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage);
+      emitTap([result]);
+      if (!result.ok) {
+        process.exitCode = 1;
+        return;
+      }
+
+      await writeCoverageReport(coverageManifestPath, coverageManifest, coverage);
+      return;
+    }
   }
 
   const results = [];

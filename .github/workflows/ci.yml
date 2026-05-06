@@ -59,6 +59,9 @@ jobs:
       - name: Test WAT
         run: npm test
 
+      - name: Test WAT coverage
+        run: npm run coverage
+
       - name: Detect Playwright golden tests
         if: github.event_name == 'pull_request'
         id: golden-tests
