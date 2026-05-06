@@ -93,6 +93,13 @@
   (global $DEFAULT_PARSE_OUTPUT_RECORDS i32 (i32.const 4096))
   (global $EXTRACTOR_EVENT_BYTES i32 (i32.const 40))
   (global $EXTRACTOR_EVENT_PTR i32 (i32.const 32768))
+  (global $EXTRACTOR_FIELD_NONE i32 (i32.const 0))
+  (global $EXTRACTOR_FIELD_PHASE i32 (i32.const 1))
+  (global $EXTRACTOR_FIELD_NAME i32 (i32.const 2))
+  (global $EXTRACTOR_FIELD_TS i32 (i32.const 3))
+  (global $EXTRACTOR_FIELD_DUR i32 (i32.const 4))
+  (global $EXTRACTOR_FIELD_PID i32 (i32.const 5))
+  (global $EXTRACTOR_FIELD_TID i32 (i32.const 6))
   (global $active_state (mut i32) (i32.const 0))
   (global $extractor_token_base (mut i32) (i32.const 0))
   (global $extractor_cursor (mut i32) (i32.const 0))
@@ -317,6 +324,341 @@
     i32.and
   )
 
+  (func $extractor_token_byte (param $index i32) (param $offset i32) (result i32)
+    local.get $index
+    call $extractor_token_payload_ptr
+    local.get $offset
+    i32.add
+    i32.load8_u
+  )
+
+  (func $extractor_payload_matches2 (param $index i32) (param $a i32) (param $b i32) (result i32)
+    local.get $index
+    call $extractor_token_payload_len
+    i32.const 2
+    i32.eq
+    local.get $index
+    i32.const 0
+    call $extractor_token_byte
+    local.get $a
+    i32.eq
+    i32.and
+    local.get $index
+    i32.const 1
+    call $extractor_token_byte
+    local.get $b
+    i32.eq
+    i32.and
+  )
+
+  (func $extractor_payload_matches3 (param $index i32) (param $a i32) (param $b i32) (param $c i32) (result i32)
+    local.get $index
+    call $extractor_token_payload_len
+    i32.const 3
+    i32.eq
+    local.get $index
+    i32.const 0
+    call $extractor_token_byte
+    local.get $a
+    i32.eq
+    i32.and
+    local.get $index
+    i32.const 1
+    call $extractor_token_byte
+    local.get $b
+    i32.eq
+    i32.and
+    local.get $index
+    i32.const 2
+    call $extractor_token_byte
+    local.get $c
+    i32.eq
+    i32.and
+  )
+
+  (func $extractor_payload_matches4 (param $index i32) (param $a i32) (param $b i32) (param $c i32) (param $d i32) (result i32)
+    local.get $index
+    call $extractor_token_payload_len
+    i32.const 4
+    i32.eq
+    local.get $index
+    i32.const 0
+    call $extractor_token_byte
+    local.get $a
+    i32.eq
+    i32.and
+    local.get $index
+    i32.const 1
+    call $extractor_token_byte
+    local.get $b
+    i32.eq
+    i32.and
+    local.get $index
+    i32.const 2
+    call $extractor_token_byte
+    local.get $c
+    i32.eq
+    i32.and
+    local.get $index
+    i32.const 3
+    call $extractor_token_byte
+    local.get $d
+    i32.eq
+    i32.and
+  )
+
+  (func $extractor_classify_key (param $index i32) (result i32)
+    local.get $index
+    i32.const 112
+    i32.const 104
+    call $extractor_payload_matches2
+    if
+      global.get $EXTRACTOR_FIELD_PHASE
+      return
+    end
+
+    local.get $index
+    i32.const 116
+    i32.const 115
+    call $extractor_payload_matches2
+    if
+      global.get $EXTRACTOR_FIELD_TS
+      return
+    end
+
+    local.get $index
+    i32.const 100
+    i32.const 117
+    i32.const 114
+    call $extractor_payload_matches3
+    if
+      global.get $EXTRACTOR_FIELD_DUR
+      return
+    end
+
+    local.get $index
+    i32.const 112
+    i32.const 105
+    i32.const 100
+    call $extractor_payload_matches3
+    if
+      global.get $EXTRACTOR_FIELD_PID
+      return
+    end
+
+    local.get $index
+    i32.const 116
+    i32.const 105
+    i32.const 100
+    call $extractor_payload_matches3
+    if
+      global.get $EXTRACTOR_FIELD_TID
+      return
+    end
+
+    local.get $index
+    i32.const 110
+    i32.const 97
+    i32.const 109
+    i32.const 101
+    call $extractor_payload_matches4
+    if
+      global.get $EXTRACTOR_FIELD_NAME
+      return
+    end
+
+    global.get $EXTRACTOR_FIELD_NONE
+  )
+
+  (func $extractor_parse_u32 (param $index i32) (result i32)
+    (local $ptr i32)
+    (local $len i32)
+    (local $i i32)
+    (local $byte i32)
+    (local $value i32)
+
+    local.get $index
+    call $extractor_token_payload_ptr
+    local.set $ptr
+    local.get $index
+    call $extractor_token_payload_len
+    local.tee $len
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $len
+        i32.ge_u
+        br_if $done
+
+        local.get $ptr
+        local.get $i
+        i32.add
+        i32.load8_u
+        local.tee $byte
+        i32.const 48
+        i32.lt_u
+        local.get $byte
+        i32.const 57
+        i32.gt_u
+        i32.or
+        if
+          i32.const 0
+          return
+        end
+
+        local.get $value
+        i32.const 10
+        i32.mul
+        local.get $byte
+        i32.const 48
+        i32.sub
+        i32.add
+        local.set $value
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    local.get $value
+  )
+
+  (func $extractor_store_value (param $field_id i32) (param $value_index i32)
+    (local $kind i32)
+
+    local.get $value_index
+    call $extractor_token_kind
+    local.set $kind
+
+    local.get $field_id
+    global.get $EXTRACTOR_FIELD_PHASE
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_STRING
+    i32.eq
+    i32.and
+    if
+      global.get $EXTRACTOR_EVENT_PTR
+      local.get $value_index
+      i32.const 0
+      call $extractor_token_byte
+      i32.store8
+      return
+    end
+
+    local.get $field_id
+    global.get $EXTRACTOR_FIELD_NAME
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_STRING
+    i32.eq
+    i32.and
+    if
+      global.get $EXTRACTOR_EVENT_PTR
+      i32.const 4
+      i32.add
+      local.get $value_index
+      call $extractor_token_payload_ptr
+      local.get $value_index
+      call $extractor_token_payload_len
+      call $strtab_intern
+      i32.store
+      return
+    end
+
+    local.get $field_id
+    global.get $EXTRACTOR_FIELD_TS
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_NUMBER
+    i32.eq
+    i32.and
+    if
+      global.get $EXTRACTOR_EVENT_PTR
+      i32.const 8
+      i32.add
+      local.get $value_index
+      call $extractor_parse_u32
+      f64.convert_i32_u
+      f64.store
+      return
+    end
+
+    local.get $field_id
+    global.get $EXTRACTOR_FIELD_DUR
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_NUMBER
+    i32.eq
+    i32.and
+    if
+      global.get $EXTRACTOR_EVENT_PTR
+      i32.const 16
+      i32.add
+      local.get $value_index
+      call $extractor_parse_u32
+      f64.convert_i32_u
+      f64.store
+      return
+    end
+
+    local.get $field_id
+    global.get $EXTRACTOR_FIELD_PID
+    i32.eq
+    if
+      global.get $EXTRACTOR_EVENT_PTR
+      i32.const 24
+      i32.add
+      local.get $kind
+      global.get $PARSER_JSON_TOKEN_STRING
+      i32.eq
+      if (result i32)
+        local.get $value_index
+        call $extractor_token_payload_ptr
+        local.get $value_index
+        call $extractor_token_payload_len
+        call $strtab_intern
+      else
+        local.get $value_index
+        call $extractor_parse_u32
+      end
+      i32.store
+      return
+    end
+
+    local.get $field_id
+    global.get $EXTRACTOR_FIELD_TID
+    i32.eq
+    if
+      global.get $EXTRACTOR_EVENT_PTR
+      i32.const 28
+      i32.add
+      local.get $kind
+      global.get $PARSER_JSON_TOKEN_STRING
+      i32.eq
+      if (result i32)
+        local.get $value_index
+        call $extractor_token_payload_ptr
+        local.get $value_index
+        call $extractor_token_payload_len
+        call $strtab_intern
+      else
+        local.get $value_index
+        call $extractor_parse_u32
+      end
+      i32.store
+    end
+  )
+
   (func $extractor_zero_event
     global.get $EXTRACTOR_EVENT_PTR
     global.get $EXTRACTOR_EVENT_BYTES
@@ -328,11 +670,16 @@
     (local $count i32)
     (local $depth i32)
     (local $kind i32)
+    (local $field_id i32)
+    (local $after_key i32)
+    (local $expect_key i32)
 
     local.get $start_index
     local.set $i
     call $extractor_token_count
     local.set $count
+    i32.const 1
+    local.set $expect_key
 
     block $done
       loop $loop
@@ -344,6 +691,63 @@
         local.get $i
         call $extractor_token_kind
         local.set $kind
+
+        local.get $depth
+        i32.const 1
+        i32.eq
+        if
+          local.get $kind
+          global.get $PARSER_JSON_TOKEN_COMMA
+          i32.eq
+          if
+            i32.const 1
+            local.set $expect_key
+            i32.const 0
+            local.set $after_key
+            global.get $EXTRACTOR_FIELD_NONE
+            local.set $field_id
+          end
+
+          local.get $after_key
+          local.get $kind
+          global.get $PARSER_JSON_TOKEN_COLON
+          i32.eq
+          i32.and
+          if
+            i32.const 0
+            local.set $after_key
+            local.get $i
+            i32.const 1
+            i32.add
+            local.tee $i
+            local.get $count
+            i32.lt_u
+            if
+              local.get $field_id
+              local.get $i
+              call $extractor_store_value
+              global.get $EXTRACTOR_FIELD_NONE
+              local.set $field_id
+              i32.const 0
+              local.set $expect_key
+            end
+          else
+            local.get $expect_key
+            local.get $kind
+            global.get $PARSER_JSON_TOKEN_STRING
+            i32.eq
+            i32.and
+            if
+              local.get $i
+              call $extractor_classify_key
+              local.set $field_id
+              i32.const 1
+              local.set $after_key
+              i32.const 0
+              local.set $expect_key
+            end
+          end
+        end
 
         local.get $kind
         global.get $PARSER_JSON_TOKEN_LBRACE
