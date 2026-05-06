@@ -64,10 +64,27 @@ function indexConstantValue(sectionName, name) {
   return entry.value;
 }
 
+function coldReloadPerformanceBudgetValue(name) {
+  const entry = spec.coldReload?.performanceBudgets?.[name];
+  if (entry === undefined) {
+    throw new Error(`unknown cold-reload performance budget ${name}`);
+  }
+  return entry.value;
+}
+
 module.exports = {
   spec,
   constantEntries,
   constantValue,
+  COLD_RELOAD_MIN_BUDGET_MS: coldReloadPerformanceBudgetValue(
+    "COLD_RELOAD_MIN_BUDGET_MS",
+  ),
+  COLD_RELOAD_TARGET_BUDGET_MS: coldReloadPerformanceBudgetValue(
+    "COLD_RELOAD_TARGET_BUDGET_MS",
+  ),
+  COLD_RELOAD_TARGET_TRACE_BYTES: coldReloadPerformanceBudgetValue(
+    "COLD_RELOAD_TARGET_TRACE_BYTES",
+  ),
   OPFS_PAGE_SIZE: constantValue("OPFS_PAGE_SIZE"),
   WASM_PAGE_SIZE: constantValue("WASM_PAGE_SIZE"),
   TOKEN_RECORD_BYTES: spec.parser.TOKEN_RECORD_BYTES.value,

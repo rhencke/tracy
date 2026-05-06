@@ -62,6 +62,9 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `MEM_HEAP_CEILING_BYTES` | `0x40000000` | 1 GiB heap ceiling. |
 | `MEM_HEAP_CEILING_PAGES` | `16384` | 1 GiB heap ceiling in WebAssembly pages. |
 | `TOKEN_RECORD_BYTES` | `12` | Parser token output record byte length. |
+| `COLD_RELOAD_TARGET_TRACE_BYTES` | `10737418240` | v0.1 mobile target trace size used to scale cold-reload parity check budgets. |
+| `COLD_RELOAD_TARGET_BUDGET_MS` | `30000` | Maximum cold-reload time budget for the v0.1 mobile target trace size. |
+| `COLD_RELOAD_MIN_BUDGET_MS` | `250` | Minimum cold-reload check budget for small local fixtures where process startup noise dominates. |
 | `INDEX_TARGET_ENCODED_BYTES_PER_EVENT` | `12` | Maximum average compact index payload bytes per event. |
 | `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
 | `INDEX_COLUMN_ENTRY_BYTES` | `16` | Byte length of one compact index column directory entry. |
@@ -84,6 +87,9 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 Index page header, directory, and query-result offsets are part of the
 generated layout spec so cold-reload parity checks and binary readers use
 documented names rather than ad hoc byte arithmetic.
+
+Cold-reload performance budgets are also spec values so CI checks scale
+small generated fixtures against the same documented v0.1 target.
 
 `MEM_STACK_BASE`, region sizes, page size constants, and end addresses may
 also be exported for convenience, but the base constants above are the

@@ -161,6 +161,13 @@ function renderMemoryLayoutSection() {
 
   lines.push(
     `| \`TOKEN_RECORD_BYTES\` | \`${spec.parser.TOKEN_RECORD_BYTES.value}\` | ${spec.parser.TOKEN_RECORD_BYTES.description} |`,
+  );
+
+  for (const [name, entry] of Object.entries(spec.coldReload.performanceBudgets)) {
+    lines.push(`| \`${name}\` | \`${formatValue(entry)}\` | ${entry.description} |`);
+  }
+
+  lines.push(
     `| \`INDEX_TARGET_ENCODED_BYTES_PER_EVENT\` | \`${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.value}\` | ${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.description} |`,
     `| \`INDEX_DECODE_HINT_TRACK_ID_SHIFT\` | \`${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.value}\` | ${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.description} |`,
     `| \`INDEX_COLUMN_ENTRY_BYTES\` | \`${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.value}\` | ${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.description} |`,
@@ -178,6 +185,9 @@ function renderMemoryLayoutSection() {
     "Index page header, directory, and query-result offsets are part of the",
     "generated layout spec so cold-reload parity checks and binary readers use",
     "documented names rather than ad hoc byte arithmetic.",
+    "",
+    "Cold-reload performance budgets are also spec values so CI checks scale",
+    "small generated fixtures against the same documented v0.1 target.",
     "",
     "`MEM_STACK_BASE`, region sizes, page size constants, and end addresses may",
     "also be exported for convenience, but the base constants above are the",

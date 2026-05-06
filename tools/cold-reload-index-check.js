@@ -3,6 +3,9 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const {
+  COLD_RELOAD_MIN_BUDGET_MS,
+  COLD_RELOAD_TARGET_BUDGET_MS,
+  COLD_RELOAD_TARGET_TRACE_BYTES,
   INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET,
   INDEX_COLUMN_ENTRY_BYTES,
   INDEX_DECODE_HINT_TRACK_ID_SHIFT,
@@ -22,7 +25,6 @@ const {
 } = require("./layout-spec.js");
 
 const MiB = 1024 * 1024;
-const GiB = 1024 * MiB;
 const DEFAULT_TRACE_BYTES = 4 * MiB;
 // Seeded fixture generation keeps cold-reload assertions deterministic while
 // still exercising varied JSON payload bytes.
@@ -439,12 +441,6 @@ function compactPayloadBytes(indexBytes, index, pages) {
 }
 
 function scaledColdReloadBudgetMs(bytes) {
-  // v0.1's mobile target is a 10 GiB trace cold-reloaded within 30 seconds.
-  // Small local fixtures keep a minimum budget so process startup noise does
-  // not make this check flaky.
-  const COLD_RELOAD_TARGET_TRACE_BYTES = 10 * GiB;
-  const COLD_RELOAD_TARGET_BUDGET_MS = 30_000;
-  const COLD_RELOAD_MIN_BUDGET_MS = 250;
   const scaled =
     (bytes / COLD_RELOAD_TARGET_TRACE_BYTES) * COLD_RELOAD_TARGET_BUDGET_MS;
   return Math.max(COLD_RELOAD_MIN_BUDGET_MS, Math.ceil(scaled));

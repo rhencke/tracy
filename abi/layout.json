@@ -144,6 +144,22 @@
       "description": "Parser token output record byte length."
     }
   },
+  "coldReload": {
+    "performanceBudgets": {
+      "COLD_RELOAD_TARGET_TRACE_BYTES": {
+        "value": 10737418240,
+        "description": "v0.1 mobile target trace size used to scale cold-reload parity check budgets."
+      },
+      "COLD_RELOAD_TARGET_BUDGET_MS": {
+        "value": 30000,
+        "description": "Maximum cold-reload time budget for the v0.1 mobile target trace size."
+      },
+      "COLD_RELOAD_MIN_BUDGET_MS": {
+        "value": 250,
+        "description": "Minimum cold-reload check budget for small local fixtures where process startup noise dominates."
+      }
+    }
+  },
   "index": {
     "INDEX_TARGET_ENCODED_BYTES_PER_EVENT": {
       "value": 12,
