@@ -46,13 +46,13 @@
     i32.const 0
     i32.const 0
     call $file_picker_open
-    i32.const -1
+    i32.const 7
     i32.const 3
     call $assert_eq_i32
 
     i32.const 1
     call $opfs_create_from_file
-    i32.const -1
+    i32.const 11
     i32.const 4
     call $assert_eq_i32
 
@@ -61,7 +61,7 @@
     i32.const 16
     i32.const 2048
     call $opfs_read_chunk
-    i32.const 0
+    i32.const 16
     i32.const 5
     call $assert_eq_i32
   )

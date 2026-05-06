@@ -180,13 +180,13 @@ function createHostImports() {
     canvas_listen_resize() {},
     pointer_listen() {},
     file_picker_open() {
-      return -1;
+      return 7;
     },
     opfs_create_from_file() {
-      return -1;
+      return 11;
     },
     opfs_read_chunk() {
-      return 0;
+      return 16;
     },
   };
 }

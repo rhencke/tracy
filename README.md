@@ -73,6 +73,40 @@ node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 python3 -m http.server -d dist 8000
 ```
 
+## Browser smoke checks
+
+The host shim smoke fixture is built to `dist/wasm/host_smoke.wasm` by
+`bash tools/build.sh`.  It uses the same host imports as the app and is meant
+for a manual run in a JSPI-capable browser.
+
+1. Serve the repository root after building:
+
+   ```sh
+   python3 -m http.server 8000
+   ```
+
+2. Open `http://localhost:8000/smoke/host-shim.html`.  The page imports
+   `shim.js`, loads `dist/wasm/host_smoke.wasm`, and calls `tracy_main()` to
+   install resize and pointer listeners.  Press **Canvas size** to call
+   `canvas_get_size()` through wasm; the result packs width in the low 32 bits
+   and height in the high 32 bits.
+
+3. Tap or drag on the canvas, then press **Canvas size** again.  The displayed
+   pointer record count should increase.  The same value is visible in
+   DevTools from the documented scratch ring:
+
+   ```js
+   const memory = await import("./host-shim.js").then((module) => module.memory);
+   const view = new DataView(memory.buffer);
+   view.getUint32(0x48, true); // unread pointer record count
+   view.getUint8(0x60);        // first record kind: 1 down, 2 move, 3 up, 4 cancel
+   ```
+
+4. Press **File round trip** and choose a small trace or JSON file.  A
+   non-negative byte count means the file picker resolved, the file was copied
+   into OPFS, and the first chunk was copied back into linear memory at
+   `0x800`.
+
 The hosted scaffold is <https://rhencke.github.io/tracy/>.  At this
 stage it is intentionally only a blank full-screen canvas loaded from
 the placeholder wasm module.
