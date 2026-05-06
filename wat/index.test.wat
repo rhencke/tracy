@@ -43,7 +43,11 @@
   (import "index" "INDEX_SLICE_COLUMN_DEPTH" (global $INDEX_SLICE_COLUMN_DEPTH i32))
   (import "index" "INDEX_SLICE_COLUMN_CAT_ID" (global $INDEX_SLICE_COLUMN_CAT_ID i32))
   (import "index" "INDEX_SLICE_COLUMN_COLOR" (global $INDEX_SLICE_COLUMN_COLOR i32))
+  (import "index" "INDEX_COUNTER_COLUMN_TS" (global $INDEX_COUNTER_COLUMN_TS i32))
+  (import "index" "INDEX_COUNTER_COLUMN_NAME_ID" (global $INDEX_COUNTER_COLUMN_NAME_ID i32))
+  (import "index" "INDEX_COUNTER_COLUMN_VALUE" (global $INDEX_COUNTER_COLUMN_VALUE i32))
   (import "index" "INDEX_DECODE_HINT_COMPACT_SLICES" (global $INDEX_DECODE_HINT_COMPACT_SLICES i32))
+  (import "index" "INDEX_DECODE_HINT_COUNTERS" (global $INDEX_DECODE_HINT_COUNTERS i32))
   (import "index" "INDEX_ENCODING_UVARINT" (global $INDEX_ENCODING_UVARINT i32))
   (import "index" "INDEX_ENCODING_ZIGZAG_VARINT" (global $INDEX_ENCODING_ZIGZAG_VARINT i32))
   (import "index" "INDEX_ENCODING_DICT8" (global $INDEX_ENCODING_DICT8 i32))
@@ -52,6 +56,7 @@
   (import "index" "INDEX_ENCODING_RLE" (global $INDEX_ENCODING_RLE i32))
   (import "index" "INDEX_ENCODING_SIDE_REF" (global $INDEX_ENCODING_SIDE_REF i32))
   (import "index" "INDEX_ENCODING_FIXED32" (global $INDEX_ENCODING_FIXED32 i32))
+  (import "index" "INDEX_ENCODING_FIXED64" (global $INDEX_ENCODING_FIXED64 i32))
   (import "index" "INDEX_CODEC_STATUS_OK" (global $INDEX_CODEC_STATUS_OK i32))
   (import "index" "INDEX_CODEC_STATUS_BAD_VARINT" (global $INDEX_CODEC_STATUS_BAD_VARINT i32))
   (import "index" "INDEX_CODEC_STATUS_BAD_RLE" (global $INDEX_CODEC_STATUS_BAD_RLE i32))
@@ -533,6 +538,12 @@
     call $index_column_fixed_width
     i32.const 4
     i32.const 205
+    call $assert_eq_i32
+
+    global.get $INDEX_ENCODING_FIXED64
+    call $index_column_fixed_width
+    i32.const 8
+    i32.const 356
     call $assert_eq_i32
 
     i32.const 20000
@@ -1213,7 +1224,7 @@
     call $assert_eq_i32
   )
 
-  (func (export "test_index_add_event_ignores_async_instant_and_counters")
+  (func (export "test_index_add_event_ignores_async_and_instant_events")
     i32.const 21
     global.get $ALT_PAGE
     i32.const 9
@@ -1247,20 +1258,6 @@
     i32.const 326
     call $assert_eq_i32
 
-    i32.const 67
-    i32.const 3
-    f64.const 3
-    f64.const 0
-    i32.const 1
-    i32.const 2
-    i32.const 0
-    call $write_event
-    global.get $EVENT
-    call $index_add_event
-    global.get $INDEX_INGEST_STATUS_IGNORED
-    i32.const 327
-    call $assert_eq_i32
-
     call $index_track_count
     i32.const 0
     i32.const 328
@@ -1270,6 +1267,308 @@
     i32.const 0
     i32.const 329
     call $assert_eq_i32
+  )
+
+  (func (export "test_index_add_event_writes_counter_page")
+    (local $ptr i32)
+    (local $len i32)
+    (local $encoding i32)
+    (local $rows i32)
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 16
+    call $index_writer_init
+
+    i32.const 67
+    i32.const 700
+    f64.const 25
+    f64.const 42
+    i32.const 3
+    i32.const 4
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 357
+    call $assert_eq_i32
+
+    call $index_track_count
+    i32.const 1
+    i32.const 358
+    call $assert_eq_i32
+
+    call $index_writer_pending_rows
+    i32.const 1
+    i32.const 359
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 360
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_COUNTERS
+    i32.and
+    global.get $INDEX_DECODE_HINT_COUNTERS
+    i32.const 361
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    i32.const 36
+    i32.add
+    i32.load
+    i32.const 8
+    i32.shr_u
+    i32.const 0
+    i32.const 362
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    i32.const 20
+    i32.add
+    i64.load
+    i64.const 25
+    i32.const 363
+    call $assert_eq_i64
+
+    global.get $ALT_PAGE
+    global.get $INDEX_COUNTER_COLUMN_TS
+    call $index_column_span
+    local.set $rows
+    local.set $encoding
+    local.set $len
+    local.set $ptr
+
+    local.get $encoding
+    global.get $INDEX_ENCODING_UVARINT
+    i32.const 364
+    call $assert_eq_i32
+
+    local.get $rows
+    i32.const 1
+    i32.const 365
+    call $assert_eq_i32
+
+    local.get $ptr
+    i32.load8_u
+    i32.const 0
+    i32.const 366
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    global.get $INDEX_COUNTER_COLUMN_NAME_ID
+    call $index_column_span
+    local.set $rows
+    local.set $encoding
+    local.set $len
+    local.set $ptr
+
+    local.get $encoding
+    global.get $INDEX_ENCODING_DICT16
+    i32.const 367
+    call $assert_eq_i32
+
+    local.get $ptr
+    i32.load16_u
+    i32.const 700
+    i32.const 368
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    global.get $INDEX_COUNTER_COLUMN_VALUE
+    call $index_column_span
+    local.set $rows
+    local.set $encoding
+    local.set $len
+    local.set $ptr
+
+    local.get $encoding
+    global.get $INDEX_ENCODING_FIXED64
+    i32.const 369
+    call $assert_eq_i32
+
+    local.get $ptr
+    i64.load
+    i64.const 0x4045000000000000
+    i32.const 370
+    call $assert_eq_i64
+  )
+
+  (func (export "test_counter_writer_splits_modes_and_tracks")
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 17
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 1
+    f64.const 10
+    f64.const 1
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 371
+    call $assert_eq_i32
+
+    i32.const 67
+    i32.const 2
+    f64.const 20
+    f64.const 2
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 372
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 1
+    i32.const 373
+    call $assert_eq_i32
+
+    i32.const 67
+    i32.const 3
+    f64.const 25
+    f64.const 3
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 374
+    call $assert_eq_i32
+
+    i32.const 67
+    i32.const 4
+    f64.const 18
+    f64.const 4
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 375
+    call $assert_eq_i32
+
+    i32.const 67
+    i32.const 5
+    f64.const 30
+    f64.const 5
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 376
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 2
+    i32.const 377
+    call $assert_eq_i32
+  )
+
+  (func (export "test_counter_writer_propagates_commit_failures")
+    (local $i i32)
+
+    i32.const 111
+    global.get $ALT_PAGE
+    i32.const 18
+    call $index_writer_init
+
+    i32.const 67
+    i32.const 1
+    f64.const 10
+    f64.const 1
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 378
+    call $assert_eq_i32
+
+    i32.const 67
+    i32.const 2
+    f64.const 20
+    f64.const 2
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
+    i32.const 379
+    call $assert_eq_i32
+
+    i32.const 111
+    global.get $ALT_PAGE
+    i32.const 19
+    call $index_writer_init
+
+    i32.const 67
+    i32.const 3
+    f64.const 30
+    f64.const 3
+    i32.const 2
+    i32.const 1
+    i32.const 0
+    call $write_event
+
+    block $done
+      loop $fill
+        local.get $i
+        global.get $INDEX_WRITER_ROWS_PER_PAGE
+        i32.ge_u
+        br_if $done
+
+        global.get $EVENT
+        call $index_add_event
+        global.get $INDEX_WRITER_STATUS_OK
+        i32.const 380
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $fill
+      end
+    end
+
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
+    i32.const 381
+    call $assert_eq_i32
+
+    i32.const 0
+    global.get $ALT_PAGE
+    i32.const 0
+    call $index_writer_init
   )
 
   (func (export "test_index_add_event_reports_stack_and_init_errors")
@@ -1294,10 +1593,71 @@
     i32.const 330
     call $assert_eq_i32
 
+    i32.const 67
+    i32.const 2
+    f64.const 1
+    f64.const 2
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_WRITER_STATUS_NOT_INITIALIZED
+    i32.const 382
+    call $assert_eq_i32
+
     i32.const 21
     global.get $ALT_PAGE
     i32.const 10
     call $index_writer_init
+
+    i32.const 0
+    local.set $i
+
+    block $tracks_done
+      loop $tracks
+        local.get $i
+        global.get $INDEX_TRACK_CAPACITY
+        i32.ge_u
+        br_if $tracks_done
+
+        local.get $i
+        i32.const 0
+        call $index_track_for_pid_tid
+        local.get $i
+        i32.const 383
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $tracks
+      end
+    end
+
+    i32.const 67
+    i32.const 3
+    f64.const 1
+    f64.const 3
+    global.get $INDEX_TRACK_CAPACITY
+    i32.const 0
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_TRACK_FULL
+    i32.const 388
+    call $assert_eq_i32
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 10
+    call $index_writer_init
+
+    i32.const 0
+    local.set $i
 
     i32.const 69
     i32.const 0
@@ -2889,6 +3249,54 @@
     i32.const 1
     i32.const 54
     call $assert_eq_i32
+  )
+
+  (func (export "test_index_writer_tracks_raw_page_max_ts")
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 20
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 20
+    f64.const 10
+    f64.const 1
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 384
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 21
+    f64.const 15
+    f64.const 1
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 385
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 386
+    call $assert_eq_i32
+
+    global.get $ALT_PAGE
+    i32.const 20
+    i32.add
+    i64.load
+    i64.const 15
+    i32.const 387
+    call $assert_eq_i64
   )
 
   (func (export "test_index_writer_commits_full_pages_immediately")
