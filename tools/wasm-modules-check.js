@@ -1,0 +1,66 @@
+#!/usr/bin/env node
+
+const assert = require("node:assert/strict");
+const path = require("node:path");
+const { pathToFileURL } = require("node:url");
+
+async function main() {
+  const manifestUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
+  const {
+    instantiateWasmModule,
+    wasmModuleGraphIds,
+    wasmModuleUrl,
+  } = await import(manifestUrl);
+
+  assert.deepEqual(wasmModuleGraphIds("parser"), [
+    "std/mem",
+    "parser_state",
+    "std/alloc",
+    "std/hash",
+    "std/strtab",
+    "parser",
+  ]);
+  assert.equal(wasmModuleUrl("std/strtab", "/assets/wasm"), "/assets/wasm/std/strtab.wasm");
+
+  const compiledIds = [];
+  const instantiatedIds = [];
+  const { exports, imports } = await instantiateWasmModule(
+    "parser",
+    { env: { memory: "shared-memory" } },
+    {
+      baseUrl: "/assets/wasm",
+      compile(url, moduleId) {
+        compiledIds.push(moduleId);
+        return Promise.resolve({ moduleId, url });
+      },
+      instantiate(module, moduleImports, moduleId, url) {
+        assert.equal(module.moduleId, moduleId);
+        assert.equal(module.url, url);
+        assert.equal(moduleImports.env.memory, "shared-memory");
+        instantiatedIds.push(moduleId);
+        return Promise.resolve({ moduleId });
+      },
+    },
+  );
+
+  assert.deepEqual(compiledIds, [
+    "std/mem",
+    "parser_state",
+    "std/alloc",
+    "std/hash",
+    "std/strtab",
+    "parser",
+  ]);
+  assert.deepEqual(instantiatedIds, compiledIds);
+  assert.equal(exports.moduleId, "parser");
+  assert.equal(imports.mem.moduleId, "std/mem");
+  assert.equal(imports.parser_state.moduleId, "parser_state");
+  assert.equal(imports.alloc.moduleId, "std/alloc");
+  assert.equal(imports.hash.moduleId, "std/hash");
+  assert.equal(imports.strtab.moduleId, "std/strtab");
+}
+
+main().catch((error) => {
+  console.error(error.stack || error.message || String(error));
+  process.exitCode = 1;
+});
