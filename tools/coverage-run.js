@@ -133,11 +133,13 @@ async function runManifest(manifestPath) {
 }
 
 function usage() {
-  console.error("usage: coverage-run dist/wasm-cov");
+  console.error("usage: coverage-run [--check] dist/wasm-cov");
 }
 
 async function main() {
-  const [root] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const check = args[0] === "--check";
+  const [root] = check ? args.slice(1) : args;
 
   if (!root) {
     usage();
@@ -155,9 +157,11 @@ async function main() {
     await runManifest(manifestPath);
   }
 
-  execFileSync(process.execPath, [path.join(__dirname, "coverage-check.js"), root], {
-    stdio: "inherit",
-  });
+  if (check) {
+    execFileSync(process.execPath, [path.join(__dirname, "coverage-check.js"), root], {
+      stdio: "inherit",
+    });
+  }
 }
 
 main().catch((error) => {
