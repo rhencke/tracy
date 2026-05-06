@@ -100,12 +100,14 @@
   (global $EXTRACTOR_FIELD_DUR i32 (i32.const 4))
   (global $EXTRACTOR_FIELD_PID i32 (i32.const 5))
   (global $EXTRACTOR_FIELD_TID i32 (i32.const 6))
+  (global $EXTRACTOR_FIELD_ARGS i32 (i32.const 7))
   (global $active_state (mut i32) (i32.const 0))
   (global $extractor_token_base (mut i32) (i32.const 0))
   (global $extractor_cursor (mut i32) (i32.const 0))
   (global $extractor_in_trace_events (mut i32) (i32.const 0))
   (global $extractor_after_trace_events_key (mut i32) (i32.const 0))
   (global $extractor_after_trace_events_colon (mut i32) (i32.const 0))
+  (global $extractor_discard_event (mut i32) (i32.const 0))
 
   (func $field (param $state i32) (param $offset i32) (result i32)
     local.get $state
@@ -467,7 +469,301 @@
       return
     end
 
+    local.get $index
+    i32.const 97
+    i32.const 114
+    i32.const 103
+    i32.const 115
+    call $extractor_payload_matches4
+    if
+      global.get $EXTRACTOR_FIELD_ARGS
+      return
+    end
+
     global.get $EXTRACTOR_FIELD_NONE
+  )
+
+  (func $extractor_is_scalar_value (param $kind i32) (result i32)
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_STRING
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_NUMBER
+    i32.eq
+    i32.or
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_TRUE
+    i32.eq
+    i32.or
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_FALSE
+    i32.eq
+    i32.or
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_NULL
+    i32.eq
+    i32.or
+  )
+
+  (func $extractor_token_end_ptr (param $index i32) (result i32)
+    local.get $index
+    call $extractor_token_payload_ptr
+    local.get $index
+    call $extractor_token_payload_len
+    i32.add
+  )
+
+  (func $extractor_capture_args_span (param $start_index i32) (param $end_index i32)
+    (local $start_ptr i32)
+    (local $end_ptr i32)
+
+    local.get $start_index
+    call $extractor_token_payload_ptr
+    local.set $start_ptr
+    local.get $end_index
+    call $extractor_token_end_ptr
+    local.set $end_ptr
+
+    global.get $EXTRACTOR_EVENT_PTR
+    i32.const 32
+    i32.add
+    local.get $start_ptr
+    i32.store
+
+    global.get $EXTRACTOR_EVENT_PTR
+    i32.const 36
+    i32.add
+    local.get $end_ptr
+    local.get $start_ptr
+    i32.ge_u
+    if (result i32)
+      local.get $end_ptr
+      local.get $start_ptr
+      i32.sub
+    else
+      i32.const 0
+    end
+    i32.store
+  )
+
+  (func $extractor_skip_value (param $start_index i32) (result i32)
+    (local $i i32)
+    (local $count i32)
+    (local $depth i32)
+    (local $kind i32)
+
+    local.get $start_index
+    call $extractor_token_kind
+    local.tee $kind
+    call $extractor_is_scalar_value
+    if
+      local.get $start_index
+      i32.const 1
+      i32.add
+      return
+    end
+
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_ERROR
+    i32.eq
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_EOF
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_NEED_MORE
+    i32.eq
+    i32.or
+    if
+      i32.const -1
+      return
+    end
+
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    i32.eq
+    local.get $kind
+    global.get $PARSER_JSON_TOKEN_LBRACK
+    i32.eq
+    i32.or
+    i32.eqz
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $start_index
+    local.set $i
+    call $extractor_token_count
+    local.set $count
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $count
+        i32.ge_u
+        br_if $done
+
+        local.get $i
+        call $extractor_token_kind
+        local.set $kind
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_LBRACE
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_LBRACK
+        i32.eq
+        i32.or
+        if
+          local.get $depth
+          i32.const 1
+          i32.add
+          local.set $depth
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_RBRACE
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_RBRACK
+        i32.eq
+        i32.or
+        if
+          local.get $depth
+          i32.const 1
+          i32.sub
+          local.tee $depth
+          i32.eqz
+          if
+            local.get $i
+            i32.const 1
+            i32.add
+            return
+          end
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_ERROR
+        i32.eq
+        if
+          i32.const 0
+          return
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_EOF
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_NEED_MORE
+        i32.eq
+        i32.or
+        if
+          i32.const -1
+          return
+        end
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    i32.const -1
+  )
+
+  (func $extractor_skip_to_object_end (param $start_index i32) (result i32)
+    (local $i i32)
+    (local $count i32)
+    (local $depth i32)
+    (local $kind i32)
+
+    local.get $start_index
+    local.set $i
+    call $extractor_token_count
+    local.set $count
+    i32.const 1
+    local.set $depth
+
+    block $done
+      loop $loop
+        local.get $i
+        local.get $count
+        i32.ge_u
+        br_if $done
+
+        local.get $i
+        call $extractor_token_kind
+        local.set $kind
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_LBRACE
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_LBRACK
+        i32.eq
+        i32.or
+        if
+          local.get $depth
+          i32.const 1
+          i32.add
+          local.set $depth
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_RBRACK
+        i32.eq
+        if
+          local.get $depth
+          i32.const 1
+          i32.sub
+          local.set $depth
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_RBRACE
+        i32.eq
+        if
+          local.get $depth
+          i32.const 1
+          i32.sub
+          local.tee $depth
+          i32.eqz
+          if
+            local.get $i
+            i32.const 1
+            i32.add
+            return
+          end
+        end
+
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_EOF
+        i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_NEED_MORE
+        i32.eq
+        i32.or
+        if
+          i32.const -1
+          return
+        end
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
+
+    i32.const -1
   )
 
   (func $extractor_parse_u32 (param $index i32) (result i32)
@@ -673,6 +969,8 @@
     (local $field_id i32)
     (local $after_key i32)
     (local $expect_key i32)
+    (local $value_index i32)
+    (local $next_index i32)
 
     local.get $start_index
     local.set $i
@@ -719,19 +1017,86 @@
             local.get $i
             i32.const 1
             i32.add
-            local.tee $i
+            local.tee $value_index
             local.get $count
             i32.lt_u
             if
               local.get $field_id
-              local.get $i
-              call $extractor_store_value
+              global.get $EXTRACTOR_FIELD_ARGS
+              i32.eq
+              if
+                local.get $value_index
+                call $extractor_skip_value
+                local.tee $next_index
+                i32.const -1
+                i32.eq
+                if
+                  i32.const -1
+                  return
+                end
+
+                local.get $next_index
+                i32.eqz
+                if
+                  i32.const 1
+                  global.set $extractor_discard_event
+                  local.get $value_index
+                  call $extractor_skip_to_object_end
+                  return
+                end
+
+                local.get $value_index
+                local.get $next_index
+                i32.const 1
+                i32.sub
+                call $extractor_capture_args_span
+              else
+                local.get $field_id
+                local.get $value_index
+                call $extractor_store_value
+
+                local.get $value_index
+                call $extractor_skip_value
+                local.tee $next_index
+                i32.const -1
+                i32.eq
+                if
+                  i32.const -1
+                  return
+                end
+
+                local.get $next_index
+                i32.eqz
+                if
+                  i32.const 1
+                  global.set $extractor_discard_event
+                  local.get $value_index
+                  call $extractor_skip_to_object_end
+                  return
+                end
+              end
+
+              local.get $next_index
+              i32.const 1
+              i32.sub
+              local.set $i
+              local.get $field_id
+              drop
               global.get $EXTRACTOR_FIELD_NONE
               local.set $field_id
               i32.const 0
               local.set $expect_key
             end
           else
+            local.get $after_key
+            if
+              i32.const 1
+              global.set $extractor_discard_event
+              local.get $i
+              call $extractor_skip_to_object_end
+              return
+            end
+
             local.get $expect_key
             local.get $kind
             global.get $PARSER_JSON_TOKEN_STRING
@@ -752,6 +1117,10 @@
         local.get $kind
         global.get $PARSER_JSON_TOKEN_LBRACE
         i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_LBRACK
+        i32.eq
+        i32.or
         if
           local.get $depth
           i32.const 1
@@ -762,6 +1131,10 @@
         local.get $kind
         global.get $PARSER_JSON_TOKEN_RBRACE
         i32.eq
+        local.get $kind
+        global.get $PARSER_JSON_TOKEN_RBRACK
+        i32.eq
+        i32.or
         if
           local.get $depth
           i32.const 1
@@ -810,6 +1183,8 @@
     global.set $extractor_after_trace_events_key
     i32.const 0
     global.set $extractor_after_trace_events_colon
+    i32.const 0
+    global.set $extractor_discard_event
   )
 
   (func (export "extractor_next") (result i32)
@@ -850,6 +1225,8 @@
           i32.eq
           if
             call $extractor_zero_event
+            i32.const 0
+            global.set $extractor_discard_event
             global.get $extractor_cursor
             call $extractor_skip_object
             local.tee $next_index
@@ -862,6 +1239,13 @@
 
             local.get $next_index
             global.set $extractor_cursor
+            global.get $extractor_discard_event
+            if
+              i32.const 0
+              global.set $extractor_discard_event
+              br $scan
+            end
+
             global.get $EXTRACTOR_EVENT_PTR
             return
           end
@@ -1823,12 +2207,12 @@
     i32.const 0
   )
 
-  (func $emit_checked_structural_token (param $state i32) (param $out_ptr i32) (param $kind i32) (result i32)
+  (func $emit_checked_structural_token (param $state i32) (param $out_ptr i32) (param $kind i32) (param $token_ptr i32) (result i32)
     local.get $state
     local.get $out_ptr
     local.get $kind
-    i32.const 0
-    i32.const 0
+    local.get $token_ptr
+    i32.const 1
     call $emit_checked_token
   )
 
@@ -2344,6 +2728,7 @@
       local.get $state
       local.get $out_ptr
       global.get $PARSER_JSON_TOKEN_LBRACE
+      local.get $byte_ptr
       call $emit_checked_structural_token
       return
     end
@@ -2378,6 +2763,7 @@
       local.get $state
       local.get $out_ptr
       global.get $PARSER_JSON_TOKEN_RBRACE
+      local.get $byte_ptr
       call $emit_checked_structural_token
       return
     end
@@ -2404,6 +2790,7 @@
       local.get $state
       local.get $out_ptr
       global.get $PARSER_JSON_TOKEN_LBRACK
+      local.get $byte_ptr
       call $emit_checked_structural_token
       return
     end
@@ -2428,6 +2815,7 @@
       local.get $state
       local.get $out_ptr
       global.get $PARSER_JSON_TOKEN_RBRACK
+      local.get $byte_ptr
       call $emit_checked_structural_token
       return
     end
@@ -2454,6 +2842,7 @@
       local.get $state
       local.get $out_ptr
       global.get $PARSER_JSON_TOKEN_COLON
+      local.get $byte_ptr
       call $emit_checked_structural_token
       return
     end
@@ -2486,6 +2875,7 @@
       local.get $state
       local.get $out_ptr
       global.get $PARSER_JSON_TOKEN_COMMA
+      local.get $byte_ptr
       call $emit_checked_structural_token
       return
     end
