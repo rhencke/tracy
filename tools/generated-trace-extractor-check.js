@@ -78,6 +78,10 @@ function finalEventJson(index, padLen) {
   });
 }
 
+function finalEventBytes(index, padLen) {
+  return Buffer.byteLength(finalEventJson(index, padLen));
+}
+
 function buildTrace() {
   const random = createRandom(fnv1a(seedText));
   const chunks = [Buffer.from("[")];
@@ -87,7 +91,9 @@ function buildTrace() {
 
   while (true) {
     const prefixLen = count === 0 ? 0 : 1;
-    const suffixLen = 1;
+    const nextFinalPrefixLen = 1;
+    const nextFinalOverhead = finalEventBytes(count + 1, 0);
+    const suffixLen = nextFinalPrefixLen + nextFinalOverhead + 1;
     const event = eventJson(count, random, basePadLen);
     const eventLen = Buffer.byteLength(event);
 
@@ -106,7 +112,7 @@ function buildTrace() {
   }
 
   const prefixLen = count === 0 ? 0 : 1;
-  const finalOverhead = Buffer.byteLength(finalEventJson(count, 0));
+  const finalOverhead = finalEventBytes(count, 0);
   const finalPadLen = targetBytes - bytes - prefixLen - finalOverhead - 1;
   if (finalPadLen < 0) {
     throw new Error(`target size ${targetBytes} is too small for a valid generated trace`);
