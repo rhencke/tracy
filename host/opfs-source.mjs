@@ -3,7 +3,9 @@ import { u64ToNumber } from "./memory.mjs";
 
 export function makeOpfsSourceHost(memoryView, files) {
   const sources = new Map();
+  const indexes = new Map();
   let nextSourceId = 1;
+  let nextIndexId = 1;
 
   function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -19,8 +21,49 @@ export function makeOpfsSourceHost(memoryView, files) {
     return entry;
   }
 
+  function requireIndex(operation, indexId) {
+    const entry = indexes.get(indexId);
+
+    if (entry === undefined) {
+      throw new Error(`${operation}: unknown OPFS index id ${indexId}`);
+    }
+
+    return entry;
+  }
+
   async function opfsRoot() {
     return navigator.storage?.getDirectory?.() ?? null;
+  }
+
+  function decodeName(operation, namePtr, nameLen) {
+    const name = memoryView.decodeString(namePtr, nameLen).trim();
+
+    if (name.length === 0) {
+      throw new Error(`${operation}: name is empty`);
+    }
+
+    return name;
+  }
+
+  function pathParts(operation, name) {
+    const parts = name.split("/").filter((part) => part.length > 0);
+
+    if (parts.length === 0 || parts.some((part) => part === "." || part === "..")) {
+      throw new Error(`${operation}: invalid OPFS path ${name}`);
+    }
+
+    return parts;
+  }
+
+  async function fileHandleAt(root, operation, name, create) {
+    const parts = pathParts(operation, name);
+    let directory = root;
+
+    for (const part of parts.slice(0, -1)) {
+      directory = await directory.getDirectoryHandle(part, { create });
+    }
+
+    return directory.getFileHandle(parts.at(-1), { create });
   }
 
   function cacheSource(handle, name, size) {
@@ -28,6 +71,13 @@ export function makeOpfsSourceHost(memoryView, files) {
     nextSourceId += 1;
     sources.set(sourceId, { handle, name, size, access: null });
     return sourceId;
+  }
+
+  function cacheIndex(handle, name, size) {
+    const indexId = nextIndexId;
+    nextIndexId += 1;
+    indexes.set(indexId, { handle, name, size, access: null });
+    return indexId;
   }
 
   function reserveSource(handle, name, size, sourceId) {
@@ -81,19 +131,15 @@ export function makeOpfsSourceHost(memoryView, files) {
   }
 
   async function opfsSourceOpen(namePtr, nameLen) {
-    const name = memoryView.decodeString(namePtr, nameLen).trim();
+    const name = decodeName("opfs_source_open", namePtr, nameLen);
     const root = await opfsRoot();
-
-    if (name.length === 0) {
-      throw new Error("opfs_source_open: source name is empty");
-    }
 
     if (root === null) {
       throw new Error("opfs_source_open: OPFS root is unavailable");
     }
 
     try {
-      const handle = await root.getFileHandle(name, { create: false });
+      const handle = await fileHandleAt(root, "opfs_source_open", name, false);
       const file = await handle.getFile();
 
       return cacheSource(handle, name, file.size);
@@ -165,7 +211,138 @@ export function makeOpfsSourceHost(memoryView, files) {
     }
   }
 
+  async function opfsIndexCreate(namePtr, nameLen) {
+    const name = decodeName("opfs_index_create", namePtr, nameLen);
+    const root = await opfsRoot();
+
+    if (root === null) {
+      throw new Error("opfs_index_create: OPFS root is unavailable");
+    }
+
+    try {
+      const handle = await fileHandleAt(root, "opfs_index_create", name, true);
+      const writable = await handle.createWritable({ keepExistingData: false });
+
+      await writable.close();
+      return cacheIndex(handle, name, 0);
+    } catch (error) {
+      throw new Error(`opfs_index_create: ${errorMessage(error)}`);
+    }
+  }
+
+  async function opfsIndexOpen(namePtr, nameLen) {
+    const name = decodeName("opfs_index_open", namePtr, nameLen);
+    const root = await opfsRoot();
+
+    if (root === null) {
+      throw new Error("opfs_index_open: OPFS root is unavailable");
+    }
+
+    try {
+      const handle = await fileHandleAt(root, "opfs_index_open", name, false);
+      const file = await handle.getFile();
+
+      return cacheIndex(handle, name, file.size);
+    } catch (error) {
+      throw new Error(`opfs_index_open: ${errorMessage(error)}`);
+    }
+  }
+
+  function opfsIndexSize(indexId) {
+    const entry = requireIndex("opfs_index_size", indexId);
+
+    return BigInt(entry.size);
+  }
+
+  async function opfsIndexRead(indexId, offset, len, destPtr) {
+    const entry = requireIndex("opfs_index_read", indexId);
+    const start = u64ToNumber(offset);
+    const dest = memoryView.span(destPtr, len);
+
+    if (start < 0) {
+      throw new Error(`opfs_index_read: invalid offset ${offset}`);
+    }
+
+    if (dest === null) {
+      throw new Error(`opfs_index_read: invalid destination span ${destPtr}:${len}`);
+    }
+
+    try {
+      const access = await maybeSyncAccess(entry);
+
+      if (access !== null) {
+        return access.read(dest, { at: start });
+      }
+
+      const file = await entry.handle.getFile();
+      const chunk = await file.slice(start, start + len).arrayBuffer();
+      const src = new Uint8Array(chunk);
+
+      dest.set(src);
+      return src.byteLength;
+    } catch (error) {
+      throw new Error(`opfs_index_read: ${errorMessage(error)}`);
+    }
+  }
+
+  async function opfsIndexWrite(indexId, offset, srcPtr, len) {
+    const entry = requireIndex("opfs_index_write", indexId);
+    const start = u64ToNumber(offset);
+    const src = memoryView.span(srcPtr, len);
+
+    if (start < 0) {
+      throw new Error(`opfs_index_write: invalid offset ${offset}`);
+    }
+
+    if (src === null) {
+      throw new Error(`opfs_index_write: invalid source span ${srcPtr}:${len}`);
+    }
+
+    try {
+      const access = await maybeSyncAccess(entry);
+      let written = 0;
+
+      if (access !== null) {
+        written = access.write(src, { at: start });
+      } else {
+        const writable = await entry.handle.createWritable({ keepExistingData: true });
+
+        await writable.seek(start);
+        await writable.write(src);
+        await writable.close();
+        written = src.byteLength;
+      }
+
+      entry.size = Math.max(entry.size, start + written);
+      return written;
+    } catch (error) {
+      throw new Error(`opfs_index_write: ${errorMessage(error)}`);
+    }
+  }
+
+  async function opfsIndexFlush(indexId) {
+    const entry = requireIndex("opfs_index_flush", indexId);
+
+    try {
+      const access = await maybeSyncAccess(entry);
+
+      if (access !== null && typeof access.flush === "function") {
+        await access.flush();
+      }
+
+      return 0;
+    } catch (error) {
+      throw new Error(`opfs_index_flush: ${errorMessage(error)}`);
+    }
+  }
+
   return {
+    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE]: opfsIndexCreate,
+    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH]: opfsIndexFlush,
+    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsIndexOpen,
+    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsIndexRead,
+    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsIndexSize,
+    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE]: opfsIndexWrite,
     [HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]: opfsSourceFromFile,
     [HOST_IMPORT_NAME.OPFS_READ_CHUNK]: opfsSourceRead,
     [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]: opfsSourceFromFile,

@@ -242,6 +242,24 @@ function createHostImports(memory) {
 
       return 64;
     },
+    opfs_index_create() {
+      return 21;
+    },
+    opfs_index_open() {
+      return 22;
+    },
+    opfs_index_read() {
+      return 65536;
+    },
+    opfs_index_write() {
+      return 65536;
+    },
+    opfs_index_flush() {
+      return 0;
+    },
+    opfs_index_size() {
+      return BigInt(131072);
+    },
   };
 }
 

@@ -12,6 +12,12 @@
   (import "host" "opfs_source_name" (func $opfs_source_name (param i32 i32 i32) (result i32)))
   (import "host" "opfs_source_size" (func $opfs_source_size (param i32) (result i64)))
   (import "host" "opfs_source_read" (func $opfs_source_read (param i32 i64 i32 i32) (result i32)))
+  (import "host" "opfs_index_create" (func $opfs_index_create (param i32 i32) (result i32)))
+  (import "host" "opfs_index_open" (func $opfs_index_open (param i32 i32) (result i32)))
+  (import "host" "opfs_index_read" (func $opfs_index_read (param i32 i64 i32 i32) (result i32)))
+  (import "host" "opfs_index_write" (func $opfs_index_write (param i32 i64 i32 i32) (result i32)))
+  (import "host" "opfs_index_flush" (func $opfs_index_flush (param i32) (result i32)))
+  (import "host" "opfs_index_size" (func $opfs_index_size (param i32) (result i64)))
   ;; @generated host-imports app:end
 
   (func (export "tracy_main"))

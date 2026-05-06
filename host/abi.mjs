@@ -31,7 +31,7 @@ export const HOST_POINTER_MOD_BUTTON_PRIMARY = 0x00000020;
 export const HOST_POINTER_MOD_BUTTON_SECONDARY = 0x00000040;
 export const HOST_POINTER_MOD_BUTTON_AUXILIARY = 0x00000080;
 
-export const HOST_ASYNC_IMPORTS = Object.freeze(["file_picker_open", "opfs_create_from_file", "opfs_read_chunk", "opfs_source_from_file", "opfs_source_open", "opfs_source_read"]);
+export const HOST_ASYNC_IMPORTS = Object.freeze(["file_picker_open", "opfs_create_from_file", "opfs_read_chunk", "opfs_source_from_file", "opfs_source_open", "opfs_source_read", "opfs_index_create", "opfs_index_open", "opfs_index_read", "opfs_index_write", "opfs_index_flush"]);
 
 export const HOST_IMPORT_NAME = Object.freeze({
   CANVAS_GET_SIZE: "canvas_get_size",
@@ -46,6 +46,12 @@ export const HOST_IMPORT_NAME = Object.freeze({
   OPFS_SOURCE_NAME: "opfs_source_name",
   OPFS_SOURCE_SIZE: "opfs_source_size",
   OPFS_SOURCE_READ: "opfs_source_read",
+  OPFS_INDEX_CREATE: "opfs_index_create",
+  OPFS_INDEX_OPEN: "opfs_index_open",
+  OPFS_INDEX_READ: "opfs_index_read",
+  OPFS_INDEX_WRITE: "opfs_index_write",
+  OPFS_INDEX_FLUSH: "opfs_index_flush",
+  OPFS_INDEX_SIZE: "opfs_index_size",
 });
 
 export const HOST_IMPORTS = Object.freeze([
@@ -120,5 +126,41 @@ export const HOST_IMPORTS = Object.freeze([
     params: Object.freeze(["i32", "i64", "i32", "i32"]),
     result: "i32",
     async: true,
+  }),
+  Object.freeze({
+    name: "opfs_index_create",
+    params: Object.freeze(["i32", "i32"]),
+    result: "i32",
+    async: true,
+  }),
+  Object.freeze({
+    name: "opfs_index_open",
+    params: Object.freeze(["i32", "i32"]),
+    result: "i32",
+    async: true,
+  }),
+  Object.freeze({
+    name: "opfs_index_read",
+    params: Object.freeze(["i32", "i64", "i32", "i32"]),
+    result: "i32",
+    async: true,
+  }),
+  Object.freeze({
+    name: "opfs_index_write",
+    params: Object.freeze(["i32", "i64", "i32", "i32"]),
+    result: "i32",
+    async: true,
+  }),
+  Object.freeze({
+    name: "opfs_index_flush",
+    params: Object.freeze(["i32"]),
+    result: "i32",
+    async: true,
+  }),
+  Object.freeze({
+    name: "opfs_index_size",
+    params: Object.freeze(["i32"]),
+    result: "i64",
+    async: false,
   }),
 ]);
