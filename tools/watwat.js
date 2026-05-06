@@ -318,7 +318,8 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
     throw error;
   }
 
-  const allocPath = path.join(path.dirname(modulePath), "alloc.wasm");
+  const rootDir = wasmRootFor(modulePath);
+  const allocPath = path.join(rootDir, "std", "alloc.wasm");
   const moduleImports = { ...imports };
   const aliases = {};
 
@@ -341,7 +342,7 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
     }
   }
 
-  const hashPath = path.join(path.dirname(modulePath), "hash.wasm");
+  const hashPath = path.join(rootDir, "std", "hash.wasm");
 
   if (path.basename(modulePath) === "strtab.wasm") {
     try {
@@ -362,8 +363,6 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
     }
   }
 
-  const rootDir = wasmRootFor(modulePath);
-
   if (path.basename(modulePath) !== "mem.wasm") {
     await instantiateDependency(
       moduleImports,
@@ -383,6 +382,26 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
       coverage,
       path.join(rootDir, "parser_state.wasm"),
       ["parser_state"],
+    );
+  }
+
+  if (path.basename(modulePath) === "parser.wasm") {
+    await instantiateDependency(
+      moduleImports,
+      aliases,
+      imports,
+      coverage,
+      hashPath,
+      ["hash", "std/hash", "wat/std/hash"],
+    );
+
+    await instantiateDependency(
+      moduleImports,
+      aliases,
+      imports,
+      coverage,
+      path.join(rootDir, "std", "strtab.wasm"),
+      ["strtab", "std/strtab", "wat/std/strtab"],
     );
   }
 

@@ -5,6 +5,8 @@
   ;; @generated host-imports parser:end
   (import "mem" "MEM_RING_BASE" (global $MEM_RING_BASE i32))
   (import "mem" "MEM_RING_SIZE" (global $MEM_RING_SIZE i32))
+  (import "strtab" "strtab_intern"
+    (func $strtab_intern (param i32) (param i32) (result i32)))
   ;; @generated parser-state-imports parser:start
   (import "parser_state" "PARSER_STATE_BYTES" (global $PARSER_STATE_BYTES i32))
   (import "parser_state" "PARSER_STACK_CAP" (global $PARSER_STACK_CAP i32))
