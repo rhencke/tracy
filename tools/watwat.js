@@ -251,10 +251,18 @@ function createHostImports(memory) {
     opfs_index_read() {
       return 65536;
     },
-    opfs_index_write() {
+    opfs_index_write(indexId) {
+      if (indexId === 111) {
+        return -1;
+      }
+
       return 65536;
     },
-    opfs_index_flush() {
+    opfs_index_flush(indexId) {
+      if (indexId === 112) {
+        return -1;
+      }
+
       return 0;
     },
     opfs_index_size() {
