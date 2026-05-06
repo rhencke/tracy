@@ -1,0 +1,448 @@
+{
+  "constants": [
+    {
+      "name": "PARSER_STATE_MAGIC",
+      "value": 1414672458,
+      "wat": "0x5452504A",
+      "description": "Magic TRPJ as little-endian 0x5452504A."
+    },
+    {
+      "name": "PARSER_STATE_VERSION",
+      "value": 1,
+      "description": "Parser resume-state ABI version."
+    },
+    {
+      "name": "PARSER_STATE_BYTES",
+      "value": 512,
+      "description": "Fixed parser resume-state record byte length."
+    },
+    {
+      "name": "PARSER_STACK_CAP",
+      "value": 64,
+      "description": "Inline JSON container stack capacity."
+    },
+    {
+      "name": "PARSER_PARTIAL_TOKEN_CAP",
+      "value": 256,
+      "description": "Inline partial-token byte buffer capacity."
+    },
+    {
+      "name": "PARSER_DEFAULT_YIELD_BUDGET_MS",
+      "value": 8,
+      "description": "Default parser yield budget in milliseconds."
+    }
+  ],
+  "fields": [
+    {
+      "name": "PARSER_STATE_MAGIC_OFFSET",
+      "offset": 0,
+      "size": 4,
+      "field": "Magic `TRPJ` as little-endian `0x5452504A`."
+    },
+    {
+      "name": "PARSER_STATE_VERSION_OFFSET",
+      "offset": 4,
+      "size": 4,
+      "field": "Format version, currently `1`."
+    },
+    {
+      "name": "PARSER_STATE_STATUS_OFFSET",
+      "offset": 8,
+      "size": 4,
+      "field": "Parser status enum."
+    },
+    {
+      "name": "PARSER_STATE_YIELD_BUDGET_MS_OFFSET",
+      "offset": 12,
+      "size": 4,
+      "field": "Yield budget in milliseconds."
+    },
+    {
+      "name": "PARSER_STATE_SOURCE_ID_OFFSET",
+      "offset": 16,
+      "size": 4,
+      "field": "Opaque OPFS source id from the host shim."
+    },
+    {
+      "name": "PARSER_STATE_FLAGS_OFFSET",
+      "offset": 20,
+      "size": 4,
+      "field": "Parser flags, zero unless a later version defines bits."
+    },
+    {
+      "name": "PARSER_STATE_FILE_OFFSET_OFFSET",
+      "offset": 24,
+      "size": 8,
+      "field": "Absolute file byte offset for the next unread byte."
+    },
+    {
+      "name": "PARSER_STATE_RING_READ_OFFSET",
+      "offset": 32,
+      "size": 4,
+      "field": "Ring read cursor, relative to `MEM_RING_BASE`."
+    },
+    {
+      "name": "PARSER_STATE_RING_WRITE_OFFSET",
+      "offset": 36,
+      "size": 4,
+      "field": "Ring write cursor, relative to `MEM_RING_BASE`."
+    },
+    {
+      "name": "PARSER_STATE_RING_COUNT_OFFSET",
+      "offset": 40,
+      "size": 4,
+      "field": "Ring byte count currently available to the parser."
+    },
+    {
+      "name": "PARSER_STATE_DEPTH_OFFSET",
+      "offset": 44,
+      "size": 4,
+      "field": "JSON nesting depth."
+    },
+    {
+      "name": "PARSER_STATE_STACK_LEN_OFFSET",
+      "offset": 48,
+      "size": 4,
+      "field": "Number of valid entries in the inline stack."
+    },
+    {
+      "name": "PARSER_STATE_TOKEN_KIND_OFFSET",
+      "offset": 52,
+      "size": 4,
+      "field": "Partial token kind enum."
+    },
+    {
+      "name": "PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET",
+      "offset": 56,
+      "size": 4,
+      "field": "Partial token byte length."
+    },
+    {
+      "name": "PARSER_STATE_PARTIAL_TOKEN_HASH_OFFSET",
+      "offset": 60,
+      "size": 4,
+      "field": "Rolling partial-token hash for dictionary/key matching."
+    },
+    {
+      "name": "PARSER_STATE_STRING_ESCAPE_OFFSET",
+      "offset": 64,
+      "size": 4,
+      "field": "String escape substate."
+    },
+    {
+      "name": "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "offset": 68,
+      "size": 4,
+      "field": "Unicode escape accumulator and remaining nibble count."
+    },
+    {
+      "name": "PARSER_STATE_EVENT_FIELD_OFFSET",
+      "offset": 72,
+      "size": 4,
+      "field": "Current Chrome trace event field enum."
+    },
+    {
+      "name": "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
+      "offset": 76,
+      "size": 4,
+      "field": "Bitmask of fields already seen in the current event."
+    },
+    {
+      "name": "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
+      "offset": 80,
+      "size": 4,
+      "field": "Current object key hash."
+    },
+    {
+      "name": "PARSER_STATE_RESERVED0_OFFSET",
+      "offset": 84,
+      "size": 4,
+      "field": "Reserved, zero for v0.1."
+    },
+    {
+      "name": "PARSER_STATE_EVENT_COUNT_OFFSET",
+      "offset": 88,
+      "size": 8,
+      "field": "Count of complete trace events emitted so far."
+    },
+    {
+      "name": "PARSER_STATE_STACK_OFFSET",
+      "offset": 96,
+      "size": 64,
+      "field": "Inline stack bytes, one enum byte per JSON container."
+    },
+    {
+      "name": "PARSER_STATE_PARTIAL_TOKEN_OFFSET",
+      "offset": 160,
+      "size": 256,
+      "field": "Inline partial-token byte buffer."
+    },
+    {
+      "name": "PARSER_STATE_RESERVED1_OFFSET",
+      "offset": 416,
+      "size": 96,
+      "field": "Reserved, zero for v0.1."
+    }
+  ],
+  "enums": [
+    {
+      "name": "parser status",
+      "constants": [
+        {
+          "name": "PARSER_STATUS_READY",
+          "value": 0,
+          "description": "State is valid and can continue parsing."
+        },
+        {
+          "name": "PARSER_STATUS_NEED_CHUNK",
+          "value": 1,
+          "description": "The ring is exhausted and the host should read more bytes."
+        },
+        {
+          "name": "PARSER_STATUS_YIELDED",
+          "value": 2,
+          "description": "The parser stopped because its time budget expired."
+        },
+        {
+          "name": "PARSER_STATUS_DONE",
+          "value": 3,
+          "description": "The source reached a valid end."
+        },
+        {
+          "name": "PARSER_STATUS_MALFORMED",
+          "value": 4,
+          "description": "The input JSON cannot be parsed as the v0.1 trace format."
+        },
+        {
+          "name": "PARSER_STATUS_STATE_INVALID",
+          "value": 5,
+          "description": "The serialized state itself is not a valid resume point."
+        }
+      ]
+    },
+    {
+      "name": "partial token kind",
+      "constants": [
+        {
+          "name": "PARSER_TOKEN_NONE",
+          "value": 0,
+          "description": "No partial token is buffered."
+        },
+        {
+          "name": "PARSER_TOKEN_STRING",
+          "value": 1,
+          "description": "A string token crosses a chunk or yield boundary."
+        },
+        {
+          "name": "PARSER_TOKEN_NUMBER",
+          "value": 2,
+          "description": "A number token crosses a chunk or yield boundary."
+        },
+        {
+          "name": "PARSER_TOKEN_LITERAL",
+          "value": 3,
+          "description": "A literal token crosses a chunk or yield boundary."
+        }
+      ]
+    },
+    {
+      "name": "stack entry kind",
+      "constants": [
+        {
+          "name": "PARSER_STACK_ARRAY",
+          "value": 1,
+          "description": "JSON array container."
+        },
+        {
+          "name": "PARSER_STACK_OBJECT",
+          "value": 2,
+          "description": "JSON object container."
+        }
+      ]
+    },
+    {
+      "name": "event field id",
+      "constants": [
+        {
+          "name": "PARSER_EVENT_FIELD_NONE",
+          "value": 0,
+          "description": "No current trace event field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_NAME",
+          "value": 1,
+          "description": "Chrome trace `name` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_CAT",
+          "value": 2,
+          "description": "Chrome trace `cat` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_PHASE",
+          "value": 3,
+          "description": "Chrome trace `ph` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_TS",
+          "value": 4,
+          "description": "Chrome trace `ts` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_DUR",
+          "value": 5,
+          "description": "Chrome trace `dur` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_PID",
+          "value": 6,
+          "description": "Chrome trace `pid` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_TID",
+          "value": 7,
+          "description": "Chrome trace `tid` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_ARGS",
+          "value": 8,
+          "description": "Chrome trace `args` field."
+        },
+        {
+          "name": "PARSER_EVENT_FIELD_OTHER",
+          "value": 9,
+          "description": "Any other Chrome trace event field."
+        }
+      ]
+    }
+  ],
+  "importSets": {
+    "parser": [
+      "PARSER_STACK_CAP",
+      "PARSER_PARTIAL_TOKEN_CAP",
+      "PARSER_STATE_STATUS_OFFSET",
+      "PARSER_STATE_YIELD_BUDGET_MS_OFFSET",
+      "PARSER_STATE_SOURCE_ID_OFFSET",
+      "PARSER_STATE_FLAGS_OFFSET",
+      "PARSER_STATE_FILE_OFFSET_OFFSET",
+      "PARSER_STATE_RING_READ_OFFSET",
+      "PARSER_STATE_RING_WRITE_OFFSET",
+      "PARSER_STATE_RING_COUNT_OFFSET",
+      "PARSER_STATE_DEPTH_OFFSET",
+      "PARSER_STATE_STACK_LEN_OFFSET",
+      "PARSER_STATE_TOKEN_KIND_OFFSET",
+      "PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET",
+      "PARSER_STATE_STRING_ESCAPE_OFFSET",
+      "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "PARSER_STATE_EVENT_FIELD_OFFSET",
+      "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
+      "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
+      "PARSER_STATE_EVENT_COUNT_OFFSET",
+      "PARSER_STATE_STACK_OFFSET",
+      "PARSER_STATE_PARTIAL_TOKEN_OFFSET",
+      "PARSER_STATUS_DONE",
+      "PARSER_STATUS_YIELDED",
+      "PARSER_STATUS_MALFORMED",
+      "PARSER_STATUS_STATE_INVALID",
+      "PARSER_TOKEN_NONE",
+      "PARSER_TOKEN_STRING",
+      "PARSER_TOKEN_NUMBER",
+      "PARSER_TOKEN_LITERAL",
+      "PARSER_STACK_ARRAY",
+      "PARSER_STACK_OBJECT",
+      "PARSER_EVENT_FIELD_NONE",
+      "PARSER_EVENT_FIELD_NAME",
+      "PARSER_EVENT_FIELD_CAT",
+      "PARSER_EVENT_FIELD_PHASE",
+      "PARSER_EVENT_FIELD_TS",
+      "PARSER_EVENT_FIELD_DUR",
+      "PARSER_EVENT_FIELD_PID",
+      "PARSER_EVENT_FIELD_TID",
+      "PARSER_EVENT_FIELD_ARGS",
+      "PARSER_EVENT_FIELD_OTHER"
+    ],
+    "parserTest": [
+      "PARSER_STATE_BYTES",
+      "PARSER_STATE_STATUS_OFFSET",
+      "PARSER_STATE_YIELD_BUDGET_MS_OFFSET",
+      "PARSER_STATE_FLAGS_OFFSET",
+      "PARSER_STATE_FILE_OFFSET_OFFSET",
+      "PARSER_STATE_RING_READ_OFFSET",
+      "PARSER_STATE_RING_WRITE_OFFSET",
+      "PARSER_STATE_RING_COUNT_OFFSET",
+      "PARSER_STATE_DEPTH_OFFSET",
+      "PARSER_STATE_STACK_LEN_OFFSET",
+      "PARSER_STATE_TOKEN_KIND_OFFSET",
+      "PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET",
+      "PARSER_STATE_STRING_ESCAPE_OFFSET",
+      "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "PARSER_STATE_EVENT_FIELD_OFFSET",
+      "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
+      "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
+      "PARSER_STATE_EVENT_COUNT_OFFSET",
+      "PARSER_DEFAULT_YIELD_BUDGET_MS",
+      "PARSER_STATUS_DONE",
+      "PARSER_STATUS_YIELDED",
+      "PARSER_STATUS_MALFORMED",
+      "PARSER_STATUS_STATE_INVALID",
+      "PARSER_TOKEN_NONE",
+      "PARSER_TOKEN_STRING",
+      "PARSER_TOKEN_NUMBER",
+      "PARSER_EVENT_FIELD_NONE",
+      "PARSER_EVENT_FIELD_TS"
+    ],
+    "parserStateTest": [
+      "PARSER_STATE_MAGIC",
+      "PARSER_STATE_VERSION",
+      "PARSER_STATE_BYTES",
+      "PARSER_STACK_CAP",
+      "PARSER_PARTIAL_TOKEN_CAP",
+      "PARSER_DEFAULT_YIELD_BUDGET_MS",
+      "PARSER_STATE_MAGIC_OFFSET",
+      "PARSER_STATE_VERSION_OFFSET",
+      "PARSER_STATE_STATUS_OFFSET",
+      "PARSER_STATE_YIELD_BUDGET_MS_OFFSET",
+      "PARSER_STATE_SOURCE_ID_OFFSET",
+      "PARSER_STATE_FLAGS_OFFSET",
+      "PARSER_STATE_FILE_OFFSET_OFFSET",
+      "PARSER_STATE_RING_READ_OFFSET",
+      "PARSER_STATE_RING_WRITE_OFFSET",
+      "PARSER_STATE_RING_COUNT_OFFSET",
+      "PARSER_STATE_DEPTH_OFFSET",
+      "PARSER_STATE_STACK_LEN_OFFSET",
+      "PARSER_STATE_TOKEN_KIND_OFFSET",
+      "PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET",
+      "PARSER_STATE_PARTIAL_TOKEN_HASH_OFFSET",
+      "PARSER_STATE_STRING_ESCAPE_OFFSET",
+      "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "PARSER_STATE_EVENT_FIELD_OFFSET",
+      "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
+      "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
+      "PARSER_STATE_EVENT_COUNT_OFFSET",
+      "PARSER_STATE_STACK_OFFSET",
+      "PARSER_STATE_PARTIAL_TOKEN_OFFSET",
+      "PARSER_STATUS_READY",
+      "PARSER_STATUS_NEED_CHUNK",
+      "PARSER_STATUS_YIELDED",
+      "PARSER_STATUS_DONE",
+      "PARSER_STATUS_MALFORMED",
+      "PARSER_STATUS_STATE_INVALID",
+      "PARSER_TOKEN_NONE",
+      "PARSER_TOKEN_STRING",
+      "PARSER_TOKEN_NUMBER",
+      "PARSER_TOKEN_LITERAL",
+      "PARSER_STACK_ARRAY",
+      "PARSER_STACK_OBJECT",
+      "PARSER_EVENT_FIELD_NONE",
+      "PARSER_EVENT_FIELD_NAME",
+      "PARSER_EVENT_FIELD_CAT",
+      "PARSER_EVENT_FIELD_PHASE",
+      "PARSER_EVENT_FIELD_TS",
+      "PARSER_EVENT_FIELD_DUR",
+      "PARSER_EVENT_FIELD_PID",
+      "PARSER_EVENT_FIELD_TID",
+      "PARSER_EVENT_FIELD_ARGS",
+      "PARSER_EVENT_FIELD_OTHER"
+    ]
+  }
+}

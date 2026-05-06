@@ -96,10 +96,14 @@ for a manual run in a JSPI-capable browser.
    DevTools from the documented scratch ring:
 
    ```js
+   const {
+     HOST_POINTER_RECORDS_OFFSET,
+     HOST_POINTER_RING_COUNT_OFFSET,
+   } = await import("./shim.js");
    const memory = await import("./host-shim.js").then((module) => module.memory);
    const view = new DataView(memory.buffer);
-   view.getUint32(0x48, true); // unread pointer record count
-   view.getUint8(0x60);        // first record kind: 1 down, 2 move, 3 up, 4 cancel
+   view.getUint32(HOST_POINTER_RING_COUNT_OFFSET, true); // unread pointer record count
+   view.getUint8(HOST_POINTER_RECORDS_OFFSET);           // first record kind
    ```
 
 4. Press **File round trip** and choose a small trace or JSON file.  A

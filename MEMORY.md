@@ -47,28 +47,33 @@ cross-module ABI surface required by v0.1.
 
 ## Host scratch ABI
 
+<!-- @generated host-abi:start -->
+### Generated host scratch ABI
+
+This section is generated from `abi/host.json` by `tools/generate-host-abi.js`.
+The same source also generates JavaScript host constants and WAT host import declarations.
+
 The browser host shim owns the first page of `MEM_SCRATCH_BASE` for v0.1
 browser input state.  Wasm may read these bytes during `tracy_tick`; no wasm
 module may allocate from or overwrite this range.  The app may clear the rest
 of scratch every tick, but it must preserve the host range below.
 
-Multi-byte fields are little-endian.  Canvas sizes are physical pixels:
-`floor(canvas.clientWidth * devicePixelRatio)` and
-`floor(canvas.clientHeight * devicePixelRatio)`, clamped to at least `1`.
+Multi-byte fields are little-endian.
+
+Canvas sizes are physical pixels: `floor(canvas.clientWidth * devicePixelRatio)`
+and `floor(canvas.clientHeight * devicePixelRatio)`, clamped to at least `1`.
 The packed canvas size returned by `canvas_get_size()` is a 64-bit value with
 width in bits `0..31` and height in bits `32..63`.
 
-### Host scratch layout
-
 | Offset | Constant | Size | Field |
 |---:|---|---:|---|
-| `0x0000` | `HOST_CANVAS_SIZE_OFFSET` | 4 | Canvas width, `u32`. |
-| `0x0004` | `HOST_CANVAS_SIZE_OFFSET + 4` | 4 | Canvas height, `u32`. |
-| `0x0008` | `HOST_CANVAS_RESIZE_SEQ_OFFSET` | 4 | Incremented after each resize write. |
-| `0x000C..0x003F` | | 52 | Reserved, zero for v0.1. |
-| `0x0040` | `HOST_POINTER_RING_OFFSET` | 32 | Pointer ring header. |
-| `0x0060` | `HOST_POINTER_RECORDS_OFFSET` | 8192 | Pointer event records. |
-| `0x2060..0xFFFF` | | 57248 | Reserved for future host scratch fields. |
+| `0x00000000` | `HOST_CANVAS_SIZE_OFFSET` | 4 | Canvas width, `u32`. |
+| `0x00000004` | `HOST_CANVAS_HEIGHT_OFFSET` | 4 | Canvas height, `u32`. |
+| `0x00000008` | `HOST_CANVAS_RESIZE_SEQ_OFFSET` | 4 | Incremented after each resize write. |
+| `0x0000000C..0x0000003F` | | 52 | Reserved, zero for v0.1. |
+| `0x00000040` | `HOST_POINTER_RING_OFFSET` | 32 | Pointer ring header. |
+| `0x00000060` | `HOST_POINTER_RECORDS_OFFSET` | 8192 | Pointer event records. |
+| `0x00002060..0x0000FFFF` | | 57248 | Reserved for future host scratch fields. |
 
 The resize observer writes width and height first, then increments
 `HOST_CANVAS_RESIZE_SEQ_OFFSET`.  Readers that need a stable pair should read
@@ -118,6 +123,10 @@ Modifier bits are:
 | `0x00000020` | `HOST_POINTER_MOD_BUTTON_PRIMARY` | Primary pointer button is down. |
 | `0x00000040` | `HOST_POINTER_MOD_BUTTON_SECONDARY` | Secondary pointer button is down. |
 | `0x00000080` | `HOST_POINTER_MOD_BUTTON_AUXILIARY` | Auxiliary pointer button is down. |
+
+Host import names, signatures, and async/sync status are generated in
+[HOST_ABI.md](HOST_ABI.md).
+<!-- @generated host-abi:end -->
 
 ## Ownership rules
 
@@ -459,6 +468,111 @@ The gate assertion for #11 is: after indexing the 100 MB synthetic fixture,
 the fixture) / event_count <= 12.0`.  The measurement uses committed OPFS byte
 lengths, not just in-memory payload lengths, so page padding and resumability
 metadata stay visible.
+
+<!-- @generated parser-state-abi:start -->
+## Parser resume state ABI
+
+This section is generated from `abi/parser-state.json` by
+`tools/generate-parser-state-abi.js`.  The same source generates WAT
+parser-state constants/imports and test assertions.
+
+The streaming JSON parser state is a fixed 512-byte little-endian record.
+It may be stored anywhere the caller owns memory, then serialized byte-for-byte
+to OPFS for crash/reload recovery.  Pointers are deliberately excluded from
+the record; every location is an offset, id, enum, count, or inline byte span
+that remains meaningful after reload.
+
+The parser state format is versioned by `PARSER_STATE_MAGIC` (`TRPJ`) and
+`PARSER_STATE_VERSION` (`1`).  A parser must reject resume records whose magic
+or version do not match, and return `PARSER_STATUS_STATE_INVALID` rather than
+guessing how to interpret old bytes.
+
+The default yield budget is `PARSER_DEFAULT_YIELD_BUDGET_MS = 8`.  Callers may
+lower or raise `yield_budget_ms`, but the default stays at or below 8 ms so the
+JSPI-fallback profile yields before a long single-threaded turn risks starving
+the page.
+
+### Parser state layout
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 4 | Magic `TRPJ` as little-endian `0x5452504A`. |
+| 4 | 4 | Format version, currently `1`. |
+| 8 | 4 | Parser status enum. |
+| 12 | 4 | Yield budget in milliseconds. |
+| 16 | 4 | Opaque OPFS source id from the host shim. |
+| 20 | 4 | Parser flags, zero unless a later version defines bits. |
+| 24 | 8 | Absolute file byte offset for the next unread byte. |
+| 32 | 4 | Ring read cursor, relative to `MEM_RING_BASE`. |
+| 36 | 4 | Ring write cursor, relative to `MEM_RING_BASE`. |
+| 40 | 4 | Ring byte count currently available to the parser. |
+| 44 | 4 | JSON nesting depth. |
+| 48 | 4 | Number of valid entries in the inline stack. |
+| 52 | 4 | Partial token kind enum. |
+| 56 | 4 | Partial token byte length. |
+| 60 | 4 | Rolling partial-token hash for dictionary/key matching. |
+| 64 | 4 | String escape substate. |
+| 68 | 4 | Unicode escape accumulator and remaining nibble count. |
+| 72 | 4 | Current Chrome trace event field enum. |
+| 76 | 4 | Bitmask of fields already seen in the current event. |
+| 80 | 4 | Current object key hash. |
+| 84 | 4 | Reserved, zero for v0.1. |
+| 88 | 8 | Count of complete trace events emitted so far. |
+| 96 | 64 | Inline stack bytes, one enum byte per JSON container. |
+| 160 | 256 | Inline partial-token byte buffer. |
+| 416 | 96 | Reserved, zero for v0.1. |
+
+The inline stack capacity is `PARSER_STACK_CAP = 64`.  Stack entries are
+`PARSER_STACK_ARRAY = 1` or `PARSER_STACK_OBJECT = 2`; unused bytes are zero.
+Deeper input is malformed for v0.1 and should fail closed instead of spilling
+stack state into another allocation.
+
+The partial-token buffer capacity is `PARSER_PARTIAL_TOKEN_CAP = 256`.  It is
+used only for tokens that cross chunk or yield boundaries, such as string
+bytes, escaped string substates, number text, and literal text.  A token that
+cannot fit in the buffer must be rejected or routed through a later explicit
+large-token path; the resume record must never contain a borrowed pointer into
+the ring.
+
+### Parser status and field enums
+
+Parser statuses are:
+
+- `PARSER_STATUS_READY = 0`: State is valid and can continue parsing.
+- `PARSER_STATUS_NEED_CHUNK = 1`: The ring is exhausted and the host should read more bytes.
+- `PARSER_STATUS_YIELDED = 2`: The parser stopped because its time budget expired.
+- `PARSER_STATUS_DONE = 3`: The source reached a valid end.
+- `PARSER_STATUS_MALFORMED = 4`: The input JSON cannot be parsed as the v0.1 trace format.
+- `PARSER_STATUS_STATE_INVALID = 5`: The serialized state itself is not a valid resume point.
+
+Partial token kinds are:
+
+- `PARSER_TOKEN_NONE = 0`: No partial token is buffered.
+- `PARSER_TOKEN_STRING = 1`: A string token crosses a chunk or yield boundary.
+- `PARSER_TOKEN_NUMBER = 2`: A number token crosses a chunk or yield boundary.
+- `PARSER_TOKEN_LITERAL = 3`: A literal token crosses a chunk or yield boundary.
+
+Stack entry kinds are:
+
+- `PARSER_STACK_ARRAY = 1`: JSON array container.
+- `PARSER_STACK_OBJECT = 2`: JSON object container.
+
+Event field ids are:
+
+- `PARSER_EVENT_FIELD_NONE = 0`: No current trace event field.
+- `PARSER_EVENT_FIELD_NAME = 1`: Chrome trace `name` field.
+- `PARSER_EVENT_FIELD_CAT = 2`: Chrome trace `cat` field.
+- `PARSER_EVENT_FIELD_PHASE = 3`: Chrome trace `ph` field.
+- `PARSER_EVENT_FIELD_TS = 4`: Chrome trace `ts` field.
+- `PARSER_EVENT_FIELD_DUR = 5`: Chrome trace `dur` field.
+- `PARSER_EVENT_FIELD_PID = 6`: Chrome trace `pid` field.
+- `PARSER_EVENT_FIELD_TID = 7`: Chrome trace `tid` field.
+- `PARSER_EVENT_FIELD_ARGS = 8`: Chrome trace `args` field.
+- `PARSER_EVENT_FIELD_OTHER = 9`: Any other Chrome trace event field.
+
+The current field and seen-field bitmask let the parser yield in the middle
+of one event object without losing which output column the next token belongs to.
+<!-- @generated parser-state-abi:end -->
 
 ### Decoder API contract
 

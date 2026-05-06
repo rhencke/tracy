@@ -1,0 +1,261 @@
+{
+  "constants": [
+    {
+      "name": "HOST_SCRATCH_BASE",
+      "value": 0,
+      "hex": true,
+      "description": "Host-owned scratch base."
+    },
+    {
+      "name": "HOST_CANVAS_SIZE_OFFSET",
+      "value": 0,
+      "hex": true,
+      "description": "Canvas width, u32."
+    },
+    {
+      "name": "HOST_CANVAS_HEIGHT_OFFSET",
+      "value": 4,
+      "hex": true,
+      "description": "Canvas height, u32."
+    },
+    {
+      "name": "HOST_CANVAS_RESIZE_SEQ_OFFSET",
+      "value": 8,
+      "hex": true,
+      "description": "Incremented after each resize write."
+    },
+    {
+      "name": "HOST_POINTER_RING_OFFSET",
+      "value": 64,
+      "hex": true,
+      "description": "Pointer ring header base."
+    },
+    {
+      "name": "HOST_POINTER_RING_HEADER_BYTES",
+      "value": 32,
+      "description": "Pointer ring header byte length."
+    },
+    {
+      "name": "HOST_POINTER_RECORD_SIZE",
+      "value": 32,
+      "description": "Pointer event record byte length."
+    },
+    {
+      "name": "HOST_POINTER_RECORD_CAPACITY",
+      "value": 256,
+      "description": "Pointer event record capacity."
+    },
+    {
+      "name": "HOST_POINTER_RECORDS_OFFSET",
+      "value": 96,
+      "hex": true,
+      "description": "Pointer event records base."
+    },
+    {
+      "name": "HOST_POINTER_RECORDS_BYTES",
+      "value": 8192,
+      "description": "Pointer event record storage byte length."
+    },
+    {
+      "name": "HOST_POINTER_RING_READ_INDEX_OFFSET",
+      "value": 64,
+      "hex": true,
+      "description": "Unread pointer ring read index, u32."
+    },
+    {
+      "name": "HOST_POINTER_RING_WRITE_INDEX_OFFSET",
+      "value": 68,
+      "hex": true,
+      "description": "Pointer ring write index, u32."
+    },
+    {
+      "name": "HOST_POINTER_RING_COUNT_OFFSET",
+      "value": 72,
+      "hex": true,
+      "description": "Unread pointer record count, u32."
+    },
+    {
+      "name": "HOST_POINTER_RING_DROPPED_OFFSET",
+      "value": 76,
+      "hex": true,
+      "description": "Dropped pointer event count, u32."
+    },
+    {
+      "name": "HOST_POINTER_RING_CAPACITY_OFFSET",
+      "value": 80,
+      "hex": true,
+      "description": "Pointer ring capacity field, u32."
+    },
+    {
+      "name": "HOST_POINTER_RING_RECORD_SIZE_OFFSET",
+      "value": 84,
+      "hex": true,
+      "description": "Pointer ring record size field, u32."
+    },
+    {
+      "name": "HOST_POINTER_RING_RESERVED_OFFSET",
+      "value": 88,
+      "hex": true,
+      "description": "Pointer ring reserved bytes base."
+    },
+    {
+      "name": "HOST_POINTER_KIND_DOWN",
+      "value": 1,
+      "description": "Pointer down event kind."
+    },
+    {
+      "name": "HOST_POINTER_KIND_MOVE",
+      "value": 2,
+      "description": "Pointer move event kind."
+    },
+    {
+      "name": "HOST_POINTER_KIND_UP",
+      "value": 3,
+      "description": "Pointer up event kind."
+    },
+    {
+      "name": "HOST_POINTER_KIND_CANCEL",
+      "value": 4,
+      "description": "Pointer cancel event kind."
+    },
+    {
+      "name": "HOST_POINTER_MOD_SHIFT",
+      "value": 1,
+      "hex": true,
+      "description": "Shift key active."
+    },
+    {
+      "name": "HOST_POINTER_MOD_CTRL",
+      "value": 2,
+      "hex": true,
+      "description": "Control key active."
+    },
+    {
+      "name": "HOST_POINTER_MOD_ALT",
+      "value": 4,
+      "hex": true,
+      "description": "Alt key active."
+    },
+    {
+      "name": "HOST_POINTER_MOD_META",
+      "value": 8,
+      "hex": true,
+      "description": "Meta key active."
+    },
+    {
+      "name": "HOST_POINTER_MOD_PRIMARY",
+      "value": 16,
+      "hex": true,
+      "description": "Event is the primary pointer."
+    },
+    {
+      "name": "HOST_POINTER_MOD_BUTTON_PRIMARY",
+      "value": 32,
+      "hex": true,
+      "description": "Primary pointer button is down."
+    },
+    {
+      "name": "HOST_POINTER_MOD_BUTTON_SECONDARY",
+      "value": 64,
+      "hex": true,
+      "description": "Secondary pointer button is down."
+    },
+    {
+      "name": "HOST_POINTER_MOD_BUTTON_AUXILIARY",
+      "value": 128,
+      "hex": true,
+      "description": "Auxiliary pointer button is down."
+    }
+  ],
+  "hostImports": [
+    {
+      "name": "canvas_get_size",
+      "params": [],
+      "result": "i64",
+      "async": false
+    },
+    {
+      "name": "canvas_listen_resize",
+      "params": [],
+      "result": null,
+      "async": false
+    },
+    {
+      "name": "pointer_listen",
+      "params": [],
+      "result": null,
+      "async": false
+    },
+    {
+      "name": "file_picker_open",
+      "params": ["i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_create_from_file",
+      "params": ["i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_read_chunk",
+      "params": ["i32", "i64", "i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_source_from_file",
+      "params": ["i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_source_open",
+      "params": ["i32", "i32"],
+      "result": "i32",
+      "async": true
+    },
+    {
+      "name": "opfs_source_name_len",
+      "params": ["i32"],
+      "result": "i32",
+      "async": false
+    },
+    {
+      "name": "opfs_source_name",
+      "params": ["i32", "i32", "i32"],
+      "result": "i32",
+      "async": false
+    },
+    {
+      "name": "opfs_source_size",
+      "params": ["i32"],
+      "result": "i64",
+      "async": false
+    },
+    {
+      "name": "opfs_source_read",
+      "params": ["i32", "i64", "i32", "i32"],
+      "result": "i32",
+      "async": true
+    }
+  ],
+  "watImportSets": {
+    "app": [
+      "canvas_get_size",
+      "canvas_listen_resize",
+      "pointer_listen",
+      "file_picker_open",
+      "opfs_create_from_file",
+      "opfs_read_chunk",
+      "opfs_source_from_file",
+      "opfs_source_open",
+      "opfs_source_name_len",
+      "opfs_source_name",
+      "opfs_source_size",
+      "opfs_source_read"
+    ],
+    "parser": ["opfs_source_read"]
+  }
+}
