@@ -30,15 +30,45 @@ const POINTER_RING_DROPPED_OFFSET = HOST_POINTER_RING_OFFSET + 12;
 const POINTER_RING_CAPACITY_OFFSET = HOST_POINTER_RING_OFFSET + 16;
 const POINTER_RING_RECORD_SIZE_OFFSET = HOST_POINTER_RING_OFFSET + 20;
 
+function u64ToNumber(value) {
+  const number = typeof value === "bigint" ? Number(value) : value;
+
+  return Number.isSafeInteger(number) && number >= 0 ? number : -1;
+}
+
 export function makeShim(memory) {
   const canvas = document.getElementById("tracy");
   const context = canvas.getContext("2d", { alpha: false });
+  const files = new Map();
+  const opfsFiles = new Map();
+  const decoder = new TextDecoder();
   let resizeObserver = null;
   let resizeListenerInstalled = false;
   let pointerListenerInstalled = false;
+  let fileInput = null;
+  let nextFileHandle = 1;
+  let nextOpfsId = 1;
 
   function view() {
     return new DataView(memory.buffer);
+  }
+
+  function bytes() {
+    return new Uint8Array(memory.buffer);
+  }
+
+  function decodeString(ptr, len) {
+    if (!Number.isInteger(ptr) || !Number.isInteger(len) || ptr < 0 || len < 0) {
+      return "";
+    }
+
+    const end = ptr + len;
+
+    if (end < ptr || end > memory.buffer.byteLength) {
+      return "";
+    }
+
+    return decoder.decode(bytes().subarray(ptr, end));
   }
 
   function canvasSize() {
@@ -233,11 +263,144 @@ export function makeShim(memory) {
     }
   }
 
+  function ensureFileInput() {
+    if (fileInput !== null) {
+      return fileInput;
+    }
+
+    fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.hidden = true;
+    fileInput.tabIndex = -1;
+    document.body.appendChild(fileInput);
+
+    return fileInput;
+  }
+
+  function filePickerOpen(acceptPtr, acceptLen) {
+    const input = ensureFileInput();
+    const accept = decodeString(acceptPtr, acceptLen).trim();
+
+    if (accept.length > 0) {
+      input.accept = accept;
+    } else {
+      input.removeAttribute("accept");
+    }
+
+    input.value = "";
+
+    return new Promise((resolve) => {
+      let settled = false;
+
+      function settle(value) {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        input.removeEventListener("change", onChange);
+        window.removeEventListener("focus", onFocus);
+        resolve(value);
+      }
+
+      function onChange() {
+        const file = input.files?.[0] ?? null;
+
+        if (file === null) {
+          settle(-1);
+          return;
+        }
+
+        const handle = nextFileHandle;
+        nextFileHandle += 1;
+        files.set(handle, file);
+        settle(handle);
+      }
+
+      function onFocus() {
+        setTimeout(() => {
+          if ((input.files?.length ?? 0) === 0) {
+            settle(-1);
+          }
+        }, 0);
+      }
+
+      input.addEventListener("change", onChange, { once: true });
+      window.addEventListener("focus", onFocus, { once: true });
+      input.click();
+    });
+  }
+
+  async function opfsCreateFromFile(fileHandle) {
+    const file = files.get(fileHandle);
+
+    if (file === undefined || navigator.storage?.getDirectory === undefined) {
+      return -1;
+    }
+
+    try {
+      const root = await navigator.storage.getDirectory();
+      const opfsId = nextOpfsId;
+      nextOpfsId += 1;
+      const opfsName = `trace-${opfsId}.bin`;
+      const handle = await root.getFileHandle(opfsName, { create: true });
+      const writable = await handle.createWritable();
+
+      await writable.write(file);
+      await writable.close();
+
+      opfsFiles.set(opfsId, {
+        handle,
+        name: opfsName,
+        size: file.size,
+      });
+
+      return opfsId;
+    } catch (error) {
+      return -1;
+    }
+  }
+
+  async function opfsReadChunk(opfsId, offset, len, destPtr) {
+    const entry = opfsFiles.get(opfsId);
+    const start = u64ToNumber(offset);
+
+    if (
+      entry === undefined ||
+      start < 0 ||
+      !Number.isInteger(len) ||
+      len < 0 ||
+      !Number.isInteger(destPtr) ||
+      destPtr < 0
+    ) {
+      return -1;
+    }
+
+    if (destPtr + len < destPtr || destPtr + len > memory.buffer.byteLength) {
+      return -1;
+    }
+
+    try {
+      const file = await entry.handle.getFile();
+      const chunk = await file.slice(start, start + len).arrayBuffer();
+      const src = new Uint8Array(chunk);
+
+      bytes().set(src, destPtr);
+
+      return src.byteLength;
+    } catch (error) {
+      return -1;
+    }
+  }
+
   resize();
 
   return {
     canvas_get_size: canvasGetSize,
     canvas_listen_resize: canvasListenResize,
+    file_picker_open: filePickerOpen,
+    opfs_create_from_file: opfsCreateFromFile,
+    opfs_read_chunk: opfsReadChunk,
     pointer_listen: pointerListen,
   };
 }
