@@ -49,6 +49,11 @@
   (import "index" "INDEX_CODEC_STATUS_BAD_VARINT" (global $INDEX_CODEC_STATUS_BAD_VARINT i32))
   (import "index" "INDEX_CODEC_STATUS_BAD_RLE" (global $INDEX_CODEC_STATUS_BAD_RLE i32))
   (import "index" "INDEX_CODEC_STATUS_BAD_ENCODING" (global $INDEX_CODEC_STATUS_BAD_ENCODING i32))
+  (import "index" "INDEX_TRACK_CAPACITY" (global $INDEX_TRACK_CAPACITY i32))
+  (import "index" "INDEX_TRACK_ENTRY_BYTES" (global $INDEX_TRACK_ENTRY_BYTES i32))
+  (import "index" "INDEX_TRACK_STATUS_OK" (global $INDEX_TRACK_STATUS_OK i32))
+  (import "index" "INDEX_TRACK_STATUS_INVALID" (global $INDEX_TRACK_STATUS_INVALID i32))
+  (import "index" "INDEX_TRACK_STATUS_FULL" (global $INDEX_TRACK_STATUS_FULL i32))
   (import "index" "index_zigzag_encode_i32"
     (func $index_zigzag_encode_i32 (param i32) (result i32)))
   (import "index" "index_zigzag_decode_i32"
@@ -69,6 +74,32 @@
     (func $index_fixed8_value (param i32 i32 i32) (result i32 i32)))
   (import "index" "index_rle_validate"
     (func $index_rle_validate (param i32 i32 i32 i32) (result i32)))
+  (import "index" "index_tracks_reset"
+    (func $index_tracks_reset))
+  (import "index" "index_track_count"
+    (func $index_track_count (result i32)))
+  (import "index" "index_track_for_pid_tid"
+    (func $index_track_for_pid_tid (param i32 i32) (result i32)))
+  (import "index" "index_track_for_event"
+    (func $index_track_for_event (param i32) (result i32)))
+  (import "index" "index_apply_metadata_event"
+    (func $index_apply_metadata_event (param i32) (result i32)))
+  (import "index" "index_track_record_slice"
+    (func $index_track_record_slice (param i32 i32 i32 i32) (result i32)))
+  (import "index" "track_pid"
+    (func $track_pid (param i32) (result i32)))
+  (import "index" "track_tid"
+    (func $track_tid (param i32) (result i32)))
+  (import "index" "track_name_id"
+    (func $track_name_id (param i32) (result i32)))
+  (import "index" "track_slice_count"
+    (func $track_slice_count (param i32) (result i32)))
+  (import "index" "track_min_ts"
+    (func $track_min_ts (param i32) (result i32)))
+  (import "index" "track_max_ts"
+    (func $track_max_ts (param i32) (result i32)))
+  (import "index" "track_max_depth"
+    (func $track_max_depth (param i32) (result i32)))
   (import "index" "index_crc32c"
     (func $index_crc32c (param i32) (param i32) (result i32)))
   (import "index" "index_header_crc"
@@ -497,6 +528,300 @@
     i32.const 4
     i32.const 234
     call $assert_eq_i32
+  )
+
+  (func (export "test_track_table_constants_and_pid_tid_mapping")
+    call $index_tracks_reset
+
+    global.get $INDEX_TRACK_ENTRY_BYTES
+    i32.const 32
+    i32.const 260
+    call $assert_eq_i32
+
+    global.get $INDEX_TRACK_CAPACITY
+    i32.const 2048
+    i32.const 261
+    call $assert_eq_i32
+
+    global.get $INDEX_TRACK_STATUS_OK
+    i32.const 0
+    i32.const 262
+    call $assert_eq_i32
+
+    global.get $INDEX_TRACK_STATUS_INVALID
+    i32.const 1
+    i32.const 263
+    call $assert_eq_i32
+
+    global.get $INDEX_TRACK_STATUS_FULL
+    i32.const 2
+    i32.const 264
+    call $assert_eq_i32
+
+    i32.const 7
+    i32.const 9
+    call $index_track_for_pid_tid
+    i32.const 0
+    i32.const 265
+    call $assert_eq_i32
+
+    i32.const 7
+    i32.const 9
+    call $index_track_for_pid_tid
+    i32.const 0
+    i32.const 266
+    call $assert_eq_i32
+
+    i32.const 7
+    i32.const 10
+    call $index_track_for_pid_tid
+    i32.const 1
+    i32.const 267
+    call $assert_eq_i32
+
+    call $index_track_count
+    i32.const 2
+    i32.const 268
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_pid
+    i32.const 7
+    i32.const 269
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_tid
+    i32.const 9
+    i32.const 270
+    call $assert_eq_i32
+  )
+
+  (func (export "test_metadata_events_set_track_names")
+    call $index_tracks_reset
+
+    i32.const 77
+    i32.const 555
+    f64.const 0
+    f64.const 0
+    i32.const 42
+    i32.const 5
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_track_for_event
+    i32.const 0
+    i32.const 271
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_name_id
+    i32.const 0
+    i32.const 272
+    call $assert_eq_i32
+
+    global.get $EVENT
+    call $index_apply_metadata_event
+    i32.const 0
+    i32.const 273
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_name_id
+    i32.const 555
+    i32.const 274
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 777
+    f64.const 0
+    f64.const 0
+    i32.const 42
+    i32.const 5
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_apply_metadata_event
+    i32.const 0
+    i32.const 275
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_name_id
+    i32.const 555
+    i32.const 276
+    call $assert_eq_i32
+  )
+
+  (func (export "test_track_slice_stats_update_min_max_and_depth")
+    call $index_tracks_reset
+
+    i32.const 1
+    i32.const 2
+    call $index_track_for_pid_tid
+    i32.const 0
+    i32.const 277
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 1000
+    i32.const 25
+    i32.const 3
+    call $index_track_record_slice
+    global.get $INDEX_TRACK_STATUS_OK
+    i32.const 278
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_slice_count
+    i32.const 1
+    i32.const 279
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_min_ts
+    i32.const 1000
+    i32.const 280
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_max_ts
+    i32.const 1025
+    i32.const 281
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_max_depth
+    i32.const 3
+    i32.const 282
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 900
+    i32.const 1
+    i32.const 2
+    call $index_track_record_slice
+    global.get $INDEX_TRACK_STATUS_OK
+    i32.const 283
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 1100
+    i32.const 5
+    i32.const 7
+    call $index_track_record_slice
+    global.get $INDEX_TRACK_STATUS_OK
+    i32.const 284
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_slice_count
+    i32.const 3
+    i32.const 285
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_min_ts
+    i32.const 900
+    i32.const 286
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_max_ts
+    i32.const 1105
+    i32.const 287
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_max_depth
+    i32.const 7
+    i32.const 288
+    call $assert_eq_i32
+  )
+
+  (func (export "test_track_table_invalid_and_full_cases")
+    (local $i i32)
+
+    call $index_tracks_reset
+
+    i32.const 0
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $index_track_record_slice
+    global.get $INDEX_TRACK_STATUS_INVALID
+    i32.const 289
+    call $assert_eq_i32
+
+    i32.const -1
+    call $track_pid
+    i32.const 0
+    i32.const 290
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_tid
+    i32.const 0
+    i32.const 291
+    call $assert_eq_i32
+
+    i32.const 0
+    call $track_name_id
+    i32.const 0
+    i32.const 292
+    call $assert_eq_i32
+
+    block $done
+      loop $fill
+        local.get $i
+        global.get $INDEX_TRACK_CAPACITY
+        i32.ge_u
+        br_if $done
+
+        i32.const 100
+        local.get $i
+        call $index_track_for_pid_tid
+        local.get $i
+        i32.const 293
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $fill
+      end
+    end
+
+    i32.const 100
+    global.get $INDEX_TRACK_CAPACITY
+    call $index_track_for_pid_tid
+    i32.const -1
+    i32.const 294
+    call $assert_eq_i32
+
+    call $index_track_count
+    global.get $INDEX_TRACK_CAPACITY
+    i32.const 295
+    call $assert_eq_i32
+
+    i32.const 77
+    i32.const 999
+    f64.const 0
+    f64.const 0
+    i32.const 100
+    global.get $INDEX_TRACK_CAPACITY
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_apply_metadata_event
+    i32.const -1
+    i32.const 296
+    call $assert_eq_i32
+
   )
 
   (func (export "test_uvarint_codec_roundtrips_and_rejects_overlong")
@@ -1755,7 +2080,7 @@
 
     local.get $ptr
     i32.load
-    i32.const 458766
+    i32.const 0
     i32.const 48
     call $assert_eq_i32
 
@@ -1910,6 +2235,8 @@
   )
 
   (func (export "test_index_writer_flush_empty_and_uninitialized")
+    (local $i i32)
+
     i32.const 1
     memory.grow
     drop
@@ -1937,6 +2264,46 @@
     call $index_writer_committed_pages
     i32.const 0
     i32.const 62
+    call $assert_eq_i32
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 5
+    call $index_writer_init
+
+    block $writer_done
+      loop $writer_fill
+        local.get $i
+        global.get $INDEX_TRACK_CAPACITY
+        i32.ge_u
+        br_if $writer_done
+
+        i32.const 200
+        local.get $i
+        call $index_track_for_pid_tid
+        drop
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $writer_fill
+      end
+    end
+
+    i32.const 88
+    i32.const 1000
+    f64.const 1
+    f64.const 1
+    i32.const 200
+    global.get $INDEX_TRACK_CAPACITY
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
+    i32.const 297
     call $assert_eq_i32
   )
 
