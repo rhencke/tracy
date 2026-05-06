@@ -129,9 +129,28 @@ async function instantiateStdModule(file, imports) {
     throw error;
   }
 
-  const bytes = await fs.readFile(stdPath);
-  const { instance } = await WebAssembly.instantiate(bytes, imports);
+  const allocPath = path.join(path.dirname(stdPath), "alloc.wasm");
+  const stdImports = { ...imports };
   const aliases = {};
+
+  if (path.basename(stdPath) !== "alloc.wasm") {
+    try {
+      await fs.access(allocPath);
+      const allocBytes = await fs.readFile(allocPath);
+      const { instance } = await WebAssembly.instantiate(allocBytes, stdImports);
+      stdImports.alloc = instance.exports;
+      aliases.alloc = instance.exports;
+      aliases["std/alloc"] = instance.exports;
+      aliases["wat/std/alloc"] = instance.exports;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  const bytes = await fs.readFile(stdPath);
+  const { instance } = await WebAssembly.instantiate(bytes, stdImports);
 
   for (const name of stdImportAliases(stdPath)) {
     aliases[name] = instance.exports;
