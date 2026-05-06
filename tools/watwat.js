@@ -149,6 +149,24 @@ async function instantiateStdModule(file, imports) {
     }
   }
 
+  const hashPath = path.join(path.dirname(stdPath), "hash.wasm");
+
+  if (path.basename(stdPath) === "strtab.wasm") {
+    try {
+      await fs.access(hashPath);
+      const hashBytes = await fs.readFile(hashPath);
+      const { instance } = await WebAssembly.instantiate(hashBytes, stdImports);
+      stdImports.hash = instance.exports;
+      aliases.hash = instance.exports;
+      aliases["std/hash"] = instance.exports;
+      aliases["wat/std/hash"] = instance.exports;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
   const bytes = await fs.readFile(stdPath);
   const { instance } = await WebAssembly.instantiate(bytes, stdImports);
 
