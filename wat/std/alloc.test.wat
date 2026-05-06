@@ -144,4 +144,46 @@
     i32.const 10
     call $assert_true
   )
+
+  (func (export "test_alloc_failure_and_fast_capacity_paths")
+    (local $before_pages i32)
+
+    memory.size
+    local.set $before_pages
+
+    i32.const 4096
+    i32.const 4096
+    call $bump_init
+
+    i32.const 8
+    call $alloc
+    i32.const 4096
+    i32.const 11
+    call $assert_eq_i32
+
+    memory.size
+    local.get $before_pages
+    i32.const 12
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 0
+    call $bump_init
+
+    i32.const -8
+    call $alloc
+    i32.const 0
+    i32.const 13
+    call $assert_eq_i32
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    i32.const 32
+    call $alloc
+    i32.const 0
+    i32.const 14
+    call $assert_eq_i32
+  )
 )

@@ -4,9 +4,17 @@
   "private": true,
   "scripts": {
     "build": "bash tools/build.sh",
-    "test": "npm run test:wat && npm run test:watwat-probe",
+    "build:cov": "bash tools/build-cov.sh",
+    "test": "npm run test:wat && npm run test:watwat-probe && npm run test:assert-probes && npm run test:coverage-selftest",
     "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
-    "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm"
+    "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
+    "test:assert-probes": "bash tools/test-assert-probes.sh",
+    "test:coverage-selftest": "node tools/coverage-selftest.js",
+    "test:coverage": "node tools/coverage-run.js --check dist/wasm-cov",
+    "test:coverage:report": "node tools/coverage-run.js dist/wasm-cov",
+    "test:coverage:strict": "node tools/coverage-run.js --check dist/wasm-cov",
+    "coverage": "npm run build:cov && npm run test:coverage",
+    "coverage:strict": "npm run build:cov && npm run test:coverage:strict"
   },
   "devDependencies": {
     "esbuild": "0.25.3"

@@ -179,4 +179,94 @@
     i32.const 10
     call $assert_false
   )
+
+  (func (export "test_hash_failure_guards")
+    (local $map i32)
+
+    call $init_heap
+
+    i32.const 0
+    i32.const 123
+    i32.const 456
+    call $hash_put
+
+    i32.const 0
+    i32.const 123
+    call $hash_get
+    drop
+
+    i32.const 0
+    i32.const 123
+    call $hash_has
+    drop
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    i32.const 0
+    call $hash_new
+    drop
+
+    call $init_heap
+
+    i32.const 1073741824
+    call $hash_new
+    drop
+
+    i32.const 65448
+    i32.const 65536
+    call $bump_init
+
+    i32.const 1
+    call $hash_new
+    i32.const 0
+    i32.const 11
+    call $assert_eq_i32
+
+    call $init_heap
+
+    i32.const 1
+    call $hash_new
+    local.set $map
+
+    local.get $map
+    i32.const 1
+    i32.const 101
+    call $hash_put
+
+    local.get $map
+    i32.const 2
+    i32.const 102
+    call $hash_put
+
+    local.get $map
+    i32.const 3
+    i32.const 103
+    call $hash_put
+
+    local.get $map
+    i32.const 4
+    i32.const 104
+    call $hash_put
+
+    local.get $map
+    i32.const 5
+    i32.const 105
+    call $hash_put
+
+    local.get $map
+    i32.const 6
+    i32.const 106
+    call $hash_put
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    local.get $map
+    i32.const 100
+    i32.const 200
+    call $hash_put
+  )
 )

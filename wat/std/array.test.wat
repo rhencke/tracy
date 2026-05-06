@@ -214,4 +214,80 @@
     i32.const 15
     call $assert_eq_i32
   )
+
+  (func (export "test_array_failure_guards")
+    (local $i32_arr i32)
+    (local $f64_arr i32)
+    (local $u8_arr i32)
+
+    call $init_heap
+
+    i32.const 0
+    call $arr_i32_len
+    drop
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    i32.const 0
+    call $arr_i32_new
+    drop
+
+    call $init_heap
+
+    i32.const -1
+    call $arr_i32_new
+    drop
+
+    call $init_heap
+
+    i32.const 65520
+    i32.const 65536
+    call $bump_init
+
+    i32.const 1
+    call $arr_i32_new
+    i32.const 0
+    i32.const 16
+    call $assert_eq_i32
+
+    call $init_heap
+
+    i32.const 0
+    call $arr_i32_new
+    local.set $i32_arr
+
+    i32.const 0
+    call $arr_f64_new
+    local.set $f64_arr
+
+    i32.const 0
+    call $arr_u8_new
+    local.set $u8_arr
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    local.get $i32_arr
+    i32.const 123
+    call $arr_i32_push
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    local.get $f64_arr
+    f64.const 9
+    call $arr_f64_push
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    local.get $u8_arr
+    i32.const 9
+    call $arr_u8_push
+  )
 )

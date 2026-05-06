@@ -15,6 +15,7 @@ class WatwatFailure extends Error {
 
 function usage() {
   console.error("usage: watwat dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
+  console.error("usage: watwat --cov dist/wasm/foo.cov.json dist/wasm/foo.test.wasm");
   console.error("usage: watwat --expect-failure export_name expected_message dist/wasm/foo.test.wasm");
 }
 
@@ -81,30 +82,83 @@ function testExports(instance) {
     .map(([name, value]) => [name, value]);
 }
 
-async function instantiateAssert(assertPath, memory, watwat) {
+async function readJson(file) {
+  return JSON.parse(await fs.readFile(file, "utf8"));
+}
+
+function coverageOutputPath(manifestPath) {
+  return path.join(
+    path.dirname(manifestPath),
+    `${path.basename(manifestPath, ".cov.json")}.coverage.json`,
+  );
+}
+
+function createCoverageContext(manifest) {
+  const blockCount = Array.isArray(manifest.blocks) ? manifest.blocks.length : 0;
+  const counters = new Uint8Array(blockCount);
+  const moduleBase = path.basename(manifest.module ?? "", ".wat");
+
+  return {
+    counters,
+    moduleBase,
+    imports: {
+      hit(id) {
+        if (!Number.isInteger(id) || id < 0 || id >= counters.length) {
+          return;
+        }
+
+        if (counters[id] < 255) {
+          counters[id] += 1;
+        }
+      },
+    },
+  };
+}
+
+function coverageReport(manifest, coverage) {
+  const hits = Array.from(coverage.counters);
+  return {
+    module: manifest.module,
+    hits,
+    uncovered_ids: hits
+      .map((hit, id) => (hit === 0 ? id : -1))
+      .filter((id) => id !== -1),
+  };
+}
+
+async function writeCoverageReport(manifestPath, manifest, coverage) {
+  await fs.writeFile(
+    coverageOutputPath(manifestPath),
+    `${JSON.stringify(coverageReport(manifest, coverage), null, 2)}\n`,
+  );
+}
+
+async function instantiateAssert(assertPath, memory, watwat, coverage = null) {
   const bytes = await fs.readFile(assertPath);
-  const { instance } = await WebAssembly.instantiate(bytes, {
+  const imports = {
     env: { memory },
     watwat,
-  });
+  };
+
+  if (coverage !== null) {
+    imports.cov = coverage.imports;
+  }
+
+  const { instance } = await WebAssembly.instantiate(bytes, imports);
 
   return instance.exports;
 }
 
-function stdModulePathForTest(file) {
+function modulePathForTest(file) {
   if (!file.endsWith(".test.wasm")) {
     return null;
   }
 
   const parsed = path.parse(file);
-  if (path.basename(parsed.dir) !== "std") {
-    return null;
-  }
-
   return path.join(parsed.dir, `${parsed.name.replace(/\.test$/, "")}.wasm`);
 }
 
-function stdImportAliases(file) {
+function moduleImportAliases(file) {
   const parsed = path.parse(file);
   const name = parsed.name;
   const parent = path.basename(parsed.dir);
@@ -112,15 +166,44 @@ function stdImportAliases(file) {
   return [name, `${parent}/${name}`, `wat/${parent}/${name}`];
 }
 
-async function instantiateStdModule(file, imports) {
-  const stdPath = stdModulePathForTest(file);
+function memoryMaximumPagesFor(file) {
+  const constrainedSuites = new Set(["array.test.wasm", "hash.test.wasm", "pool.test.wasm"]);
 
-  if (stdPath === null) {
+  return constrainedSuites.has(path.basename(file)) ? 1 : 32768;
+}
+
+function dependencyImportsFor(imports) {
+  if (imports.cov === undefined) {
+    return imports;
+  }
+
+  return {
+    ...imports,
+    cov: {
+      hit() {},
+    },
+  };
+}
+
+function importsForModule(imports, coverage, modulePath) {
+  if (coverage === null || imports.cov === undefined) {
+    return imports;
+  }
+
+  return path.basename(modulePath, ".wasm") === coverage.moduleBase
+    ? imports
+    : dependencyImportsFor(imports);
+}
+
+async function instantiateSiblingModule(file, imports, coverage = null) {
+  const modulePath = modulePathForTest(file);
+
+  if (modulePath === null) {
     return {};
   }
 
   try {
-    await fs.access(stdPath);
+    await fs.access(modulePath);
   } catch (error) {
     if (error.code === "ENOENT") {
       return {};
@@ -129,16 +212,19 @@ async function instantiateStdModule(file, imports) {
     throw error;
   }
 
-  const allocPath = path.join(path.dirname(stdPath), "alloc.wasm");
-  const stdImports = { ...imports };
+  const allocPath = path.join(path.dirname(modulePath), "alloc.wasm");
+  const moduleImports = { ...imports };
   const aliases = {};
 
-  if (path.basename(stdPath) !== "alloc.wasm") {
+  if (path.basename(modulePath) !== "alloc.wasm") {
     try {
       await fs.access(allocPath);
       const allocBytes = await fs.readFile(allocPath);
-      const { instance } = await WebAssembly.instantiate(allocBytes, stdImports);
-      stdImports.alloc = instance.exports;
+      const { instance } = await WebAssembly.instantiate(
+        allocBytes,
+        importsForModule(imports, coverage, allocPath),
+      );
+      moduleImports.alloc = instance.exports;
       aliases.alloc = instance.exports;
       aliases["std/alloc"] = instance.exports;
       aliases["wat/std/alloc"] = instance.exports;
@@ -149,14 +235,17 @@ async function instantiateStdModule(file, imports) {
     }
   }
 
-  const hashPath = path.join(path.dirname(stdPath), "hash.wasm");
+  const hashPath = path.join(path.dirname(modulePath), "hash.wasm");
 
-  if (path.basename(stdPath) === "strtab.wasm") {
+  if (path.basename(modulePath) === "strtab.wasm") {
     try {
       await fs.access(hashPath);
       const hashBytes = await fs.readFile(hashPath);
-      const { instance } = await WebAssembly.instantiate(hashBytes, stdImports);
-      stdImports.hash = instance.exports;
+      const { instance } = await WebAssembly.instantiate(
+        hashBytes,
+        importsForModule(moduleImports, coverage, hashPath),
+      );
+      moduleImports.hash = instance.exports;
       aliases.hash = instance.exports;
       aliases["std/hash"] = instance.exports;
       aliases["wat/std/hash"] = instance.exports;
@@ -167,31 +256,40 @@ async function instantiateStdModule(file, imports) {
     }
   }
 
-  const bytes = await fs.readFile(stdPath);
-  const { instance } = await WebAssembly.instantiate(bytes, stdImports);
+  const bytes = await fs.readFile(modulePath);
+  const { instance } = await WebAssembly.instantiate(
+    bytes,
+    importsForModule(moduleImports, coverage, modulePath),
+  );
 
-  for (const name of stdImportAliases(stdPath)) {
+  for (const name of moduleImportAliases(modulePath)) {
     aliases[name] = instance.exports;
   }
 
   return aliases;
 }
 
-async function instantiateTestModule(file, assertPath) {
-  const memory = new WebAssembly.Memory({ initial: 1, maximum: 32768 });
+async function instantiateTestModule(file, assertPath, coverage = null) {
+  const memory = new WebAssembly.Memory({
+    initial: 1,
+    maximum: memoryMaximumPagesFor(file),
+  });
   const watwat = {
     fail(code) {
       throw new WatwatFailure(code);
     },
   };
-  const assert = await instantiateAssert(assertPath, memory, watwat);
+  const assert = await instantiateAssert(assertPath, memory, watwat, coverage);
   Object.assign(watwat, assert);
   const imports = {
     env: { memory },
     watwat,
     assert,
   };
-  Object.assign(imports, await instantiateStdModule(file, imports));
+  if (coverage !== null) {
+    imports.cov = coverage.imports;
+  }
+  Object.assign(imports, await instantiateSiblingModule(file, imports, coverage));
 
   const bytes = await fs.readFile(file);
   const { instance } = await WebAssembly.instantiate(bytes, imports);
@@ -202,8 +300,8 @@ async function instantiateTestModule(file, assertPath) {
   };
 }
 
-async function runTestFile(file, assertPath) {
-  const { instance, memory } = await instantiateTestModule(file, assertPath);
+async function runTestFile(file, assertPath, coverage = null) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage);
   const tests = testExports(instance);
   const results = [];
 
@@ -222,8 +320,8 @@ async function runTestFile(file, assertPath) {
   return results;
 }
 
-async function runExpectedFailure(exportName, expectedMessage, file, assertPath) {
-  const { instance, memory } = await instantiateTestModule(file, assertPath);
+async function runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage = null) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage);
   const probe = instance.exports[exportName];
 
   if (typeof probe !== "function") {
@@ -280,7 +378,7 @@ function emitTap(results) {
 }
 
 async function main() {
-  const files = process.argv.slice(2);
+  let files = process.argv.slice(2);
 
   if (files.length === 0) {
     usage();
@@ -306,13 +404,49 @@ async function main() {
     return;
   }
 
+  let coverage = null;
+  let coverageManifest = null;
+  let coverageManifestPath = null;
+
+  if (files[0] === "--cov") {
+    if (files.length < 3) {
+      usage();
+      process.exitCode = 64;
+      return;
+    }
+
+    coverageManifestPath = files[1];
+    coverageManifest = await readJson(coverageManifestPath);
+    coverage = createCoverageContext(coverageManifest);
+    files = files.slice(2);
+
+    if (files[0] === "--expect-failure") {
+      if (files.length !== 4) {
+        usage();
+        process.exitCode = 64;
+        return;
+      }
+
+      const [, exportName, expectedMessage, file] = files;
+      const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage);
+      emitTap([result]);
+      if (!result.ok) {
+        process.exitCode = 1;
+        return;
+      }
+
+      await writeCoverageReport(coverageManifestPath, coverageManifest, coverage);
+      return;
+    }
+  }
+
   const results = [];
   let harnessFailed = false;
 
   for (const file of files) {
     try {
       await fs.access(file);
-      results.push(...(await runTestFile(file, assertPath)));
+      results.push(...(await runTestFile(file, assertPath, coverage)));
     } catch (error) {
       if (error.code === "ENOENT" && hasGlobMeta(file)) {
         continue;
@@ -331,6 +465,11 @@ async function main() {
 
   if (harnessFailed || results.some((result) => !result.ok)) {
     process.exitCode = 1;
+    return;
+  }
+
+  if (coverage !== null) {
+    await writeCoverageReport(coverageManifestPath, coverageManifest, coverage);
   }
 }
 

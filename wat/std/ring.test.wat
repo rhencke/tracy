@@ -167,4 +167,43 @@
     i32.const 13
     call $assert_eq_i32
   )
+
+  (func (export "test_ring_failure_guards")
+    i32.const 0
+    i32.const 2048
+    i32.const 1
+    call $ring_write
+
+    i32.const 0
+    i32.const 3000
+    i32.const 1
+    call $ring_read
+    i32.const 0
+    i32.const 14
+    call $assert_eq_i32
+
+    i32.const 0
+    call $ring_available
+    i32.const 0
+    i32.const 15
+    call $assert_eq_i32
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    i32.const 4
+    call $ring_new
+    i32.const 0
+    i32.const 16
+    call $assert_eq_i32
+
+    call $init_heap
+
+    i32.const -8
+    call $ring_new
+    i32.const 0
+    i32.const 17
+    call $assert_eq_i32
+  )
 )

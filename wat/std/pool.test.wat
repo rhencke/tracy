@@ -170,4 +170,114 @@
     i32.const 11
     call $assert_eq_i32
   )
+
+  (func (export "test_pool_failure_guards")
+    (local $pool i32)
+    (local $slot i32)
+
+    i32.const 0
+    call $pool_alloc
+    i32.const 0
+    i32.const 12
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 100
+    call $pool_free
+
+    i32.const 0
+    call $pool_count
+    i32.const 0
+    i32.const 13
+    call $assert_eq_i32
+
+    i32.const -16
+    i32.const -8
+    call $bump_init
+
+    i32.const 8
+    i32.const 1
+    call $pool_new
+    i32.const 0
+    i32.const 14
+    call $assert_eq_i32
+
+    call $init_heap
+
+    i32.const 8
+    i32.const 2147483641
+    call $pool_new
+    i32.const 0
+    i32.const 17
+    call $assert_eq_i32
+
+    i32.const 65512
+    i32.const 65536
+    call $bump_init
+
+    i32.const 8
+    i32.const 1
+    call $pool_new
+    i32.const 0
+    i32.const 20
+    call $assert_eq_i32
+
+    call $init_heap
+
+    i32.const -8
+    i32.const 1
+    call $pool_new
+    i32.const 0
+    i32.const 18
+    call $assert_eq_i32
+
+    call $init_heap
+
+    i32.const 8
+    i32.const 1
+    call $pool_new
+    local.set $pool
+
+    local.get $pool
+    call $pool_alloc
+    local.set $slot
+
+    local.get $pool
+    local.get $slot
+    i32.const 8
+    i32.sub
+    call $pool_free
+
+    local.get $pool
+    call $pool_count
+    i32.const 1
+    i32.const 15
+    call $assert_eq_i32
+
+    local.get $pool
+    local.get $slot
+    i32.const 8
+    i32.add
+    call $pool_free
+
+    local.get $pool
+    call $pool_count
+    i32.const 1
+    i32.const 19
+    call $assert_eq_i32
+
+    local.get $pool
+    local.get $slot
+    call $pool_free
+
+    local.get $pool
+    local.get $slot
+    call $pool_free
+
+    local.get $pool
+    call $pool_count
+    i32.const 0
+    i32.const 16
+    call $assert_eq_i32
+  )
 )
