@@ -9,7 +9,7 @@
     "test:host-abi": "node tools/generate-host-abi.js --check",
     "test:parser-state-abi": "node tools/generate-parser-state-abi.js --check",
     "test:bootstrap-lines": "bash tools/check-bootstrap-lines.sh",
-    "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
+    "test:wat": "node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
     "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
     "test:generated-trace": "node tools/generated-trace-extractor-check.js",
     "test:cold-reload-index": "node tools/cold-reload-index-check.js",

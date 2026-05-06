@@ -70,7 +70,7 @@ bash tools/build.sh
 ls dist/index.html dist/bootstrap.bundle.js dist/wasm/app.wasm
 
 # run WAT module tests through watwat
-node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
+node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 
 # serve dist/ locally
 python3 -m http.server -d dist 8000

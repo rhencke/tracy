@@ -2,11 +2,8 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
 
 const testNamePattern = /^test_/;
-const wasmModulesUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
-const wasmModules = import(wasmModulesUrl);
 
 class WatwatFailure extends Error {
   constructor(code) {
@@ -17,9 +14,9 @@ class WatwatFailure extends Error {
 }
 
 function usage() {
-  console.error("usage: watwat dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
-  console.error("usage: watwat --cov dist/wasm/foo.cov.json dist/wasm/foo.test.wasm");
-  console.error("usage: watwat --expect-failure export_name expected_message dist/wasm/foo.test.wasm");
+  console.error("usage: watwat [--harness tools/harness.js] dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
+  console.error("usage: watwat [--harness tools/harness.js] --cov dist/wasm/foo.cov.json dist/wasm/foo.test.wasm");
+  console.error("usage: watwat [--harness tools/harness.js] --expect-failure export_name expected_message dist/wasm/foo.test.wasm");
 }
 
 function hasGlobMeta(value) {
@@ -152,144 +149,6 @@ async function instantiateAssert(assertPath, memory, watwat, coverage = null) {
   return instance.exports;
 }
 
-function modulePathForTest(file) {
-  if (!file.endsWith(".test.wasm")) {
-    return null;
-  }
-
-  const parsed = path.parse(file);
-  return path.join(parsed.dir, `${parsed.name.replace(/\.test$/, "")}.wasm`);
-}
-
-function memoryMaximumPagesFor(file) {
-  const constrainedSuites = new Set(["array.test.wasm", "hash.test.wasm", "pool.test.wasm"]);
-
-  return constrainedSuites.has(path.basename(file)) ? 1 : 32768;
-}
-
-const parserFixtureEncoder = new TextEncoder();
-const encodeParserFixture = (source) => parserFixtureEncoder.encode(source);
-const parserTraceFixture = encodeParserFixture(
-  '{"traceEvents":[{"name":"lo\\u0061d","cat":"io","ph":"X","ts":123,"dur":2,"pid":3,"tid":4},{"name":"paint","args":{"layer":"ro\\\"ot"},"ts":5}]}',
-);
-const parserFixtures = new Map([
-  [99, parserTraceFixture],
-  [100, encodeParserFixture('{"traceEvents":[}')],
-  [101, encodeParserFixture('{"traceEvents":[{"name":"\\q"}]}')],
-  [102, encodeParserFixture('{"traceEvents":[{"name":"open}')],
-  [103, encodeParserFixture('"root"')],
-  [104, encodeParserFixture("[".repeat(65))],
-  [105, encodeParserFixture('{"traceEvents":[{"name":"\\u00X0"}]}')],
-  [106, encodeParserFixture('{"traceEvents":[{"name":"bad\n"}]}')],
-  [107, encodeParserFixture(' \n { } \t')],
-  [108, encodeParserFixture('{"a"}')],
-  [109, encodeParserFixture('{:"x"}')],
-  [110, encodeParserFixture('{"traceEvents":[{"name":true,"ts":123}]}')],
-]);
-
-function writeFixture(memory, bytes, offset, len, dest) {
-  const start = Number(offset);
-  const count = Math.max(0, Math.min(len, bytes.length - start));
-
-  if (count <= 0) {
-    return 0;
-  }
-
-  new Uint8Array(memory.buffer, dest, count).set(bytes.subarray(start, start + count));
-  return count;
-}
-
-function createHostImports(memory) {
-  return {
-    canvas_get_size() {
-      return (BigInt(600) << 32n) | BigInt(800);
-    },
-    canvas_listen_resize() {},
-    pointer_listen() {},
-    file_picker_open() {
-      return 7;
-    },
-    opfs_create_from_file() {
-      return 11;
-    },
-    opfs_read_chunk() {
-      return 16;
-    },
-    opfs_source_from_file() {
-      return 11;
-    },
-    opfs_source_open() {
-      return 12;
-    },
-    opfs_source_name_len() {
-      return 14;
-    },
-    opfs_source_name() {
-      return 14;
-    },
-    opfs_source_size() {
-      return BigInt(1048576);
-    },
-    opfs_source_read(sourceId, offset, len, dest) {
-      if (sourceId === 111) {
-        return -1;
-      }
-
-      const fixture = parserFixtures.get(sourceId);
-      if (fixture !== undefined) {
-        return writeFixture(memory, fixture, offset, len, dest);
-      }
-
-      return 64;
-    },
-    opfs_index_create() {
-      return 21;
-    },
-    opfs_index_open() {
-      return 22;
-    },
-    opfs_index_read(indexId, offset, len, dest) {
-      if (indexId === 113) {
-        return -1;
-      }
-
-      if (indexId === 114) {
-        new Uint8Array(memory.buffer, dest, len).fill(0);
-        return len;
-      }
-
-      if (indexId === 21 && Number(offset) >= 0) {
-        const source = 65536 + Number(offset);
-        const sourceEnd = source + len;
-        const destEnd = dest + len;
-
-        if (sourceEnd <= memory.buffer.byteLength && destEnd <= memory.buffer.byteLength) {
-          new Uint8Array(memory.buffer, dest, len).set(new Uint8Array(memory.buffer, source, len));
-        }
-      }
-
-      return 65536;
-    },
-    opfs_index_write(indexId) {
-      if (indexId === 111) {
-        return -1;
-      }
-
-      return 65536;
-    },
-    opfs_index_flush(indexId) {
-      if (indexId === 112) {
-        return -1;
-      }
-
-      return 0;
-    },
-    opfs_index_size() {
-      return BigInt(131072);
-    },
-  };
-}
-
 function dependencyImportsFor(imports) {
   if (imports.cov === undefined) {
     return imports;
@@ -313,115 +172,76 @@ function importsForModule(imports, coverage, modulePath) {
     : dependencyImportsFor(imports);
 }
 
-function wasmRootFor(modulePath) {
-  const dir = path.dirname(modulePath);
-  return path.basename(dir) === "std" ? path.dirname(dir) : dir;
-}
-
-function modulePathForId(rootDir, moduleId, wasmModulePath) {
-  return path.join(rootDir, wasmModulePath(moduleId));
-}
-
-async function instantiateManifestModule(
-  moduleId,
-  moduleImports,
-  aliases,
-  imports,
-  coverage,
-  rootDir,
-  manifest,
-  instantiated,
-) {
-  if (instantiated.has(moduleId)) {
-    return true;
-  }
-
-  const wasmPath = modulePathForId(rootDir, moduleId, manifest.wasmModulePath);
-
-  try {
-    await fs.access(wasmPath);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return false;
-    }
-
-    throw error;
-  }
-
-  for (const dependency of manifest.wasmModuleDependencies(moduleId)) {
-    await instantiateManifestModule(
-      dependency,
-      moduleImports,
-      aliases,
-      imports,
-      coverage,
-      rootDir,
-      manifest,
-      instantiated,
-    );
-  }
-
-  const bytes = await fs.readFile(wasmPath);
-  const { instance } = await WebAssembly.instantiate(
-    bytes,
-    importsForModule(moduleImports, coverage, wasmPath),
-  );
-
-  for (const alias of manifest.wasmModuleAliases(moduleId)) {
-    moduleImports[alias] = instance.exports;
-    aliases[alias] = instance.exports;
-  }
-
-  instantiated.add(moduleId);
-  return true;
-}
-
-async function instantiateSiblingModule(file, imports, coverage = null) {
-  const modulePath = modulePathForTest(file);
-
-  if (modulePath === null) {
+async function loadHarness(harnessPath) {
+  if (harnessPath === null) {
     return {};
   }
 
-  try {
-    await fs.access(modulePath);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return {};
+  const loaded = require(path.resolve(harnessPath));
+  return loaded.default ?? loaded;
+}
+
+function parseOptions(args) {
+  let harnessPath = null;
+  const files = [...args];
+
+  if (files[0] === "--harness") {
+    if (files.length < 2) {
+      return { error: true };
     }
 
-    throw error;
+    harnessPath = files[1];
+    files.splice(0, 2);
   }
 
-  const rootDir = wasmRootFor(modulePath);
-  const manifest = await wasmModules;
-  const moduleId = manifest.wasmModuleIdForPath(modulePath);
-  const moduleImports = { ...imports };
-  const aliases = {};
-  const instantiated = new Set();
+  return { files, harnessPath };
+}
 
-  if (moduleId === null) {
+async function instantiateHarnessDependencies(file, imports, coverage, harness) {
+  if (typeof harness.dependencies !== "function") {
     return {};
   }
 
-  await instantiateManifestModule(
-    moduleId,
-    moduleImports,
-    aliases,
-    imports,
+  return harness.dependencies({
     coverage,
-    rootDir,
-    manifest,
-    instantiated,
-  );
-
-  return aliases;
+    file,
+    imports,
+    async instantiateWasm(wasmPath, moduleImports) {
+      const bytes = await fs.readFile(wasmPath);
+      const { instance } = await WebAssembly.instantiate(
+        bytes,
+        importsForModule(moduleImports, coverage, wasmPath),
+      );
+      return instance;
+    },
+  });
 }
 
-async function instantiateTestModule(file, assertPath, coverage = null) {
+async function harnessImports(file, memory, imports, coverage, harness) {
+  if (typeof harness.imports !== "function") {
+    return {};
+  }
+
+  return harness.imports({
+    coverage,
+    file,
+    imports,
+    memory,
+  });
+}
+
+async function memoryMaximumPagesFor(file, harness) {
+  if (typeof harness.memoryMaximumPagesFor === "function") {
+    return harness.memoryMaximumPagesFor(file);
+  }
+
+  return 32768;
+}
+
+async function instantiateTestModule(file, assertPath, coverage = null, harness = {}) {
   const memory = new WebAssembly.Memory({
     initial: 1,
-    maximum: memoryMaximumPagesFor(file),
+    maximum: await memoryMaximumPagesFor(file, harness),
   });
   const watwat = {
     fail(code) {
@@ -432,14 +252,14 @@ async function instantiateTestModule(file, assertPath, coverage = null) {
   Object.assign(watwat, assert);
   const imports = {
     env: { memory },
-    host: createHostImports(memory),
     watwat,
     assert,
   };
   if (coverage !== null) {
     imports.cov = coverage.imports;
   }
-  Object.assign(imports, await instantiateSiblingModule(file, imports, coverage));
+  Object.assign(imports, await harnessImports(file, memory, imports, coverage, harness));
+  Object.assign(imports, await instantiateHarnessDependencies(file, imports, coverage, harness));
 
   const bytes = await fs.readFile(file);
   const { instance } = await WebAssembly.instantiate(bytes, imports);
@@ -450,8 +270,8 @@ async function instantiateTestModule(file, assertPath, coverage = null) {
   };
 }
 
-async function runTestFile(file, assertPath, coverage = null) {
-  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage);
+async function runTestFile(file, assertPath, coverage = null, harness = {}) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage, harness);
   const tests = testExports(instance);
   const results = [];
 
@@ -470,8 +290,8 @@ async function runTestFile(file, assertPath, coverage = null) {
   return results;
 }
 
-async function runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage = null) {
-  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage);
+async function runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage = null, harness = {}) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage, harness);
   const probe = instance.exports[exportName];
 
   if (typeof probe !== "function") {
@@ -528,14 +348,16 @@ function emitTap(results) {
 }
 
 async function main() {
-  let files = process.argv.slice(2);
+  const options = parseOptions(process.argv.slice(2));
 
-  if (files.length === 0) {
+  if (options.error || options.files.length === 0) {
     usage();
     process.exitCode = 64;
     return;
   }
 
+  let files = options.files;
+  const harness = await loadHarness(options.harnessPath);
   const assertPath = path.resolve(__dirname, "../dist/wasm/std/assert.wasm");
 
   if (files[0] === "--expect-failure") {
@@ -546,7 +368,7 @@ async function main() {
     }
 
     const [, exportName, expectedMessage, file] = files;
-    const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath);
+    const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, null, harness);
     emitTap([result]);
     if (!result.ok) {
       process.exitCode = 1;
@@ -578,7 +400,7 @@ async function main() {
       }
 
       const [, exportName, expectedMessage, file] = files;
-      const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage);
+      const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage, harness);
       emitTap([result]);
       if (!result.ok) {
         process.exitCode = 1;
@@ -596,7 +418,7 @@ async function main() {
   for (const file of files) {
     try {
       await fs.access(file);
-      results.push(...(await runTestFile(file, assertPath, coverage)));
+      results.push(...(await runTestFile(file, assertPath, coverage, harness)));
     } catch (error) {
       if (error.code === "ENOENT" && hasGlobMeta(file)) {
         continue;
