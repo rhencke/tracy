@@ -8,7 +8,7 @@
     },
     {
       "name": "PARSER_STATE_VERSION",
-      "value": 1,
+      "value": 2,
       "description": "Parser resume-state ABI version."
     },
     {
@@ -30,6 +30,11 @@
       "name": "PARSER_DEFAULT_YIELD_BUDGET_MS",
       "value": 8,
       "description": "Default parser yield budget in milliseconds."
+    },
+    {
+      "name": "PARSER_TOKEN_RECORD_BYTES",
+      "value": 12,
+      "description": "Fixed tokenizer output record size: kind, payload pointer, payload length."
     }
   ],
   "fields": [
@@ -43,7 +48,7 @@
       "name": "PARSER_STATE_VERSION_OFFSET",
       "offset": 4,
       "size": 4,
-      "field": "Format version, currently `1`."
+      "field": "Format version, currently `2`."
     },
     {
       "name": "PARSER_STATE_STATUS_OFFSET",
@@ -154,10 +159,10 @@
       "field": "Current object key hash."
     },
     {
-      "name": "PARSER_STATE_RESERVED0_OFFSET",
+      "name": "PARSER_STATE_DFA_STATE_OFFSET",
       "offset": 84,
       "size": 4,
-      "field": "Reserved, zero for v0.1."
+      "field": "Tokenizer DFA state enum."
     },
     {
       "name": "PARSER_STATE_EVENT_COUNT_OFFSET",
@@ -178,9 +183,69 @@
       "field": "Inline partial-token byte buffer."
     },
     {
-      "name": "PARSER_STATE_RESERVED1_OFFSET",
+      "name": "PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET",
       "offset": 416,
-      "size": 96,
+      "size": 4,
+      "field": "Token output record capacity advertised by the caller for this turn."
+    },
+    {
+      "name": "PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET",
+      "offset": 420,
+      "size": 4,
+      "field": "Next token output record index relative to the current output buffer."
+    },
+    {
+      "name": "PARSER_STATE_OUTPUT_WRITE_OFFSET",
+      "offset": 424,
+      "size": 4,
+      "field": "Next token output byte offset relative to the current output buffer base."
+    },
+    {
+      "name": "PARSER_STATE_OUTPUT_COUNT_OFFSET",
+      "offset": 428,
+      "size": 4,
+      "field": "Number of complete token records emitted in the current output buffer."
+    },
+    {
+      "name": "PARSER_STATE_LINE_OFFSET",
+      "offset": 432,
+      "size": 4,
+      "field": "One-based source line for the next byte to tokenize."
+    },
+    {
+      "name": "PARSER_STATE_COLUMN_OFFSET",
+      "offset": 436,
+      "size": 4,
+      "field": "One-based source column for the next byte to tokenize."
+    },
+    {
+      "name": "PARSER_STATE_ERROR_LINE_OFFSET",
+      "offset": 440,
+      "size": 4,
+      "field": "One-based source line recorded for the last tokenizer error."
+    },
+    {
+      "name": "PARSER_STATE_ERROR_COLUMN_OFFSET",
+      "offset": 444,
+      "size": 4,
+      "field": "One-based source column recorded for the last tokenizer error."
+    },
+    {
+      "name": "PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET",
+      "offset": 448,
+      "size": 4,
+      "field": "Ring-relative offset where the current token payload started, or zero."
+    },
+    {
+      "name": "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET",
+      "offset": 456,
+      "size": 8,
+      "field": "Absolute file byte offset where the current token payload started."
+    },
+    {
+      "name": "PARSER_STATE_RESERVED1_OFFSET",
+      "offset": 464,
+      "size": 48,
       "field": "Reserved, zero for v0.1."
     }
   ],
@@ -242,6 +307,116 @@
           "name": "PARSER_TOKEN_LITERAL",
           "value": 3,
           "description": "A literal token crosses a chunk or yield boundary."
+        }
+      ]
+    },
+    {
+      "name": "tokenizer DFA state",
+      "constants": [
+        {
+          "name": "PARSER_DFA_DEFAULT",
+          "value": 0,
+          "description": "Tokenizer is between JSON tokens."
+        },
+        {
+          "name": "PARSER_DFA_STRING",
+          "value": 1,
+          "description": "Tokenizer is inside a JSON string."
+        },
+        {
+          "name": "PARSER_DFA_STRING_ESCAPE",
+          "value": 2,
+          "description": "Tokenizer is processing a JSON string escape."
+        },
+        {
+          "name": "PARSER_DFA_NUMBER",
+          "value": 3,
+          "description": "Tokenizer is scanning a JSON number."
+        },
+        {
+          "name": "PARSER_DFA_KEYWORD",
+          "value": 4,
+          "description": "Tokenizer is scanning true, false, or null."
+        }
+      ]
+    },
+    {
+      "name": "tokenizer output token kind",
+      "constants": [
+        {
+          "name": "PARSER_JSON_TOKEN_LBRACE",
+          "value": 1,
+          "description": "JSON `{` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_RBRACE",
+          "value": 2,
+          "description": "JSON `}` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_LBRACK",
+          "value": 3,
+          "description": "JSON `[` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_RBRACK",
+          "value": 4,
+          "description": "JSON `]` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_COLON",
+          "value": 5,
+          "description": "JSON `:` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_COMMA",
+          "value": 6,
+          "description": "JSON `,` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_STRING",
+          "value": 7,
+          "description": "JSON string token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_NUMBER",
+          "value": 8,
+          "description": "JSON number token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_TRUE",
+          "value": 9,
+          "description": "JSON `true` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_FALSE",
+          "value": 10,
+          "description": "JSON `false` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_NULL",
+          "value": 11,
+          "description": "JSON `null` token."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_EOF",
+          "value": 12,
+          "description": "Tokenizer reached a valid end of file."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_NEED_MORE",
+          "value": 13,
+          "description": "Tokenizer needs another OPFS chunk before it can continue."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_YIELD",
+          "value": 14,
+          "description": "Tokenizer yielded cooperatively to the host."
+        },
+        {
+          "name": "PARSER_JSON_TOKEN_ERROR",
+          "value": 15,
+          "description": "Tokenizer detected malformed JSON and recorded line and column."
         }
       ]
     },
@@ -320,6 +495,7 @@
     "parser": [
       "PARSER_STACK_CAP",
       "PARSER_PARTIAL_TOKEN_CAP",
+      "PARSER_TOKEN_RECORD_BYTES",
       "PARSER_STATE_STATUS_OFFSET",
       "PARSER_STATE_YIELD_BUDGET_MS_OFFSET",
       "PARSER_STATE_SOURCE_ID_OFFSET",
@@ -334,12 +510,23 @@
       "PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET",
       "PARSER_STATE_STRING_ESCAPE_OFFSET",
       "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "PARSER_STATE_DFA_STATE_OFFSET",
       "PARSER_STATE_EVENT_FIELD_OFFSET",
       "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
       "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
       "PARSER_STATE_EVENT_COUNT_OFFSET",
       "PARSER_STATE_STACK_OFFSET",
       "PARSER_STATE_PARTIAL_TOKEN_OFFSET",
+      "PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET",
+      "PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET",
+      "PARSER_STATE_OUTPUT_WRITE_OFFSET",
+      "PARSER_STATE_OUTPUT_COUNT_OFFSET",
+      "PARSER_STATE_LINE_OFFSET",
+      "PARSER_STATE_COLUMN_OFFSET",
+      "PARSER_STATE_ERROR_LINE_OFFSET",
+      "PARSER_STATE_ERROR_COLUMN_OFFSET",
+      "PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET",
+      "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET",
       "PARSER_STATUS_DONE",
       "PARSER_STATUS_YIELDED",
       "PARSER_STATUS_MALFORMED",
@@ -348,6 +535,26 @@
       "PARSER_TOKEN_STRING",
       "PARSER_TOKEN_NUMBER",
       "PARSER_TOKEN_LITERAL",
+      "PARSER_DFA_DEFAULT",
+      "PARSER_DFA_STRING",
+      "PARSER_DFA_STRING_ESCAPE",
+      "PARSER_DFA_NUMBER",
+      "PARSER_DFA_KEYWORD",
+      "PARSER_JSON_TOKEN_LBRACE",
+      "PARSER_JSON_TOKEN_RBRACE",
+      "PARSER_JSON_TOKEN_LBRACK",
+      "PARSER_JSON_TOKEN_RBRACK",
+      "PARSER_JSON_TOKEN_COLON",
+      "PARSER_JSON_TOKEN_COMMA",
+      "PARSER_JSON_TOKEN_STRING",
+      "PARSER_JSON_TOKEN_NUMBER",
+      "PARSER_JSON_TOKEN_TRUE",
+      "PARSER_JSON_TOKEN_FALSE",
+      "PARSER_JSON_TOKEN_NULL",
+      "PARSER_JSON_TOKEN_EOF",
+      "PARSER_JSON_TOKEN_NEED_MORE",
+      "PARSER_JSON_TOKEN_YIELD",
+      "PARSER_JSON_TOKEN_ERROR",
       "PARSER_STACK_ARRAY",
       "PARSER_STACK_OBJECT",
       "PARSER_EVENT_FIELD_NONE",
@@ -376,11 +583,23 @@
       "PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET",
       "PARSER_STATE_STRING_ESCAPE_OFFSET",
       "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "PARSER_STATE_DFA_STATE_OFFSET",
       "PARSER_STATE_EVENT_FIELD_OFFSET",
       "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
       "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
       "PARSER_STATE_EVENT_COUNT_OFFSET",
+      "PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET",
+      "PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET",
+      "PARSER_STATE_OUTPUT_WRITE_OFFSET",
+      "PARSER_STATE_OUTPUT_COUNT_OFFSET",
+      "PARSER_STATE_LINE_OFFSET",
+      "PARSER_STATE_COLUMN_OFFSET",
+      "PARSER_STATE_ERROR_LINE_OFFSET",
+      "PARSER_STATE_ERROR_COLUMN_OFFSET",
+      "PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET",
+      "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET",
       "PARSER_DEFAULT_YIELD_BUDGET_MS",
+      "PARSER_TOKEN_RECORD_BYTES",
       "PARSER_STATUS_DONE",
       "PARSER_STATUS_YIELDED",
       "PARSER_STATUS_MALFORMED",
@@ -388,6 +607,9 @@
       "PARSER_TOKEN_NONE",
       "PARSER_TOKEN_STRING",
       "PARSER_TOKEN_NUMBER",
+      "PARSER_DFA_DEFAULT",
+      "PARSER_JSON_TOKEN_LBRACE",
+      "PARSER_JSON_TOKEN_ERROR",
       "PARSER_EVENT_FIELD_NONE",
       "PARSER_EVENT_FIELD_TS"
     ],
@@ -398,6 +620,7 @@
       "PARSER_STACK_CAP",
       "PARSER_PARTIAL_TOKEN_CAP",
       "PARSER_DEFAULT_YIELD_BUDGET_MS",
+      "PARSER_TOKEN_RECORD_BYTES",
       "PARSER_STATE_MAGIC_OFFSET",
       "PARSER_STATE_VERSION_OFFSET",
       "PARSER_STATE_STATUS_OFFSET",
@@ -415,12 +638,23 @@
       "PARSER_STATE_PARTIAL_TOKEN_HASH_OFFSET",
       "PARSER_STATE_STRING_ESCAPE_OFFSET",
       "PARSER_STATE_UNICODE_ACCUM_OFFSET",
+      "PARSER_STATE_DFA_STATE_OFFSET",
       "PARSER_STATE_EVENT_FIELD_OFFSET",
       "PARSER_STATE_EVENT_FIELD_MASK_OFFSET",
       "PARSER_STATE_CURRENT_KEY_HASH_OFFSET",
       "PARSER_STATE_EVENT_COUNT_OFFSET",
       "PARSER_STATE_STACK_OFFSET",
       "PARSER_STATE_PARTIAL_TOKEN_OFFSET",
+      "PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET",
+      "PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET",
+      "PARSER_STATE_OUTPUT_WRITE_OFFSET",
+      "PARSER_STATE_OUTPUT_COUNT_OFFSET",
+      "PARSER_STATE_LINE_OFFSET",
+      "PARSER_STATE_COLUMN_OFFSET",
+      "PARSER_STATE_ERROR_LINE_OFFSET",
+      "PARSER_STATE_ERROR_COLUMN_OFFSET",
+      "PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET",
+      "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET",
       "PARSER_STATUS_READY",
       "PARSER_STATUS_NEED_CHUNK",
       "PARSER_STATUS_YIELDED",
@@ -431,6 +665,26 @@
       "PARSER_TOKEN_STRING",
       "PARSER_TOKEN_NUMBER",
       "PARSER_TOKEN_LITERAL",
+      "PARSER_DFA_DEFAULT",
+      "PARSER_DFA_STRING",
+      "PARSER_DFA_STRING_ESCAPE",
+      "PARSER_DFA_NUMBER",
+      "PARSER_DFA_KEYWORD",
+      "PARSER_JSON_TOKEN_LBRACE",
+      "PARSER_JSON_TOKEN_RBRACE",
+      "PARSER_JSON_TOKEN_LBRACK",
+      "PARSER_JSON_TOKEN_RBRACK",
+      "PARSER_JSON_TOKEN_COLON",
+      "PARSER_JSON_TOKEN_COMMA",
+      "PARSER_JSON_TOKEN_STRING",
+      "PARSER_JSON_TOKEN_NUMBER",
+      "PARSER_JSON_TOKEN_TRUE",
+      "PARSER_JSON_TOKEN_FALSE",
+      "PARSER_JSON_TOKEN_NULL",
+      "PARSER_JSON_TOKEN_EOF",
+      "PARSER_JSON_TOKEN_NEED_MORE",
+      "PARSER_JSON_TOKEN_YIELD",
+      "PARSER_JSON_TOKEN_ERROR",
       "PARSER_STACK_ARRAY",
       "PARSER_STACK_OBJECT",
       "PARSER_EVENT_FIELD_NONE",

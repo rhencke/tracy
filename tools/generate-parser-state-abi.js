@@ -116,6 +116,8 @@ function renderMemorySection() {
   const value = (name) => constantsByName.get(name).value;
   const status = enums.find((entry) => entry.name === "parser status").constants;
   const token = enums.find((entry) => entry.name === "partial token kind").constants;
+  const dfa = enums.find((entry) => entry.name === "tokenizer DFA state").constants;
+  const outputToken = enums.find((entry) => entry.name === "tokenizer output token kind").constants;
   const stack = enums.find((entry) => entry.name === "stack entry kind").constants;
   const event = enums.find((entry) => entry.name === "event field id").constants;
   const lines = [
@@ -165,6 +167,12 @@ function renderMemorySection() {
     "large-token path; the resume record must never contain a borrowed pointer into",
     "the ring.",
     "",
+    `Tokenizer output records are fixed-width \`PARSER_TOKEN_RECORD_BYTES = ${value("PARSER_TOKEN_RECORD_BYTES")}\``,
+    "byte records: token kind, payload pointer, and payload length.  The resume",
+    "record stores output cursors as offsets, record counts, and capacities; it",
+    "never stores the caller's output buffer pointer, so crash recovery does not",
+    "depend on a stale borrowed pointer.",
+    "",
     "### Parser status and field enums",
     "",
     "Parser statuses are:",
@@ -174,6 +182,14 @@ function renderMemorySection() {
     "Partial token kinds are:",
     "",
     renderEnumList(token),
+    "",
+    "Tokenizer DFA states are:",
+    "",
+    renderEnumList(dfa),
+    "",
+    "Tokenizer output token kinds are:",
+    "",
+    renderEnumList(outputToken),
     "",
     "Stack entry kinds are:",
     "",

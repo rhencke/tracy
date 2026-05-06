@@ -3,11 +3,12 @@
 
   ;; @generated parser-state-globals:start
   (global $PARSER_STATE_MAGIC (export "PARSER_STATE_MAGIC") i32 (i32.const 0x5452504A))
-  (global $PARSER_STATE_VERSION (export "PARSER_STATE_VERSION") i32 (i32.const 1))
+  (global $PARSER_STATE_VERSION (export "PARSER_STATE_VERSION") i32 (i32.const 2))
   (global $PARSER_STATE_BYTES (export "PARSER_STATE_BYTES") i32 (i32.const 512))
   (global $PARSER_STACK_CAP (export "PARSER_STACK_CAP") i32 (i32.const 64))
   (global $PARSER_PARTIAL_TOKEN_CAP (export "PARSER_PARTIAL_TOKEN_CAP") i32 (i32.const 256))
   (global $PARSER_DEFAULT_YIELD_BUDGET_MS (export "PARSER_DEFAULT_YIELD_BUDGET_MS") i32 (i32.const 8))
+  (global $PARSER_TOKEN_RECORD_BYTES (export "PARSER_TOKEN_RECORD_BYTES") i32 (i32.const 12))
 
   (global $PARSER_STATE_MAGIC_OFFSET (export "PARSER_STATE_MAGIC_OFFSET") i32 (i32.const 0))
   (global $PARSER_STATE_VERSION_OFFSET (export "PARSER_STATE_VERSION_OFFSET") i32 (i32.const 4))
@@ -29,9 +30,20 @@
   (global $PARSER_STATE_EVENT_FIELD_OFFSET (export "PARSER_STATE_EVENT_FIELD_OFFSET") i32 (i32.const 72))
   (global $PARSER_STATE_EVENT_FIELD_MASK_OFFSET (export "PARSER_STATE_EVENT_FIELD_MASK_OFFSET") i32 (i32.const 76))
   (global $PARSER_STATE_CURRENT_KEY_HASH_OFFSET (export "PARSER_STATE_CURRENT_KEY_HASH_OFFSET") i32 (i32.const 80))
+  (global $PARSER_STATE_DFA_STATE_OFFSET (export "PARSER_STATE_DFA_STATE_OFFSET") i32 (i32.const 84))
   (global $PARSER_STATE_EVENT_COUNT_OFFSET (export "PARSER_STATE_EVENT_COUNT_OFFSET") i32 (i32.const 88))
   (global $PARSER_STATE_STACK_OFFSET (export "PARSER_STATE_STACK_OFFSET") i32 (i32.const 96))
   (global $PARSER_STATE_PARTIAL_TOKEN_OFFSET (export "PARSER_STATE_PARTIAL_TOKEN_OFFSET") i32 (i32.const 160))
+  (global $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET (export "PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET") i32 (i32.const 416))
+  (global $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET (export "PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET") i32 (i32.const 420))
+  (global $PARSER_STATE_OUTPUT_WRITE_OFFSET (export "PARSER_STATE_OUTPUT_WRITE_OFFSET") i32 (i32.const 424))
+  (global $PARSER_STATE_OUTPUT_COUNT_OFFSET (export "PARSER_STATE_OUTPUT_COUNT_OFFSET") i32 (i32.const 428))
+  (global $PARSER_STATE_LINE_OFFSET (export "PARSER_STATE_LINE_OFFSET") i32 (i32.const 432))
+  (global $PARSER_STATE_COLUMN_OFFSET (export "PARSER_STATE_COLUMN_OFFSET") i32 (i32.const 436))
+  (global $PARSER_STATE_ERROR_LINE_OFFSET (export "PARSER_STATE_ERROR_LINE_OFFSET") i32 (i32.const 440))
+  (global $PARSER_STATE_ERROR_COLUMN_OFFSET (export "PARSER_STATE_ERROR_COLUMN_OFFSET") i32 (i32.const 444))
+  (global $PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET (export "PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET") i32 (i32.const 448))
+  (global $PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET (export "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET") i32 (i32.const 456))
 
   (global $PARSER_STATUS_READY (export "PARSER_STATUS_READY") i32 (i32.const 0))
   (global $PARSER_STATUS_NEED_CHUNK (export "PARSER_STATUS_NEED_CHUNK") i32 (i32.const 1))
@@ -44,6 +56,28 @@
   (global $PARSER_TOKEN_STRING (export "PARSER_TOKEN_STRING") i32 (i32.const 1))
   (global $PARSER_TOKEN_NUMBER (export "PARSER_TOKEN_NUMBER") i32 (i32.const 2))
   (global $PARSER_TOKEN_LITERAL (export "PARSER_TOKEN_LITERAL") i32 (i32.const 3))
+
+  (global $PARSER_DFA_DEFAULT (export "PARSER_DFA_DEFAULT") i32 (i32.const 0))
+  (global $PARSER_DFA_STRING (export "PARSER_DFA_STRING") i32 (i32.const 1))
+  (global $PARSER_DFA_STRING_ESCAPE (export "PARSER_DFA_STRING_ESCAPE") i32 (i32.const 2))
+  (global $PARSER_DFA_NUMBER (export "PARSER_DFA_NUMBER") i32 (i32.const 3))
+  (global $PARSER_DFA_KEYWORD (export "PARSER_DFA_KEYWORD") i32 (i32.const 4))
+
+  (global $PARSER_JSON_TOKEN_LBRACE (export "PARSER_JSON_TOKEN_LBRACE") i32 (i32.const 1))
+  (global $PARSER_JSON_TOKEN_RBRACE (export "PARSER_JSON_TOKEN_RBRACE") i32 (i32.const 2))
+  (global $PARSER_JSON_TOKEN_LBRACK (export "PARSER_JSON_TOKEN_LBRACK") i32 (i32.const 3))
+  (global $PARSER_JSON_TOKEN_RBRACK (export "PARSER_JSON_TOKEN_RBRACK") i32 (i32.const 4))
+  (global $PARSER_JSON_TOKEN_COLON (export "PARSER_JSON_TOKEN_COLON") i32 (i32.const 5))
+  (global $PARSER_JSON_TOKEN_COMMA (export "PARSER_JSON_TOKEN_COMMA") i32 (i32.const 6))
+  (global $PARSER_JSON_TOKEN_STRING (export "PARSER_JSON_TOKEN_STRING") i32 (i32.const 7))
+  (global $PARSER_JSON_TOKEN_NUMBER (export "PARSER_JSON_TOKEN_NUMBER") i32 (i32.const 8))
+  (global $PARSER_JSON_TOKEN_TRUE (export "PARSER_JSON_TOKEN_TRUE") i32 (i32.const 9))
+  (global $PARSER_JSON_TOKEN_FALSE (export "PARSER_JSON_TOKEN_FALSE") i32 (i32.const 10))
+  (global $PARSER_JSON_TOKEN_NULL (export "PARSER_JSON_TOKEN_NULL") i32 (i32.const 11))
+  (global $PARSER_JSON_TOKEN_EOF (export "PARSER_JSON_TOKEN_EOF") i32 (i32.const 12))
+  (global $PARSER_JSON_TOKEN_NEED_MORE (export "PARSER_JSON_TOKEN_NEED_MORE") i32 (i32.const 13))
+  (global $PARSER_JSON_TOKEN_YIELD (export "PARSER_JSON_TOKEN_YIELD") i32 (i32.const 14))
+  (global $PARSER_JSON_TOKEN_ERROR (export "PARSER_JSON_TOKEN_ERROR") i32 (i32.const 15))
 
   (global $PARSER_STACK_ARRAY (export "PARSER_STACK_ARRAY") i32 (i32.const 1))
   (global $PARSER_STACK_OBJECT (export "PARSER_STACK_OBJECT") i32 (i32.const 2))
@@ -124,6 +158,24 @@
     global.get $PARSER_STATE_SOURCE_ID_OFFSET
     call $field
     local.get $source_id
+    i32.store
+
+    local.get $state
+    global.get $PARSER_STATE_DFA_STATE_OFFSET
+    call $field
+    global.get $PARSER_DFA_DEFAULT
+    i32.store
+
+    local.get $state
+    global.get $PARSER_STATE_LINE_OFFSET
+    call $field
+    i32.const 1
+    i32.store
+
+    local.get $state
+    global.get $PARSER_STATE_COLUMN_OFFSET
+    call $field
+    i32.const 1
     i32.store
   )
 
