@@ -460,6 +460,84 @@ the fixture) / event_count <= 12.0`.  The measurement uses committed OPFS byte
 lengths, not just in-memory payload lengths, so page padding and resumability
 metadata stay visible.
 
+## Parser resume state ABI
+
+The streaming JSON parser state is a fixed 512-byte little-endian record.
+It may be stored anywhere the caller owns memory, then serialized byte-for-byte
+to OPFS for crash/reload recovery.  Pointers are deliberately excluded from
+the record; every location is an offset, id, enum, count, or inline byte span
+that remains meaningful after reload.
+
+The parser state format is versioned by `PARSER_STATE_MAGIC` (`TRPJ`) and
+`PARSER_STATE_VERSION` (`1`).  A parser must reject resume records whose magic
+or version do not match, and return `PARSER_STATUS_STATE_INVALID` rather than
+guessing how to interpret old bytes.
+
+The default yield budget is `PARSER_DEFAULT_YIELD_BUDGET_MS = 8`.  Callers may
+lower or raise `yield_budget_ms`, but the default stays at or below 8 ms so the
+JSPI-fallback profile yields before a long single-threaded turn risks starving
+the page.
+
+### Parser state layout
+
+| Offset | Size | Field |
+|---:|---:|---|
+| 0 | 4 | Magic `TRPJ` as little-endian `0x5452504A`. |
+| 4 | 4 | Format version, currently `1`. |
+| 8 | 4 | Parser status enum. |
+| 12 | 4 | Yield budget in milliseconds. |
+| 16 | 4 | Opaque OPFS source id from the host shim. |
+| 20 | 4 | Parser flags, zero unless a later version defines bits. |
+| 24 | 8 | Absolute file byte offset for the next unread byte. |
+| 32 | 4 | Ring read cursor, relative to `MEM_RING_BASE`. |
+| 36 | 4 | Ring write cursor, relative to `MEM_RING_BASE`. |
+| 40 | 4 | Ring byte count currently available to the parser. |
+| 44 | 4 | JSON nesting depth. |
+| 48 | 4 | Number of valid entries in the inline stack. |
+| 52 | 4 | Partial token kind enum. |
+| 56 | 4 | Partial token byte length. |
+| 60 | 4 | Rolling partial-token hash for dictionary/key matching. |
+| 64 | 4 | String escape substate. |
+| 68 | 4 | Unicode escape accumulator and remaining nibble count. |
+| 72 | 4 | Current Chrome trace event field enum. |
+| 76 | 4 | Bitmask of fields already seen in the current event. |
+| 80 | 4 | Current object key hash. |
+| 84 | 4 | Reserved, zero for v0.1. |
+| 88 | 8 | Count of complete trace events emitted so far. |
+| 96 | 64 | Inline stack bytes, one enum byte per JSON container. |
+| 160 | 256 | Inline partial-token byte buffer. |
+| 416 | 96 | Reserved, zero for v0.1. |
+
+The inline stack capacity is `PARSER_STACK_CAP = 64`.  Stack entries are
+`PARSER_STACK_ARRAY = 1` or `PARSER_STACK_OBJECT = 2`; unused bytes are zero.
+Deeper input is malformed for v0.1 and should fail closed instead of spilling
+stack state into another allocation.
+
+The partial-token buffer capacity is `PARSER_PARTIAL_TOKEN_CAP = 256`.  It is
+used only for tokens that cross chunk or yield boundaries, such as string
+bytes, escaped string substates, number text, and literal text.  A token that
+cannot fit in the buffer must be rejected or routed through a later explicit
+large-token path; the resume record must never contain a borrowed pointer into
+the ring.
+
+### Parser status and field enums
+
+`PARSER_STATUS_READY = 0` means the state is valid and can continue parsing.
+`PARSER_STATUS_NEED_CHUNK = 1` means the ring is exhausted and the host should
+read more bytes from the OPFS source.  `PARSER_STATUS_YIELDED = 2` means the
+parser stopped because its time budget expired.  `PARSER_STATUS_DONE = 3`
+means the source reached a valid end.  `PARSER_STATUS_MALFORMED = 4` means the
+input JSON cannot be parsed as the v0.1 trace format.
+`PARSER_STATUS_STATE_INVALID = 5` means the serialized state itself is not a
+valid resume point.
+
+Partial token kinds are `none`, `string`, `number`, and `literal`.  Event field
+ids cover the Chrome trace fields the v0.1 parser needs to recognize while
+streaming: `name`, `cat`, `ph`, `ts`, `dur`, `pid`, `tid`, `args`, and
+`other`.  The current field and seen-field bitmask let the parser yield in the
+middle of one event object without losing which output column the next token
+belongs to.
+
 ### Decoder API contract
 
 The index implementation must expose a page-oriented decoder API.  The API
