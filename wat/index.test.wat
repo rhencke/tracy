@@ -75,10 +75,21 @@
     (func $index_reader_cache_hit (result i32)))
   (import "index" "index_reader_cached_page_id"
     (func $index_reader_cached_page_id (result i32)))
+  (import "index" "index_reader_cache_slots"
+    (func $index_reader_cache_slots (result i32)))
+  (import "index" "index_reader_last_slot"
+    (func $index_reader_last_slot (result i32)))
+  (import "index" "index_reader_configure_cache"
+    (func $index_reader_configure_cache (param i32) (result i32)))
+  (import "index" "index_reader_evict_cold_pages"
+    (func $index_reader_evict_cold_pages (param i32) (result i32)))
   (import "mem" "MEM_INDEX_CACHE_BASE" (global $MEM_INDEX_CACHE_BASE i32))
+  (import "mem" "MEM_INDEX_CACHE_SIZE" (global $MEM_INDEX_CACHE_SIZE i32))
 
   (global $PAGE i32 (i32.const 0))
   (global $ALT_PAGE i32 (i32.const 65536))
+  (global $ALT_PAGE_2 i32 (i32.const 131072))
+  (global $ALT_PAGE_3 i32 (i32.const 196608))
   (global $PAGE_BYTES i32 (i32.const 65536))
   (global $PAYLOAD_LEN i32 (i32.const 135))
   (global $DIR_PTR i32 (i32.const 64))
@@ -283,6 +294,8 @@
 
     global.get $MEM_INDEX_CACHE_BASE
     global.get $PAGE_BYTES
+    i32.const 3
+    i32.mul
     i32.add
     i32.const 65535
     i32.add
@@ -355,6 +368,33 @@
     i32.add
     local.get $args_len
     i32.store
+  )
+
+  (func $write_reader_fixture_page (param $page_ptr i32) (param $name i32) (param $dict_epoch i32)
+    i32.const 21
+    local.get $page_ptr
+    local.get $dict_epoch
+    call $index_writer_init
+
+    i32.const 88
+    local.get $name
+    f64.const 1000
+    f64.const 25
+    i32.const 7
+    i32.const 9
+    i32.const 12
+    call $write_event
+
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 94
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 95
+    call $assert_eq_i32
   )
 
   (func (export "test_index_constants")
@@ -1448,6 +1488,209 @@
     call $index_reader_status
     global.get $INDEX_READER_STATUS_LEVEL_MISMATCH
     i32.const 93
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_configures_cache_slots")
+    i32.const 2
+    call $index_reader_configure_cache
+    i32.const 2
+    i32.const 96
+    call $assert_eq_i32
+
+    call $index_reader_cache_slots
+    i32.const 2
+    i32.const 97
+    call $assert_eq_i32
+
+    i32.const 0
+    call $index_reader_configure_cache
+    i32.const 1
+    i32.const 98
+    call $assert_eq_i32
+
+    global.get $MEM_INDEX_CACHE_SIZE
+    global.get $PAGE_BYTES
+    i32.div_u
+    i32.const 1
+    i32.add
+    call $index_reader_configure_cache
+    global.get $MEM_INDEX_CACHE_SIZE
+    global.get $PAGE_BYTES
+    i32.div_u
+    i32.const 99
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_lru_eviction_keeps_hot_page")
+    (local $page i32)
+
+    call $grow_to_index_cache
+
+    global.get $ALT_PAGE
+    i32.const 100
+    i32.const 1
+    call $write_reader_fixture_page
+
+    global.get $ALT_PAGE_2
+    i32.const 200
+    i32.const 2
+    call $write_reader_fixture_page
+
+    global.get $ALT_PAGE_3
+    i32.const 300
+    i32.const 3
+    call $write_reader_fixture_page
+
+    i32.const 2
+    call $index_reader_configure_cache
+    i32.const 2
+    i32.const 100
+    call $assert_eq_i32
+
+    i32.const 21
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    local.tee $page
+    global.get $MEM_INDEX_CACHE_BASE
+    i32.const 101
+    call $assert_eq_i32
+
+    call $index_reader_last_slot
+    i32.const 0
+    i32.const 102
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 1
+    call $read_page
+    global.get $MEM_INDEX_CACHE_BASE
+    global.get $PAGE_BYTES
+    i32.add
+    i32.const 103
+    call $assert_eq_i32
+
+    call $index_reader_last_slot
+    i32.const 1
+    i32.const 104
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    local.get $page
+    i32.const 105
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 1
+    i32.const 106
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 2
+    call $read_page
+    global.get $MEM_INDEX_CACHE_BASE
+    global.get $PAGE_BYTES
+    i32.add
+    i32.const 107
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 0
+    i32.const 108
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    local.get $page
+    i32.const 109
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 1
+    i32.const 110
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 1
+    call $read_page
+    global.get $MEM_INDEX_CACHE_BASE
+    global.get $PAGE_BYTES
+    i32.add
+    i32.const 111
+    call $assert_eq_i32
+
+    call $index_reader_cache_hit
+    i32.const 0
+    i32.const 112
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_memory_pressure_eviction_hook")
+    call $grow_to_index_cache
+
+    global.get $ALT_PAGE
+    i32.const 100
+    i32.const 1
+    call $write_reader_fixture_page
+
+    global.get $ALT_PAGE_2
+    i32.const 200
+    i32.const 2
+    call $write_reader_fixture_page
+
+    i32.const 2
+    call $index_reader_configure_cache
+    drop
+
+    i32.const 21
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    drop
+
+    i32.const 0
+    i32.const 1
+    call $read_page
+    drop
+
+    i32.const 1
+    call $index_reader_evict_cold_pages
+    i32.const 1
+    i32.const 113
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    drop
+
+    call $index_reader_cache_hit
+    i32.const 0
+    i32.const 114
+    call $assert_eq_i32
+
+    i32.const 0
+    call $index_reader_evict_cold_pages
+    i32.const 2
+    i32.const 115
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 1
+    call $read_page
+    drop
+
+    call $index_reader_cache_hit
+    i32.const 0
+    i32.const 116
     call $assert_eq_i32
   )
 )

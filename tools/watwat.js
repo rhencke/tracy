@@ -258,8 +258,8 @@ function createHostImports(memory) {
         return len;
       }
 
-      if (indexId === 21 && Number(offset) === 0) {
-        const source = 65536;
+      if (indexId === 21 && Number(offset) >= 0) {
+        const source = 65536 + Number(offset);
         const sourceEnd = source + len;
         const destEnd = dest + len;
 

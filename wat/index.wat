@@ -4,6 +4,7 @@
   (import "host" "opfs_index_write" (func $opfs_index_write (param i32 i64 i32 i32) (result i32)))
   (import "host" "opfs_index_flush" (func $opfs_index_flush (param i32) (result i32)))
   (import "mem" "MEM_INDEX_CACHE_BASE" (global $MEM_INDEX_CACHE_BASE i32))
+  (import "mem" "MEM_INDEX_CACHE_SIZE" (global $MEM_INDEX_CACHE_SIZE i32))
   (import "mem" "OPFS_PAGE_SIZE" (global $OPFS_PAGE_SIZE i32))
 
   (global $INDEX_PAGE_MAGIC_TRCI (export "INDEX_PAGE_MAGIC_TRCI") i32 (i32.const 0x49435254))
@@ -59,6 +60,8 @@
   (global $INDEX_WRITER_CAT_OFFSET i32 (i32.const 46580))
   (global $INDEX_WRITER_PHASE_OFFSET i32 (i32.const 58180))
   (global $INDEX_WRITER_FLAGS_OFFSET i32 (i32.const 61080))
+  (global $INDEX_READER_SLOT_META_BASE i32 (i32.const 0x00080000))
+  (global $INDEX_READER_SLOT_META_BYTES i32 (i32.const 16))
 
   (global $index_writer_file (mut i32) (i32.const 0))
   (global $index_writer_page (mut i32) (i32.const 0))
@@ -76,6 +79,9 @@
   (global $index_reader_cached_page_id (mut i32) (i32.const -1))
   (global $index_reader_last_status (mut i32) (i32.const 0))
   (global $index_reader_last_hit (mut i32) (i32.const 0))
+  (global $index_reader_configured_slots (mut i32) (i32.const 0))
+  (global $index_reader_clock (mut i32) (i32.const 0))
+  (global $index_reader_last_slot (mut i32) (i32.const -1))
 
   (func $load_payload_len (param $page i32) (result i32)
     local.get $page
@@ -870,16 +876,315 @@
     global.get $index_writer_next_page_id
   )
 
+  (func $index_reader_max_slots (result i32)
+    global.get $MEM_INDEX_CACHE_SIZE
+    global.get $OPFS_PAGE_SIZE
+    i32.div_u
+  )
+
+  (func $index_reader_slot_meta (param $slot i32) (result i32)
+    global.get $INDEX_READER_SLOT_META_BASE
+    local.get $slot
+    global.get $INDEX_READER_SLOT_META_BYTES
+    i32.mul
+    i32.add
+  )
+
+  (func $index_reader_slot_ptr (param $slot i32) (result i32)
+    global.get $MEM_INDEX_CACHE_BASE
+    local.get $slot
+    global.get $OPFS_PAGE_SIZE
+    i32.mul
+    i32.add
+  )
+
+  (func $index_reader_slot_valid (param $slot i32) (result i32)
+    local.get $slot
+    call $index_reader_slot_meta
+    i32.load8_u
+  )
+
+  (func $index_reader_slot_level (param $slot i32) (result i32)
+    local.get $slot
+    call $index_reader_slot_meta
+    i32.const 4
+    i32.add
+    i32.load
+  )
+
+  (func $index_reader_slot_page_id (param $slot i32) (result i32)
+    local.get $slot
+    call $index_reader_slot_meta
+    i32.const 8
+    i32.add
+    i32.load
+  )
+
+  (func $index_reader_slot_stamp (param $slot i32) (result i32)
+    local.get $slot
+    call $index_reader_slot_meta
+    i32.const 12
+    i32.add
+    i32.load
+  )
+
+  (func $index_reader_set_slot_valid (param $slot i32) (param $valid i32)
+    local.get $slot
+    call $index_reader_slot_meta
+    local.get $valid
+    i32.store8
+  )
+
+  (func $index_reader_next_stamp (result i32)
+    global.get $index_reader_clock
+    i32.const 1
+    i32.add
+    global.set $index_reader_clock
+    global.get $index_reader_clock
+  )
+
+  (func $index_reader_touch_slot (param $slot i32)
+    local.get $slot
+    call $index_reader_slot_meta
+    i32.const 12
+    i32.add
+    call $index_reader_next_stamp
+    i32.store
+  )
+
+  (func $index_reader_store_slot (param $slot i32) (param $level i32) (param $page_id i32)
+    (local $meta i32)
+
+    local.get $slot
+    call $index_reader_slot_meta
+    local.set $meta
+
+    local.get $meta
+    i32.const 1
+    i32.store8
+
+    local.get $meta
+    i32.const 4
+    i32.add
+    local.get $level
+    i32.store
+
+    local.get $meta
+    i32.const 8
+    i32.add
+    local.get $page_id
+    i32.store
+
+    local.get $meta
+    i32.const 12
+    i32.add
+    call $index_reader_next_stamp
+    i32.store
+  )
+
+  (func $index_reader_find_hit (param $level i32) (param $page_id i32) (result i32)
+    (local $slot i32)
+
+    block $miss
+      loop $loop
+        local.get $slot
+        global.get $index_reader_configured_slots
+        i32.ge_u
+        br_if $miss
+
+        local.get $slot
+        call $index_reader_slot_valid
+        if
+          local.get $slot
+          call $index_reader_slot_level
+          local.get $level
+          i32.eq
+          local.get $slot
+          call $index_reader_slot_page_id
+          local.get $page_id
+          i32.eq
+          i32.and
+          if
+            local.get $slot
+            return
+          end
+        end
+
+        local.get $slot
+        i32.const 1
+        i32.add
+        local.set $slot
+        br $loop
+      end
+    end
+
+    i32.const -1
+  )
+
+  (func $index_reader_find_free_slot (result i32)
+    (local $slot i32)
+
+    block $miss
+      loop $loop
+        local.get $slot
+        global.get $index_reader_configured_slots
+        i32.ge_u
+        br_if $miss
+
+        local.get $slot
+        call $index_reader_slot_valid
+        i32.eqz
+        if
+          local.get $slot
+          return
+        end
+
+        local.get $slot
+        i32.const 1
+        i32.add
+        local.set $slot
+        br $loop
+      end
+    end
+
+    i32.const -1
+  )
+
+  (func $index_reader_find_lru_slot (result i32)
+    (local $slot i32)
+    (local $best_slot i32)
+    (local $best_stamp i32)
+    (local $stamp i32)
+
+    i32.const -1
+    local.set $best_slot
+    i32.const -1
+    local.set $best_stamp
+
+    block $done
+      loop $loop
+        local.get $slot
+        global.get $index_reader_configured_slots
+        i32.ge_u
+        br_if $done
+
+        local.get $slot
+        call $index_reader_slot_valid
+        if
+          local.get $slot
+          call $index_reader_slot_stamp
+          local.set $stamp
+
+          local.get $best_slot
+          i32.const -1
+          i32.eq
+          local.get $stamp
+          local.get $best_stamp
+          i32.lt_u
+          i32.or
+          if
+            local.get $slot
+            local.set $best_slot
+            local.get $stamp
+            local.set $best_stamp
+          end
+        end
+
+        local.get $slot
+        i32.const 1
+        i32.add
+        local.set $slot
+        br $loop
+      end
+    end
+
+    local.get $best_slot
+  )
+
+  (func $index_reader_choose_slot (result i32)
+    (local $slot i32)
+
+    call $index_reader_find_free_slot
+    local.tee $slot
+    i32.const -1
+    i32.ne
+    if (result i32)
+      local.get $slot
+    else
+      call $index_reader_find_lru_slot
+    end
+  )
+
   (func $index_reader_clear_cache
+    (local $slot i32)
+
+    block $done
+      loop $loop
+        local.get $slot
+        global.get $index_reader_configured_slots
+        i32.ge_u
+        br_if $done
+
+        local.get $slot
+        i32.const 0
+        call $index_reader_set_slot_valid
+
+        local.get $slot
+        i32.const 1
+        i32.add
+        local.set $slot
+        br $loop
+      end
+    end
+
     i32.const -1
     global.set $index_reader_cached_level
     i32.const -1
     global.set $index_reader_cached_page_id
     i32.const 0
     global.set $index_reader_last_hit
+    i32.const -1
+    global.set $index_reader_last_slot
+  )
+
+  (func $index_reader_ensure_configured
+    global.get $index_reader_configured_slots
+    i32.eqz
+    if
+      call $index_reader_max_slots
+      global.set $index_reader_configured_slots
+    end
+  )
+
+  (func (export "index_reader_configure_cache") (param $slot_count i32) (result i32)
+    (local $max_slots i32)
+
+    call $index_reader_max_slots
+    local.set $max_slots
+
+    local.get $slot_count
+    i32.eqz
+    if
+      i32.const 1
+      local.set $slot_count
+    end
+
+    local.get $slot_count
+    local.get $max_slots
+    i32.gt_u
+    if
+      local.get $max_slots
+      local.set $slot_count
+    end
+
+    local.get $slot_count
+    global.set $index_reader_configured_slots
+    call $index_reader_clear_cache
+    local.get $slot_count
   )
 
   (func (export "index_reader_init") (param $index_file i32)
+    call $index_reader_ensure_configured
     local.get $index_file
     global.set $index_reader_file
     global.get $INDEX_READER_STATUS_OK
@@ -890,6 +1195,10 @@
   (func (export "read_page") (param $level i32) (param $page_id i32) (result i32)
     (local $read_bytes i32)
     (local $status i32)
+    (local $slot i32)
+    (local $page_ptr i32)
+
+    call $index_reader_ensure_configured
 
     global.get $index_reader_file
     i32.eqz
@@ -902,23 +1211,37 @@
     end
 
     local.get $level
-    global.get $index_reader_cached_level
-    i32.eq
     local.get $page_id
-    global.get $index_reader_cached_page_id
-    i32.eq
-    i32.and
+    call $index_reader_find_hit
+    local.tee $slot
+    i32.const -1
+    i32.ne
     if
       global.get $INDEX_READER_STATUS_OK
       global.set $index_reader_last_status
       i32.const 1
       global.set $index_reader_last_hit
-      global.get $MEM_INDEX_CACHE_BASE
+      local.get $slot
+      global.set $index_reader_last_slot
+      local.get $slot
+      call $index_reader_touch_slot
+      local.get $level
+      global.set $index_reader_cached_level
+      local.get $page_id
+      global.set $index_reader_cached_page_id
+      local.get $slot
+      call $index_reader_slot_ptr
       return
     end
 
     i32.const 0
     global.set $index_reader_last_hit
+    call $index_reader_choose_slot
+    local.tee $slot
+    global.set $index_reader_last_slot
+    local.get $slot
+    call $index_reader_slot_ptr
+    local.set $page_ptr
 
     global.get $index_reader_file
     local.get $page_id
@@ -926,7 +1249,7 @@
     i64.const 65536
     i64.mul
     global.get $OPFS_PAGE_SIZE
-    global.get $MEM_INDEX_CACHE_BASE
+    local.get $page_ptr
     call $opfs_index_read
     local.set $read_bytes
 
@@ -936,12 +1259,14 @@
     if
       global.get $INDEX_READER_STATUS_MISSING_PAGE
       global.set $index_reader_last_status
-      call $index_reader_clear_cache
+      local.get $slot
+      i32.const 0
+      call $index_reader_set_slot_valid
       i32.const 0
       return
     end
 
-    global.get $MEM_INDEX_CACHE_BASE
+    local.get $page_ptr
     global.get $OPFS_PAGE_SIZE
     call $index_validate_page
     local.tee $status
@@ -950,12 +1275,14 @@
     if
       global.get $INDEX_READER_STATUS_CORRUPT_PAGE
       global.set $index_reader_last_status
-      call $index_reader_clear_cache
+      local.get $slot
+      i32.const 0
+      call $index_reader_set_slot_valid
       i32.const 0
       return
     end
 
-    global.get $MEM_INDEX_CACHE_BASE
+    local.get $page_ptr
     i32.const 8
     i32.add
     i32.load
@@ -964,18 +1291,24 @@
     if
       global.get $INDEX_READER_STATUS_LEVEL_MISMATCH
       global.set $index_reader_last_status
-      call $index_reader_clear_cache
+      local.get $slot
+      i32.const 0
+      call $index_reader_set_slot_valid
       i32.const 0
       return
     end
 
+    local.get $slot
+    local.get $level
+    local.get $page_id
+    call $index_reader_store_slot
     local.get $level
     global.set $index_reader_cached_level
     local.get $page_id
     global.set $index_reader_cached_page_id
     global.get $INDEX_READER_STATUS_OK
     global.set $index_reader_last_status
-    global.get $MEM_INDEX_CACHE_BASE
+    local.get $page_ptr
   )
 
   (func (export "index_reader_status") (result i32)
@@ -988,6 +1321,68 @@
 
   (func (export "index_reader_cached_page_id") (result i32)
     global.get $index_reader_cached_page_id
+  )
+
+  (func (export "index_reader_cache_slots") (result i32)
+    call $index_reader_ensure_configured
+    global.get $index_reader_configured_slots
+  )
+
+  (func (export "index_reader_last_slot") (result i32)
+    global.get $index_reader_last_slot
+  )
+
+  (func (export "index_reader_evict_cold_pages") (param $count i32) (result i32)
+    (local $evicted i32)
+    (local $slot i32)
+
+    call $index_reader_ensure_configured
+
+    local.get $count
+    i32.eqz
+    if
+      global.get $index_reader_configured_slots
+      local.set $count
+    end
+
+    block $done
+      loop $loop
+        local.get $evicted
+        local.get $count
+        i32.ge_u
+        br_if $done
+
+        call $index_reader_find_lru_slot
+        local.tee $slot
+        i32.const -1
+        i32.eq
+        br_if $done
+
+        local.get $slot
+        i32.const 0
+        call $index_reader_set_slot_valid
+
+        local.get $evicted
+        i32.const 1
+        i32.add
+        local.set $evicted
+        br $loop
+      end
+    end
+
+    local.get $evicted
+    if
+      i32.const -1
+      global.set $index_reader_cached_level
+      i32.const -1
+      global.set $index_reader_cached_page_id
+      i32.const -1
+      global.set $index_reader_last_slot
+      i32.const 0
+      global.set $index_reader_last_hit
+    end
+
+    local.get $evicted
   )
 
   (func $index_column_span (export "index_column_span") (param $page i32) (param $column_id i32) (result i32 i32 i32 i32)
