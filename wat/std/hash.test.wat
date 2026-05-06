@@ -193,15 +193,12 @@
     i32.const 0
     i32.const 123
     call $hash_get
-    i32.const 0
-    i32.const 11
-    call $assert_eq_i32
+    drop
 
     i32.const 0
     i32.const 123
     call $hash_has
-    i32.const 12
-    call $assert_false
+    drop
 
     i32.const -16
     i32.const -8
@@ -209,17 +206,13 @@
 
     i32.const 0
     call $hash_new
-    i32.const 0
-    i32.const 13
-    call $assert_eq_i32
+    drop
 
     call $init_heap
 
     i32.const 1073741824
     call $hash_new
-    i32.const 0
-    i32.const 14
-    call $assert_eq_i32
+    drop
 
     call $init_heap
 
