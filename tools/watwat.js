@@ -172,6 +172,25 @@ function memoryMaximumPagesFor(file) {
   return constrainedSuites.has(path.basename(file)) ? 1 : 32768;
 }
 
+function createHostImports() {
+  return {
+    canvas_get_size() {
+      return (BigInt(600) << 32n) | BigInt(800);
+    },
+    canvas_listen_resize() {},
+    pointer_listen() {},
+    file_picker_open() {
+      return -1;
+    },
+    opfs_create_from_file() {
+      return -1;
+    },
+    opfs_read_chunk() {
+      return 0;
+    },
+  };
+}
+
 function dependencyImportsFor(imports) {
   if (imports.cov === undefined) {
     return imports;
@@ -283,6 +302,7 @@ async function instantiateTestModule(file, assertPath, coverage = null) {
   Object.assign(watwat, assert);
   const imports = {
     env: { memory },
+    host: createHostImports(),
     watwat,
     assert,
   };
