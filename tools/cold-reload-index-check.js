@@ -86,7 +86,7 @@ function hexPad(random, len) {
   return value.slice(0, len);
 }
 
-function eventJson(event, random, padLen) {
+function traceEventJson(event, { pad, flag }) {
   return JSON.stringify({
     ph: event.ph,
     name: event.name,
@@ -95,29 +95,16 @@ function eventJson(event, random, padLen) {
     pid: event.pid,
     tid: event.tid,
     args: {
-      pad: hexPad(random, padLen),
-      flag: (random() & 1) === 1,
-    },
-  });
-}
-
-function finalEventJson(event, padLen) {
-  return JSON.stringify({
-    ph: event.ph,
-    name: event.name,
-    ts: event.ts,
-    dur: event.dur,
-    pid: event.pid,
-    tid: event.tid,
-    args: {
-      pad: "0".repeat(padLen),
-      flag: true,
+      pad,
+      flag,
     },
   });
 }
 
 function finalEventBytes(event, padLen) {
-  return Buffer.byteLength(finalEventJson(event, padLen));
+  return Buffer.byteLength(
+    traceEventJson(event, { pad: "0".repeat(padLen), flag: true }),
+  );
 }
 
 function fillEvent(index) {
@@ -153,7 +140,10 @@ function buildTrace() {
     const nextFinalEvent = fillEvent(count + 1);
     const nextFinalOverhead = finalEventBytes(nextFinalEvent, 0);
     const suffixLen = nextFinalPrefixLen + nextFinalOverhead + 1;
-    const event = eventJson(events[count] ?? fillEvent(count), random, basePadLen);
+    const event = traceEventJson(events[count] ?? fillEvent(count), {
+      pad: hexPad(random, basePadLen),
+      flag: (random() & 1) === 1,
+    });
     const eventLen = Buffer.byteLength(event);
 
     if (bytes + prefixLen + eventLen + suffixLen > targetBytes) {
@@ -184,7 +174,10 @@ function buildTrace() {
     bytes += 1;
   }
 
-  const finalEvent = finalEventJson(finalEventModel, finalPadLen);
+  const finalEvent = traceEventJson(finalEventModel, {
+    pad: "0".repeat(finalPadLen),
+    flag: true,
+  });
   chunks.push(Buffer.from(finalEvent));
   bytes += Buffer.byteLength(finalEvent);
   sliceCount += 1;
