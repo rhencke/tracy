@@ -2,6 +2,12 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const {
+  INDEX_TARGET_ENCODED_BYTES_PER_EVENT,
+  OPFS_PAGE_SIZE,
+  TOKEN_RECORD_BYTES,
+  WASM_PAGE_SIZE,
+} = require("./layout-spec.js");
 
 const MiB = 1024 * 1024;
 const GiB = 1024 * MiB;
@@ -13,12 +19,10 @@ const seedText = process.env.TRACY_COLD_RELOAD_TRACE_SEED ?? "cold-reload-index-
 const sourceId = 9101;
 const indexId = 77;
 const statePtr = 4096;
-const writerPagePtr = 65536;
+const writerPagePtr = WASM_PAGE_SIZE;
 const inputPtr = 1 * MiB;
-const tokenRecordBytes = 12;
 const tokenOutputSafetyRecords = 1024;
-const opfsPageSize = 65536;
-const queryOutPtr = writerPagePtr + 2 * opfsPageSize;
+const queryOutPtr = writerPagePtr + 2 * OPFS_PAGE_SIZE;
 const wasmRoot = path.resolve(__dirname, "../dist/wasm");
 const stdRoot = path.join(wasmRoot, "std");
 
@@ -172,7 +176,7 @@ async function instantiateWasm(file, imports) {
 }
 
 function pageCount(bytes) {
-  return Math.ceil(bytes / 65536);
+  return Math.ceil(bytes / WASM_PAGE_SIZE);
 }
 
 function globalValue(value) {
@@ -183,7 +187,7 @@ async function instantiateModules(trace, indexBytes) {
   const eventCountEstimate = Math.max(1, Math.ceil(trace.length / 470));
   const recordCap = eventCountEstimate * 48 + tokenOutputSafetyRecords;
   const outputPtr = (inputPtr + trace.length + 7) & ~7;
-  const outputBytes = recordCap * tokenRecordBytes;
+  const outputBytes = recordCap * TOKEN_RECORD_BYTES;
   const heapPtr = (outputPtr + outputBytes + 7) & ~7;
   const heapEnd = heapPtr + 64 * MiB;
   const memory = new WebAssembly.Memory({
@@ -347,7 +351,7 @@ function rebuildSliceCatalog(index, memory, pages) {
       `catalog page ${pageId} read`,
     );
     expectEq(
-      index.index_validate_page(page, opfsPageSize),
+      index.index_validate_page(page, OPFS_PAGE_SIZE),
       globalValue(index.INDEX_STATUS_OK),
       `catalog page ${pageId} validates`,
     );
@@ -371,7 +375,7 @@ function compactPayloadBytes(indexBytes, index, pages) {
   let bytes = 0;
   const view = new DataView(indexBytes.buffer, indexBytes.byteOffset, indexBytes.byteLength);
   for (let pageId = 0; pageId < pages; pageId += 1) {
-    const page = pageId * opfsPageSize;
+    const page = pageId * OPFS_PAGE_SIZE;
     const hints = view.getUint32(page + 36, true);
     if ((hints & globalValue(index.INDEX_DECODE_HINT_COMPACT_SLICES)) !== 0) {
       const dir = page + globalValue(index.INDEX_HEADER_BYTES);
@@ -463,9 +467,9 @@ async function main() {
 
   const encodedBytes = compactPayloadBytes(indexBytes, ingest.index, pages);
   const encodedBytesPerSlice = encodedBytes / sliceCount;
-  if (encodedBytesPerSlice > 12) {
+  if (encodedBytesPerSlice > INDEX_TARGET_ENCODED_BYTES_PER_EVENT) {
     throw new Error(
-      `compact slice payload used ${encodedBytesPerSlice.toFixed(2)} bytes/event, budget 12`,
+      `compact slice payload used ${encodedBytesPerSlice.toFixed(2)} bytes/event, budget ${INDEX_TARGET_ENCODED_BYTES_PER_EVENT}`,
     );
   }
 
@@ -494,7 +498,7 @@ async function main() {
   const page0 = cold.index.read_page(0, 0);
   expectEq(cold.index.index_reader_status(), globalValue(cold.index.INDEX_READER_STATUS_OK), "page0 status");
   expectEq(
-    cold.index.index_validate_page(page0, opfsPageSize),
+    cold.index.index_validate_page(page0, OPFS_PAGE_SIZE),
     globalValue(cold.index.INDEX_STATUS_OK),
     "page0 validates",
   );

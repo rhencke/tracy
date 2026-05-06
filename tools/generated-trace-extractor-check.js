@@ -2,6 +2,10 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const {
+  TOKEN_RECORD_BYTES,
+  WASM_PAGE_SIZE,
+} = require("./layout-spec.js");
 
 const MiB = 1024 * 1024;
 const targetBytes = Number.parseInt(
@@ -12,7 +16,6 @@ const seedText = process.env.TRACY_GENERATED_TRACE_SEED ?? "generated-trace-ci";
 const sourceId = 9001;
 const statePtr = 4096;
 const inputPtr = 1 * MiB;
-const tokenRecordBytes = 12;
 const tokenOutputSafetyRecords = 1024;
 const wasmRoot = path.resolve(__dirname, "../dist/wasm");
 const stdRoot = path.join(wasmRoot, "std");
@@ -146,14 +149,14 @@ async function instantiateWasm(file, imports) {
 }
 
 function pageCount(bytes) {
-  return Math.ceil(bytes / 65536);
+  return Math.ceil(bytes / WASM_PAGE_SIZE);
 }
 
 async function instantiateParser(trace) {
   const eventCountEstimate = Math.max(1, Math.ceil(trace.length / 470));
   const recordCap = eventCountEstimate * 48 + tokenOutputSafetyRecords;
   const outputPtr = (inputPtr + trace.length + 7) & ~7;
-  const outputBytes = recordCap * tokenRecordBytes;
+  const outputBytes = recordCap * TOKEN_RECORD_BYTES;
   const heapPtr = (outputPtr + outputBytes + 7) & ~7;
   const heapEnd = heapPtr + 64 * MiB;
   const memory = new WebAssembly.Memory({

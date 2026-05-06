@@ -1637,7 +1637,8 @@
     global.get $index_writer_file
     global.get $index_writer_next_page_id
     i64.extend_i32_u
-    i64.const 65536
+    global.get $OPFS_PAGE_SIZE
+    i64.extend_i32_u
     i64.mul
     global.get $index_writer_page
     global.get $OPFS_PAGE_SIZE
@@ -3358,7 +3359,8 @@
     global.get $index_reader_file
     local.get $page_id
     i64.extend_i32_u
-    i64.const 65536
+    global.get $OPFS_PAGE_SIZE
+    i64.extend_i32_u
     i64.mul
     global.get $OPFS_PAGE_SIZE
     local.get $page_ptr

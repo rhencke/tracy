@@ -1,6 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { OPFS_PAGE_SIZE } = require("./layout-spec.js");
 
 const wasmModulesUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
 const wasmModules = import(wasmModulesUrl);
@@ -114,7 +115,7 @@ function imports({ memory }) {
             return len;
           }
 
-          const source = 65536 + start;
+          const source = OPFS_PAGE_SIZE + start;
           const sourceEnd = source + len;
 
           if (sourceEnd <= memory.buffer.byteLength && destEnd <= memory.buffer.byteLength) {
@@ -122,7 +123,7 @@ function imports({ memory }) {
           }
         }
 
-        return 65536;
+        return OPFS_PAGE_SIZE;
       },
       opfs_index_write(indexId, offset, src, len) {
         if (indexId === 111) {
@@ -145,7 +146,7 @@ function imports({ memory }) {
           }
         }
 
-        return 65536;
+        return OPFS_PAGE_SIZE;
       },
       opfs_index_flush(indexId) {
         if (indexId === 112) {
