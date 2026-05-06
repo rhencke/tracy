@@ -172,22 +172,24 @@ function memoryMaximumPagesFor(file) {
   return constrainedSuites.has(path.basename(file)) ? 1 : 32768;
 }
 
-const parserTraceFixture = new TextEncoder().encode(
+const parserFixtureEncoder = new TextEncoder();
+const encodeParserFixture = (source) => parserFixtureEncoder.encode(source);
+const parserTraceFixture = encodeParserFixture(
   '{"traceEvents":[{"name":"lo\\u0061d","cat":"io","ph":"X","ts":123,"dur":2,"pid":3,"tid":4},{"name":"paint","args":{"layer":"ro\\\"ot"},"ts":5}]}',
 );
 const parserFixtures = new Map([
   [99, parserTraceFixture],
-  [100, new TextEncoder().encode('{"traceEvents":[}')],
-  [101, new TextEncoder().encode('{"traceEvents":[{"name":"\\q"}]}')],
-  [102, new TextEncoder().encode('{"traceEvents":[{"name":"open}')],
-  [103, new TextEncoder().encode('"root"')],
-  [104, new TextEncoder().encode("[".repeat(65))],
-  [105, new TextEncoder().encode('{"traceEvents":[{"name":"\\u00X0"}]}')],
-  [106, new TextEncoder().encode('{"traceEvents":[{"name":"bad\n"}]}')],
-  [107, new TextEncoder().encode(' \n { } \t')],
-  [108, new TextEncoder().encode('{"a"}')],
-  [109, new TextEncoder().encode('{:"x"}')],
-  [110, new TextEncoder().encode('{"traceEvents":[{"name":true,"ts":123}]}')],
+  [100, encodeParserFixture('{"traceEvents":[}')],
+  [101, encodeParserFixture('{"traceEvents":[{"name":"\\q"}]}')],
+  [102, encodeParserFixture('{"traceEvents":[{"name":"open}')],
+  [103, encodeParserFixture('"root"')],
+  [104, encodeParserFixture("[".repeat(65))],
+  [105, encodeParserFixture('{"traceEvents":[{"name":"\\u00X0"}]}')],
+  [106, encodeParserFixture('{"traceEvents":[{"name":"bad\n"}]}')],
+  [107, encodeParserFixture(' \n { } \t')],
+  [108, encodeParserFixture('{"a"}')],
+  [109, encodeParserFixture('{:"x"}')],
+  [110, encodeParserFixture('{"traceEvents":[{"name":true,"ts":123}]}')],
 ]);
 
 function writeFixture(memory, bytes, offset, len, dest) {
