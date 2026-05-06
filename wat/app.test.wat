@@ -1,4 +1,5 @@
 (module
+  (import "env" "memory" (memory $memory 1))
   (import "watwat" "assert_true"
     (func $assert_true (param i32) (param i32)))
   (import "app" "tracy_main" (func $tracy_main))
