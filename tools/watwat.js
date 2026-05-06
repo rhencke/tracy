@@ -17,6 +17,10 @@ function usage() {
   console.error("usage: watwat dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
 }
 
+function hasGlobMeta(value) {
+  return /[*?\[]/.test(value);
+}
+
 function tapEscape(value) {
   return String(value).replace(/[\\\n\r]/g, (match) => {
     if (match === "\\") {
@@ -146,6 +150,10 @@ async function main() {
       await fs.access(file);
       results.push(...(await runTestFile(file, assertPath)));
     } catch (error) {
+      if (error.code === "ENOENT" && hasGlobMeta(file)) {
+        continue;
+      }
+
       harnessFailed = true;
       results.push({
         ok: false,
