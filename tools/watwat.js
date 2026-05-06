@@ -15,6 +15,7 @@ class WatwatFailure extends Error {
 
 function usage() {
   console.error("usage: watwat dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
+  console.error("usage: watwat --cov dist/wasm/foo.cov.json dist/wasm/foo.test.wasm");
   console.error("usage: watwat --expect-failure export_name expected_message dist/wasm/foo.test.wasm");
 }
 
@@ -81,12 +82,67 @@ function testExports(instance) {
     .map(([name, value]) => [name, value]);
 }
 
-async function instantiateAssert(assertPath, memory, watwat) {
+async function readJson(file) {
+  return JSON.parse(await fs.readFile(file, "utf8"));
+}
+
+function coverageOutputPath(manifestPath) {
+  return path.join(
+    path.dirname(manifestPath),
+    `${path.basename(manifestPath, ".cov.json")}.coverage.json`,
+  );
+}
+
+function createCoverageContext(manifest) {
+  const blockCount = Array.isArray(manifest.blocks) ? manifest.blocks.length : 0;
+  const counters = new Uint8Array(blockCount);
+
+  return {
+    counters,
+    imports: {
+      hit(id) {
+        if (!Number.isInteger(id) || id < 0 || id >= counters.length) {
+          return;
+        }
+
+        if (counters[id] < 255) {
+          counters[id] += 1;
+        }
+      },
+    },
+  };
+}
+
+function coverageReport(manifest, coverage) {
+  const hits = Array.from(coverage.counters);
+  return {
+    module: manifest.module,
+    hits,
+    uncovered_ids: hits
+      .map((hit, id) => (hit === 0 ? id : -1))
+      .filter((id) => id !== -1),
+  };
+}
+
+async function writeCoverageReport(manifestPath, manifest, coverage) {
+  await fs.writeFile(
+    coverageOutputPath(manifestPath),
+    `${JSON.stringify(coverageReport(manifest, coverage), null, 2)}\n`,
+  );
+}
+
+async function instantiateAssert(assertPath, memory, watwat, coverage = null) {
   const bytes = await fs.readFile(assertPath);
-  const { instance } = await WebAssembly.instantiate(bytes, {
+  const imports = {
     env: { memory },
     watwat,
-  });
+  };
+
+  if (coverage !== null) {
+    imports.cov = coverage.imports;
+  }
+
+  const { instance } = await WebAssembly.instantiate(bytes, imports);
 
   return instance.exports;
 }
@@ -177,20 +233,23 @@ async function instantiateStdModule(file, imports) {
   return aliases;
 }
 
-async function instantiateTestModule(file, assertPath) {
+async function instantiateTestModule(file, assertPath, coverage = null) {
   const memory = new WebAssembly.Memory({ initial: 1, maximum: 32768 });
   const watwat = {
     fail(code) {
       throw new WatwatFailure(code);
     },
   };
-  const assert = await instantiateAssert(assertPath, memory, watwat);
+  const assert = await instantiateAssert(assertPath, memory, watwat, coverage);
   Object.assign(watwat, assert);
   const imports = {
     env: { memory },
     watwat,
     assert,
   };
+  if (coverage !== null) {
+    imports.cov = coverage.imports;
+  }
   Object.assign(imports, await instantiateStdModule(file, imports));
 
   const bytes = await fs.readFile(file);
@@ -202,8 +261,8 @@ async function instantiateTestModule(file, assertPath) {
   };
 }
 
-async function runTestFile(file, assertPath) {
-  const { instance, memory } = await instantiateTestModule(file, assertPath);
+async function runTestFile(file, assertPath, coverage = null) {
+  const { instance, memory } = await instantiateTestModule(file, assertPath, coverage);
   const tests = testExports(instance);
   const results = [];
 
@@ -280,7 +339,7 @@ function emitTap(results) {
 }
 
 async function main() {
-  const files = process.argv.slice(2);
+  let files = process.argv.slice(2);
 
   if (files.length === 0) {
     usage();
@@ -306,13 +365,30 @@ async function main() {
     return;
   }
 
+  let coverage = null;
+  let coverageManifest = null;
+  let coverageManifestPath = null;
+
+  if (files[0] === "--cov") {
+    if (files.length < 3) {
+      usage();
+      process.exitCode = 64;
+      return;
+    }
+
+    coverageManifestPath = files[1];
+    coverageManifest = await readJson(coverageManifestPath);
+    coverage = createCoverageContext(coverageManifest);
+    files = files.slice(2);
+  }
+
   const results = [];
   let harnessFailed = false;
 
   for (const file of files) {
     try {
       await fs.access(file);
-      results.push(...(await runTestFile(file, assertPath)));
+      results.push(...(await runTestFile(file, assertPath, coverage)));
     } catch (error) {
       if (error.code === "ENOENT" && hasGlobMeta(file)) {
         continue;
@@ -331,6 +407,11 @@ async function main() {
 
   if (harnessFailed || results.some((result) => !result.ok)) {
     process.exitCode = 1;
+    return;
+  }
+
+  if (coverage !== null) {
+    await writeCoverageReport(coverageManifestPath, coverageManifest, coverage);
   }
 }
 
