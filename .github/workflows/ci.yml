@@ -57,7 +57,7 @@ jobs:
         run: bash tools/build.sh
 
       - name: Test WAT
-        run: node tools/watwat.js dist/wasm/*.test.wasm
+        run: npm test
 
       - name: Detect Playwright golden tests
         if: github.event_name == 'pull_request'
