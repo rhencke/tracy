@@ -33,13 +33,21 @@ if [ -d "${WAT_DIR}" ]; then
     cov_manifest_path="${cov_wat_path%.wat}.cov.json"
     cov_wasm_path="${cov_wat_path%.wat}.wasm"
     assembled_wat_path="${ASSEMBLED_WAT_DIR}/${rel_path}"
+    instrument_input="${wat_file}"
 
     mkdir -p "$(dirname "${cov_wat_path}")"
-    node "${ROOT_DIR}/tools/assemble-wat.js" "${wat_file}" "${assembled_wat_path}"
+    mapfile -t wat_inputs < <(node "${ROOT_DIR}/tools/assemble-wat.js" --inputs "${wat_file}" --relative-to "${ROOT_DIR}")
+    if [ "${#wat_inputs[@]}" -gt 1 ]; then
+      mkdir -p "$(dirname "${assembled_wat_path}")"
+      node "${ROOT_DIR}/tools/assemble-wat.js" "${wat_file}" "${assembled_wat_path}"
+      printf '%s\n' "${wat_inputs[@]}" > "${cov_wat_path}.inputs"
+      instrument_input="${assembled_wat_path}"
+    fi
+
     if [[ "${rel_path}" == *.test.wat ]]; then
-      cp "${assembled_wat_path}" "${cov_wat_path}"
+      cp "${instrument_input}" "${cov_wat_path}"
     else
-      node "${ROOT_DIR}/tools/instrument.js" "${assembled_wat_path}" "${cov_wat_path}" "${cov_manifest_path}" "${wat_file}"
+      node "${ROOT_DIR}/tools/instrument.js" "${instrument_input}" "${cov_wat_path}" "${cov_manifest_path}" "${wat_file}"
     fi
     wat2wasm "${cov_wat_path}" -o "${cov_wasm_path}"
   done < <(find "${WAT_DIR}" -type f -name '*.wat' -print0 | sort -z)
