@@ -1,4 +1,5 @@
 (module
+  (import "env" "memory" (memory $memory 1))
   (import "watwat" "assert_eq_i32"
     (func $assert_eq_i32 (param i32) (param i32) (param i32)))
   (import "mem" "WASM_PAGE_SIZE" (global $WASM_PAGE_SIZE i32))
