@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-const fs = require("node:fs/promises");
+const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const path = require("node:path");
 
 const branchOpcodes = new Set(["br", "br_if", "br_table", "return", "unreachable"]);
@@ -32,231 +33,6 @@ function locFor(index, line, col) {
   return { index, line, col };
 }
 
-function advanceLoc(source, state, text) {
-  for (let i = 0; i < text.length; i += 1) {
-    state.index += 1;
-    if (text[i] === "\n") {
-      state.line += 1;
-      state.col = 1;
-    } else {
-      state.col += 1;
-    }
-  }
-}
-
-function skipLineComment(source, state) {
-  while (state.index < source.length && source[state.index] !== "\n") {
-    advanceLoc(source, state, source[state.index]);
-  }
-}
-
-function skipBlockComment(source, state) {
-  let depth = 1;
-  advanceLoc(source, state, "(;");
-
-  while (state.index < source.length && depth > 0) {
-    const pair = source.slice(state.index, state.index + 2);
-
-    if (pair === "(;") {
-      depth += 1;
-      advanceLoc(source, state, pair);
-    } else if (pair === ";)") {
-      depth -= 1;
-      advanceLoc(source, state, pair);
-    } else {
-      advanceLoc(source, state, source[state.index]);
-    }
-  }
-
-  if (depth !== 0) {
-    throw new WatParseError("unterminated block comment", locFor(state.index, state.line, state.col));
-  }
-}
-
-function readString(source, state) {
-  const start = locFor(state.index, state.line, state.col);
-  let raw = "";
-  advanceLoc(source, state, "\"");
-  raw += "\"";
-
-  while (state.index < source.length) {
-    const char = source[state.index];
-    raw += char;
-    advanceLoc(source, state, char);
-
-    if (char === "\\") {
-      if (state.index >= source.length) {
-        break;
-      }
-      raw += source[state.index];
-      advanceLoc(source, state, source[state.index]);
-      continue;
-    }
-
-    if (char === "\"") {
-      return { type: "string", raw, loc: start };
-    }
-
-    if (char === "\n") {
-      throw new WatParseError("unterminated string", start);
-    }
-  }
-
-  throw new WatParseError("unterminated string", start);
-}
-
-function readAtom(source, state) {
-  const start = locFor(state.index, state.line, state.col);
-  let value = "";
-
-  while (state.index < source.length) {
-    const char = source[state.index];
-    const pair = source.slice(state.index, state.index + 2);
-
-    if (/\s/.test(char) || char === "(" || char === ")" || pair === ";;" || pair === "(;") {
-      break;
-    }
-
-    value += char;
-    advanceLoc(source, state, char);
-  }
-
-  return { type: "atom", value, loc: start };
-}
-
-function tokenizeWat(source) {
-  const state = { index: 0, line: 1, col: 1 };
-  const tokens = [];
-
-  while (state.index < source.length) {
-    const char = source[state.index];
-    const pair = source.slice(state.index, state.index + 2);
-
-    if (/\s/.test(char)) {
-      advanceLoc(source, state, char);
-    } else if (pair === ";;") {
-      skipLineComment(source, state);
-    } else if (pair === "(;") {
-      skipBlockComment(source, state);
-    } else if (char === "(" || char === ")") {
-      tokens.push({ type: char, loc: locFor(state.index, state.line, state.col) });
-      advanceLoc(source, state, char);
-    } else if (char === "\"") {
-      tokens.push(readString(source, state));
-    } else {
-      const token = readAtom(source, state);
-      if (token.value.length === 0) {
-        throw new WatParseError(`unexpected character ${JSON.stringify(char)}`, token.loc);
-      }
-      tokens.push(token);
-    }
-  }
-
-  return tokens;
-}
-
-function parseWat(source) {
-  const tokens = tokenizeWat(source);
-  let cursor = 0;
-
-  function parseNode() {
-    const token = tokens[cursor];
-
-    if (token === undefined) {
-      throw new WatParseError("unexpected end of input", locFor(source.length, 1, 1));
-    }
-
-    cursor += 1;
-
-    if (token.type === "atom" || token.type === "string") {
-      return { ...token };
-    }
-
-    if (token.type === ")") {
-      throw new WatParseError("unexpected close paren", token.loc);
-    }
-
-    const node = { type: "list", items: [], loc: token.loc, endLoc: null };
-
-    while (cursor < tokens.length && tokens[cursor].type !== ")") {
-      node.items.push(parseNode());
-    }
-
-    if (cursor >= tokens.length) {
-      throw new WatParseError("missing close paren", token.loc);
-    }
-
-    node.endLoc = tokens[cursor].loc;
-    cursor += 1;
-    return node;
-  }
-
-  const body = [];
-  while (cursor < tokens.length) {
-    body.push(parseNode());
-  }
-
-  return { type: "program", body };
-}
-
-function atom(value, loc = null) {
-  return { type: "atom", value, loc };
-}
-
-function stringLiteral(raw, loc = null) {
-  return { type: "string", raw, loc };
-}
-
-function list(items, loc = null) {
-  return { type: "list", items, loc, endLoc: null };
-}
-
-function headValue(node) {
-  return node?.type === "list" && node.items[0]?.type === "atom" ? node.items[0].value : null;
-}
-
-function isListHead(node, value) {
-  return headValue(node) === value;
-}
-
-function isAtomValue(node, value) {
-  return node?.type === "atom" && node.value === value;
-}
-
-function cloneLoc(loc) {
-  return loc === null ? null : { ...loc };
-}
-
-function cloneNode(node) {
-  if (node.type === "atom") {
-    return atom(node.value, cloneLoc(node.loc));
-  }
-
-  if (node.type === "string") {
-    return stringLiteral(node.raw, cloneLoc(node.loc));
-  }
-
-  return {
-    type: "list",
-    items: node.items.map(cloneNode),
-    loc: cloneLoc(node.loc),
-    endLoc: cloneLoc(node.endLoc),
-  };
-}
-
-function coverageImportNode() {
-  return list([
-    atom("import"),
-    stringLiteral("\"cov\""),
-    stringLiteral("\"hit\""),
-    list([atom("func"), atom("$cov_hit"), list([atom("param"), atom("i32")])]),
-  ]);
-}
-
-function counterNodes(id) {
-  return [atom("i32.const"), atom(String(id)), atom("call"), atom("$cov_hit")];
-}
-
 function manifestLoc(node) {
   return {
     line: node?.loc?.line ?? 1,
@@ -264,320 +40,655 @@ function manifestLoc(node) {
   };
 }
 
-function funcName(funcNode, fallback) {
-  for (const item of funcNode.items.slice(1)) {
-    if (item.type === "atom" && item.value.startsWith("$")) {
-      return item.value;
+class TokenReader {
+  constructor(inputPath) {
+    this.stream = fs.createReadStream(inputPath, { encoding: "utf8" });
+    this.iterator = this.stream[Symbol.asyncIterator]();
+    this.buffer = "";
+    this.done = false;
+    this.index = 0;
+    this.line = 1;
+    this.col = 1;
+    this.cache = [];
+  }
+
+  async close() {
+    this.stream.destroy();
+  }
+
+  async ensure(count) {
+    while (this.buffer.length < count && !this.done) {
+      const next = await this.iterator.next();
+      if (next.done) {
+        this.done = true;
+      } else {
+        this.buffer += next.value;
+      }
+    }
+  }
+
+  loc() {
+    return locFor(this.index, this.line, this.col);
+  }
+
+  async peekChar(offset = 0) {
+    await this.ensure(offset + 1);
+    return this.buffer[offset] ?? "";
+  }
+
+  advanceText(text) {
+    for (let i = 0; i < text.length; i += 1) {
+      this.index += 1;
+      if (text[i] === "\n") {
+        this.line += 1;
+        this.col = 1;
+      } else {
+        this.col += 1;
+      }
+    }
+    this.buffer = this.buffer.slice(text.length);
+  }
+
+  async takeChar() {
+    await this.ensure(1);
+    const char = this.buffer[0];
+    if (char !== undefined) {
+      this.advanceText(char);
+    }
+    return char ?? "";
+  }
+
+  async skipWhitespaceAndComments() {
+    while (true) {
+      const char = await this.peekChar();
+      const pair = `${char}${await this.peekChar(1)}`;
+
+      if (char === "") {
+        return;
+      }
+
+      if (/\s/.test(char)) {
+        await this.takeChar();
+      } else if (pair === ";;") {
+        while ((await this.peekChar()) !== "" && (await this.peekChar()) !== "\n") {
+          await this.takeChar();
+        }
+      } else if (pair === "(;") {
+        await this.skipBlockComment();
+      } else {
+        return;
+      }
+    }
+  }
+
+  async skipBlockComment() {
+    const start = this.loc();
+    let depth = 0;
+
+    while (true) {
+      const char = await this.peekChar();
+      const pair = `${char}${await this.peekChar(1)}`;
+
+      if (pair === "(;") {
+        depth += 1;
+        this.advanceText(pair);
+      } else if (pair === ";)") {
+        depth -= 1;
+        this.advanceText(pair);
+        if (depth === 0) {
+          return;
+        }
+      } else if (char === "") {
+        throw new WatParseError("unterminated block comment", start);
+      } else {
+        await this.takeChar();
+      }
+    }
+  }
+
+  async readStringToken() {
+    const start = this.loc();
+    let raw = await this.takeChar();
+
+    while (true) {
+      const char = await this.takeChar();
+      if (char === "") {
+        throw new WatParseError("unterminated string", start);
+      }
+
+      raw += char;
+      if (char === "\\") {
+        const escaped = await this.takeChar();
+        if (escaped === "") {
+          throw new WatParseError("unterminated string", start);
+        }
+        raw += escaped;
+      } else if (char === "\"") {
+        return { type: "string", raw, loc: start };
+      } else if (char === "\n") {
+        throw new WatParseError("unterminated string", start);
+      }
+    }
+  }
+
+  async readAtomToken() {
+    const start = this.loc();
+    let value = "";
+
+    while (true) {
+      const char = await this.peekChar();
+      const pair = `${char}${await this.peekChar(1)}`;
+
+      if (char === "" || /\s/.test(char) || char === "(" || char === ")" || pair === ";;" || pair === "(;") {
+        break;
+      }
+
+      value += await this.takeChar();
     }
 
-    if (isListHead(item, "export") && item.items[1]?.type === "string") {
-      return item.items[1].raw.slice(1, -1);
+    if (value.length === 0) {
+      throw new WatParseError(`unexpected character ${JSON.stringify(await this.peekChar())}`, start);
+    }
+
+    return { type: "atom", value, loc: start };
+  }
+
+  async readToken() {
+    await this.skipWhitespaceAndComments();
+    const start = this.loc();
+    const char = await this.peekChar();
+
+    if (char === "") {
+      return { type: "eof", loc: start };
+    }
+
+    if (char === "(" || char === ")") {
+      await this.takeChar();
+      return { type: char, loc: start };
+    }
+
+    if (char === "\"") {
+      return this.readStringToken();
+    }
+
+    return this.readAtomToken();
+  }
+
+  async peek(offset = 0) {
+    while (this.cache.length <= offset) {
+      this.cache.push(await this.readToken());
+    }
+    return this.cache[offset];
+  }
+
+  async next() {
+    if (this.cache.length > 0) {
+      return this.cache.shift();
+    }
+
+    return this.readToken();
+  }
+
+  async expect(type, message) {
+    const token = await this.next();
+    if (token.type !== type) {
+      throw new WatParseError(message, token.loc);
+    }
+    return token;
+  }
+}
+
+class WatStreamWriter {
+  constructor(outputPath) {
+    this.stream = fs.createWriteStream(outputPath, { encoding: "utf8" });
+    this.depth = 0;
+    this.frames = [];
+  }
+
+  async close() {
+    await new Promise((resolve, reject) => {
+      this.stream.end((error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  async write(text) {
+    if (!this.stream.write(text)) {
+      await new Promise((resolve) => this.stream.once("drain", resolve));
     }
   }
 
-  return fallback;
-}
-
-function isFuncImport(funcNode) {
-  return funcNode.items.slice(1).some((item) => isListHead(item, "import"));
-}
-
-function moduleNodeFor(program) {
-  if (program.type !== "program" || program.body.length !== 1 || !isListHead(program.body[0], "module")) {
-    throw new WatParseError("expected a single WAT module", program.body[0]?.loc ?? locFor(0, 1, 1));
-  }
-
-  return program.body[0];
-}
-
-function hasCoverageImport(moduleNode) {
-  return moduleNode.items.some((item) => {
-    if (!isListHead(item, "import")) {
-      return false;
+  async beforeItem() {
+    const frame = this.frames[this.frames.length - 1];
+    if (frame === undefined) {
+      return;
     }
 
-    const [, moduleName, fieldName, desc] = item.items;
-    return (
-      moduleName?.type === "string" &&
-      moduleName.raw === "\"cov\"" &&
-      fieldName?.type === "string" &&
-      fieldName.raw === "\"hit\"" &&
-      isListHead(desc, "func") &&
-      desc.items.some((part) => isAtomValue(part, "$cov_hit"))
-    );
-  });
-}
-
-function injectCoverageImport(moduleNode) {
-  if (hasCoverageImport(moduleNode)) {
-    return;
+    if (frame.count > 0) {
+      await this.write(`\n${"  ".repeat(this.depth)}`);
+    }
+    frame.count += 1;
   }
 
-  moduleNode.items.splice(1, 0, coverageImportNode());
-}
-
-function isFuncPrelude(node) {
-  if (node?.type === "atom") {
-    return node.value.startsWith("$");
+  async openList() {
+    await this.beforeItem();
+    await this.write("(");
+    this.frames.push({ count: 0 });
+    this.depth += 1;
   }
 
-  return funcPreludeHeads.has(headValue(node));
-}
+  async closeList() {
+    const frame = this.frames.pop();
+    this.depth -= 1;
 
-function isBlockPrelude(node) {
-  if (node?.type === "atom") {
-    return node.value.startsWith("$");
+    if (frame.count > 1) {
+      await this.write(`\n${"  ".repeat(this.depth)}`);
+    }
+    await this.write(")");
   }
 
-  return blockPreludeHeads.has(headValue(node));
-}
-
-function isLikelyInstructionStart(node) {
-  if (node?.type !== "atom") {
-    return node?.type === "list";
+  async token(token) {
+    await this.beforeItem();
+    if (token.type === "string") {
+      await this.write(token.raw);
+    } else if (token.type === "atom") {
+      await this.write(token.value);
+    } else {
+      throw new WatParseError(`unexpected token ${token.type}`, token.loc);
+    }
   }
 
-  if (node.value.startsWith("$") || /^-?(?:0x[0-9a-fA-F]+|\d)/.test(node.value)) {
+  async atom(value) {
+    await this.token({ type: "atom", value, loc: null });
+  }
+}
+
+function tokenHeadValue(token) {
+  return token?.type === "atom" ? token.value : null;
+}
+
+function isBlockPreludeToken(token, nextToken) {
+  if (token?.type === "atom") {
+    return token.value.startsWith("$");
+  }
+
+  return token?.type === "(" && blockPreludeHeads.has(tokenHeadValue(nextToken));
+}
+
+function isFuncPreludeToken(token, nextToken) {
+  if (token?.type === "atom") {
+    return token.value.startsWith("$");
+  }
+
+  return token?.type === "(" && funcPreludeHeads.has(tokenHeadValue(nextToken));
+}
+
+function isLikelyInstructionStartToken(token) {
+  if (token?.type !== "atom") {
+    return token?.type === "(";
+  }
+
+  if (token.value.startsWith("$") || /^-?(?:0x[0-9a-fA-F]+|\d)/.test(token.value)) {
     return false;
   }
 
   return (
-    node.value.includes(".") ||
-    branchOpcodes.has(node.value) ||
-    controlBoundaryAtoms.has(node.value) ||
-    definitionHeads.has(node.value)
+    token.value.includes(".") ||
+    branchOpcodes.has(token.value) ||
+    controlBoundaryAtoms.has(token.value) ||
+    definitionHeads.has(token.value)
   );
 }
 
-function branchOperandEnd(items, index) {
-  const opcode = items[index].value;
-  let cursor = index + 1;
+async function streamCounter(writer, state, func, kind, sourceToken) {
+  const id = state.blocks.length;
+  const loc = manifestLoc(sourceToken);
+  state.blocks.push({ id, func, kind, line: loc.line, col: loc.col });
+  await writer.atom("i32.const");
+  await writer.atom(String(id));
+  await writer.atom("call");
+  await writer.atom("$cov_hit");
+}
 
+async function copyAny(reader, writer) {
+  const token = await reader.next();
+
+  if (token.type === "(") {
+    const head = await reader.next();
+    await copyList(reader, writer, head);
+  } else if (token.type === "atom" || token.type === "string") {
+    await writer.token(token);
+  } else {
+    throw new WatParseError("unexpected close paren", token.loc);
+  }
+}
+
+async function copyList(reader, writer, head) {
+  await writer.openList();
+  await writer.token(head);
+
+  while ((await reader.peek()).type !== ")") {
+    await copyAny(reader, writer);
+  }
+
+  await reader.expect(")", "missing close paren");
+  await writer.closeList();
+}
+
+async function parseAny(reader, writer, state, context) {
+  const token = await reader.next();
+
+  if (token.type === "(") {
+    const head = await reader.next();
+    await parseList(reader, writer, state, context, head, token);
+    return head.value;
+  }
+
+  if (token.type === "atom" || token.type === "string") {
+    await writer.token(token);
+    return token.value ?? token.raw;
+  }
+
+  throw new WatParseError("unexpected close paren", token.loc);
+}
+
+async function parseList(reader, writer, state, context, head, sourceToken) {
+  await writer.openList();
+  await writer.token(head);
+
+  if (context.topLevel && head.type === "atom" && head.value === "func") {
+    await parseFuncList(reader, writer, state, sourceToken);
+  } else if (context.func !== null && head.type === "atom" && (head.value === "block" || head.value === "loop")) {
+    await parseFoldedBlock(reader, writer, state, context, head.value, sourceToken);
+  } else if (context.func !== null && head.type === "atom" && head.value === "if") {
+    await parseFoldedIf(reader, writer, state, context);
+  } else if (context.func !== null && head.type === "atom" && (head.value === "then" || head.value === "else")) {
+    await streamCounter(writer, state, context.func, head.value === "then" ? "if-then" : "if-else", sourceToken);
+    await parseSequence(reader, writer, state, context);
+  } else {
+    await parseSequence(reader, writer, state, { ...context, topLevel: false });
+  }
+
+  await reader.expect(")", "missing close paren");
+  await writer.closeList();
+}
+
+async function parseFuncPreludeList(reader, writer, state, head, funcInfo) {
+  await writer.openList();
+  await writer.token(head);
+
+  if (head.value === "import") {
+    funcInfo.imported = true;
+  } else if (head.value === "export") {
+    const token = await reader.peek();
+    if (!funcInfo.explicitName && token.type === "string") {
+      funcInfo.name = token.raw.slice(1, -1);
+    }
+  }
+
+  await parseSequence(reader, writer, state, { func: null, topLevel: false });
+  await reader.expect(")", "missing close paren");
+  await writer.closeList();
+}
+
+async function parseFuncList(reader, writer, state, sourceToken) {
+  const funcInfo = { explicitName: false, imported: false, name: `$func${state.funcIndex + 1}` };
+
+  while (true) {
+    const token = await reader.peek();
+    const nextToken = token.type === "(" ? await reader.peek(1) : null;
+
+    if (!isFuncPreludeToken(token, nextToken)) {
+      break;
+    }
+
+    if (token.type === "atom") {
+      const item = await reader.next();
+      if (item.value.startsWith("$")) {
+        funcInfo.explicitName = true;
+        funcInfo.name = item.value;
+      }
+      await writer.token(item);
+    } else {
+      await reader.expect("(", "expected function prelude list");
+      const head = await reader.next();
+      await parseFuncPreludeList(reader, writer, state, head, funcInfo);
+    }
+  }
+
+  if (!funcInfo.imported) {
+    state.funcIndex += 1;
+    await streamCounter(writer, state, funcInfo.name, "func-entry", sourceToken);
+    await parseSequence(reader, writer, state, { func: funcInfo.name, topLevel: false });
+  } else {
+    await parseSequence(reader, writer, state, { func: null, topLevel: false });
+  }
+}
+
+async function parseBlockPrelude(reader, writer) {
+  while (true) {
+    const token = await reader.peek();
+    const nextToken = token.type === "(" ? await reader.peek(1) : null;
+
+    if (!isBlockPreludeToken(token, nextToken)) {
+      return;
+    }
+
+    await copyAny(reader, writer);
+  }
+}
+
+async function parseFoldedBlock(reader, writer, state, context, kind, sourceToken) {
+  await parseBlockPrelude(reader, writer);
+  await streamCounter(writer, state, context.func, kind, sourceToken);
+  await parseSequence(reader, writer, state, context);
+}
+
+async function parseFoldedIf(reader, writer, state, context) {
+  await parseBlockPrelude(reader, writer);
+
+  while ((await reader.peek()).type !== ")") {
+    const token = await reader.peek();
+    const nextToken = token.type === "(" ? await reader.peek(1) : null;
+
+    if (token.type === "(" && nextToken?.type === "atom" && (nextToken.value === "then" || nextToken.value === "else")) {
+      await reader.expect("(", "expected folded if arm");
+      const head = await reader.next();
+      await parseList(reader, writer, state, context, head, token);
+    } else {
+      await parseAny(reader, writer, state, context);
+    }
+  }
+}
+
+async function parseBranchOperands(reader, writer, opcode) {
   if (opcode === "br" || opcode === "br_if") {
-    return Math.min(cursor + 1, items.length);
+    if ((await reader.peek()).type !== ")") {
+      await parseAny(reader, writer, { blocks: [] }, { func: null, topLevel: false });
+    }
+    return;
   }
 
   if (opcode === "br_table") {
-    while (cursor < items.length && !isLikelyInstructionStart(items[cursor])) {
-      cursor += 1;
-    }
-    return cursor;
-  }
-
-  return cursor;
-}
-
-function instrumentSequence(items, startIndex, state, func, enclosingEndAtoms = new Set()) {
-  const output = [];
-
-  for (let index = startIndex; index < items.length; index += 1) {
-    const item = items[index];
-
-    if (item.type === "atom" && enclosingEndAtoms.has(item.value)) {
-      output.push(cloneNode(item));
-      continue;
-    }
-
-    if (item.type === "atom" && (item.value === "block" || item.value === "loop")) {
-      output.push(cloneNode(item));
-      index += 1;
-      while (index < items.length && isBlockPrelude(items[index])) {
-        output.push(cloneNode(items[index]));
-        index += 1;
-      }
-      index -= 1;
-      output.push(...addBlock(state, func, item.value, item));
-      continue;
-    }
-
-    if (item.type === "atom" && item.value === "if") {
-      output.push(cloneNode(item));
-      index += 1;
-      while (index < items.length && isBlockPrelude(items[index])) {
-        output.push(cloneNode(items[index]));
-        index += 1;
-      }
-      index -= 1;
-      output.push(...addBlock(state, func, "if-then", item));
-      continue;
-    }
-
-    if (item.type === "atom" && item.value === "else") {
-      output.push(cloneNode(item));
-      output.push(...addBlock(state, func, "if-else", item));
-      continue;
-    }
-
-    if (item.type === "atom" && branchOpcodes.has(item.value)) {
-      const end = branchOperandEnd(items, index);
-      for (let branchIndex = index; branchIndex < end; branchIndex += 1) {
-        output.push(cloneNode(items[branchIndex]));
-      }
-      output.push(...addBlock(state, func, "post-branch", item));
-      index = end - 1;
-      continue;
-    }
-
-    output.push(instrumentNode(item, state, func));
-
-    if (isBranchList(item)) {
-      output.push(...addBlock(state, func, "post-branch", item));
+    while ((await reader.peek()).type !== ")" && !isLikelyInstructionStartToken(await reader.peek())) {
+      await parseAny(reader, writer, { blocks: [] }, { func: null, topLevel: false });
     }
   }
-
-  return output;
 }
 
-function isBranchList(node) {
-  return branchOpcodes.has(headValue(node));
-}
+async function parseSequence(reader, writer, state, context) {
+  while ((await reader.peek()).type !== ")") {
+    const token = await reader.peek();
 
-function addBlock(state, func, kind, sourceNode) {
-  const id = state.blocks.length;
-  const loc = manifestLoc(sourceNode);
-  state.blocks.push({ id, func, kind, line: loc.line, col: loc.col });
-  return counterNodes(id);
-}
-
-function instrumentFoldedControl(node, state, func) {
-  const head = headValue(node);
-  const items = [cloneNode(node.items[0])];
-  let cursor = 1;
-
-  if (head === "block" || head === "loop") {
-    while (cursor < node.items.length && isBlockPrelude(node.items[cursor])) {
-      items.push(cloneNode(node.items[cursor]));
-      cursor += 1;
-    }
-    items.push(...addBlock(state, func, head, node));
-    items.push(...instrumentSequence(node.items, cursor, state, func));
-    return { ...node, items };
-  }
-
-  while (cursor < node.items.length && isBlockPrelude(node.items[cursor])) {
-    items.push(cloneNode(node.items[cursor]));
-    cursor += 1;
-  }
-
-  for (; cursor < node.items.length; cursor += 1) {
-    const item = node.items[cursor];
-    if (isListHead(item, "then")) {
-      items.push(instrumentThenElse(item, state, func, "if-then"));
-    } else if (isListHead(item, "else")) {
-      items.push(instrumentThenElse(item, state, func, "if-else"));
+    if (context.func !== null && token.type === "atom" && (token.value === "block" || token.value === "loop")) {
+      const item = await reader.next();
+      await writer.token(item);
+      await parseBlockPrelude(reader, writer);
+      await streamCounter(writer, state, context.func, item.value, item);
+    } else if (context.func !== null && token.type === "atom" && token.value === "if") {
+      const item = await reader.next();
+      await writer.token(item);
+      await parseBlockPrelude(reader, writer);
+      await streamCounter(writer, state, context.func, "if-then", item);
+    } else if (context.func !== null && token.type === "atom" && token.value === "else") {
+      const item = await reader.next();
+      await writer.token(item);
+      await streamCounter(writer, state, context.func, "if-else", item);
+    } else if (context.func !== null && token.type === "atom" && branchOpcodes.has(token.value)) {
+      const item = await reader.next();
+      await writer.token(item);
+      await parseBranchOperands(reader, writer, item.value);
+      await streamCounter(writer, state, context.func, "post-branch", item);
     } else {
-      items.push(instrumentNode(item, state, func));
+      const head = await parseAny(reader, writer, state, context);
+      if (context.func !== null && branchOpcodes.has(head)) {
+        await streamCounter(writer, state, context.func, "post-branch", token);
+      }
     }
   }
-
-  return { ...node, items };
 }
 
-function instrumentThenElse(node, state, func, kind) {
-  const items = [cloneNode(node.items[0]), ...addBlock(state, func, kind, node)];
-  items.push(...instrumentSequence(node.items, 1, state, func));
-  return { ...node, items };
-}
-
-function instrumentNode(node, state, func) {
-  if (node.type !== "list") {
-    return cloneNode(node);
+async function skipAny(reader) {
+  const token = await reader.next();
+  if (token.type === "(") {
+    await skipList(reader);
   }
-
-  const head = headValue(node);
-  if (head === "block" || head === "loop" || head === "if") {
-    return instrumentFoldedControl(node, state, func);
-  }
-
-  return { ...node, items: node.items.map((item) => instrumentNode(item, state, func)) };
 }
 
-function instrumentFunc(funcNode, state, fallbackName) {
-  const func = funcName(funcNode, fallbackName);
-  const items = [cloneNode(funcNode.items[0])];
-  let cursor = 1;
-
-  while (cursor < funcNode.items.length && isFuncPrelude(funcNode.items[cursor])) {
-    items.push(cloneNode(funcNode.items[cursor]));
-    cursor += 1;
+async function skipList(reader) {
+  while ((await reader.peek()).type !== ")") {
+    await skipAny(reader);
   }
-
-  items.push(...addBlock(state, func, "func-entry", funcNode));
-  items.push(...instrumentSequence(funcNode.items, cursor, state, func));
-
-  return { ...funcNode, items };
+  await reader.expect(")", "missing close paren");
 }
 
-function instrumentWat(program, options = {}) {
-  const moduleName = options.module ?? "";
-  const instrumented = { type: "program", body: program.body.map(cloneNode) };
-  const moduleNode = moduleNodeFor(instrumented);
-  const state = { blocks: [] };
-  let funcIndex = 0;
+async function scanCoverageImport(inputPath) {
+  const reader = new TokenReader(inputPath);
 
-  injectCoverageImport(moduleNode);
-
-  moduleNode.items = moduleNode.items.map((item) => {
-    if (!isListHead(item, "func") || isFuncImport(item)) {
-      return item;
+  try {
+    await reader.expect("(", "expected a single WAT module");
+    const moduleHead = await reader.next();
+    if (moduleHead.type !== "atom" || moduleHead.value !== "module") {
+      throw new WatParseError("expected a single WAT module", moduleHead.loc);
     }
 
-    funcIndex += 1;
-    return instrumentFunc(item, state, `$func${funcIndex}`);
-  });
+    while ((await reader.peek()).type !== ")") {
+      const token = await reader.next();
+      if (token.type !== "(") {
+        continue;
+      }
+
+      const head = await reader.next();
+      if (head.type !== "atom" || head.value !== "import") {
+        await skipList(reader);
+        continue;
+      }
+
+      const moduleName = await reader.next();
+      const fieldName = await reader.next();
+      let hasCovHitFunc = false;
+
+      while ((await reader.peek()).type !== ")") {
+        const item = await reader.next();
+        if (item.type === "atom" && item.value === "$cov_hit") {
+          hasCovHitFunc = true;
+        } else if (item.type === "(") {
+          await scanImportDesc(reader, (atomToken) => {
+            if (atomToken.value === "$cov_hit") {
+              hasCovHitFunc = true;
+            }
+          });
+        }
+      }
+
+      await reader.expect(")", "missing close paren");
+      if (
+        moduleName.type === "string" &&
+        moduleName.raw === "\"cov\"" &&
+        fieldName.type === "string" &&
+        fieldName.raw === "\"hit\"" &&
+        hasCovHitFunc
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  } finally {
+    await reader.close();
+  }
+}
+
+async function scanImportDesc(reader, onAtom) {
+  while ((await reader.peek()).type !== ")") {
+    const token = await reader.next();
+    if (token.type === "atom") {
+      onAtom(token);
+    } else if (token.type === "(") {
+      await scanImportDesc(reader, onAtom);
+    }
+  }
+  await reader.expect(")", "missing close paren");
+}
+
+async function writeCoverageImport(writer) {
+  await writer.openList();
+  await writer.atom("import");
+  await writer.token({ type: "string", raw: "\"cov\"" });
+  await writer.token({ type: "string", raw: "\"hit\"" });
+  await writer.openList();
+  await writer.atom("func");
+  await writer.atom("$cov_hit");
+  await writer.openList();
+  await writer.atom("param");
+  await writer.atom("i32");
+  await writer.closeList();
+  await writer.closeList();
+  await writer.closeList();
+}
+
+async function instrumentWatFile(inputPath, outputPath, options = {}) {
+  const reader = new TokenReader(inputPath);
+  const writer = new WatStreamWriter(outputPath);
+  const state = { blocks: [], funcIndex: 0 };
+
+  try {
+    const hasCovImport = await scanCoverageImport(inputPath);
+    await reader.expect("(", "expected a single WAT module");
+    const moduleHead = await reader.next();
+    if (moduleHead.type !== "atom" || moduleHead.value !== "module") {
+      throw new WatParseError("expected a single WAT module", moduleHead.loc);
+    }
+
+    await writer.openList();
+    await writer.token(moduleHead);
+    if (!hasCovImport) {
+      await writeCoverageImport(writer);
+    }
+
+    await parseSequence(reader, writer, state, { func: null, topLevel: true });
+    await reader.expect(")", "missing close paren");
+    await writer.closeList();
+    await writer.write("\n");
+
+    const trailing = await reader.next();
+    if (trailing.type !== "eof") {
+      throw new WatParseError("expected a single WAT module", trailing.loc);
+    }
+  } finally {
+    await reader.close();
+    await writer.close();
+  }
 
   return {
-    program: instrumented,
-    manifest: {
-      module: moduleName,
-      blocks: state.blocks,
-    },
+    module: options.module ?? inputPath,
+    blocks: state.blocks,
   };
-}
-
-function isInlineList(node) {
-  return (
-    node.type === "list" &&
-    node.items.every((item) => item.type === "atom" || item.type === "string") &&
-    node.items.length <= 4
-  );
-}
-
-function writeNode(node, depth) {
-  if (node.type === "atom") {
-    return node.value;
-  }
-
-  if (node.type === "string") {
-    return node.raw;
-  }
-
-  if (node.type !== "list") {
-    throw new TypeError(`unknown WAT node type ${node.type}`);
-  }
-
-  if (node.items.length === 0) {
-    return "()";
-  }
-
-  if (isInlineList(node)) {
-    return `(${node.items.map((item) => writeNode(item, depth)).join(" ")})`;
-  }
-
-  const indent = "  ".repeat(depth);
-  const childIndent = "  ".repeat(depth + 1);
-  const lines = [`(${writeNode(node.items[0], depth)}`];
-
-  for (const item of node.items.slice(1)) {
-    lines.push(`${childIndent}${writeNode(item, depth + 1)}`);
-  }
-
-  return `${lines.join("\n")}\n${indent})`;
-}
-
-function writeWat(program) {
-  const body = program.type === "program" ? program.body : [program];
-  return `${body.map((node) => writeNode(node, 0)).join("\n")}\n`;
 }
 
 async function main() {
@@ -589,12 +700,9 @@ async function main() {
     return;
   }
 
-  const source = await fs.readFile(inputPath, "utf8");
-  const program = parseWat(source);
-  const result = instrumentWat(program, { module: inputPath });
   const covPath = manifestPath ?? path.join(path.dirname(outputPath), `${path.basename(outputPath, ".wat")}.cov.json`);
-  await fs.writeFile(outputPath, writeWat(result.program));
-  await fs.writeFile(covPath, `${JSON.stringify(result.manifest, null, 2)}\n`);
+  const manifest = await instrumentWatFile(inputPath, outputPath, { module: inputPath });
+  await fsp.writeFile(covPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 if (require.main === module) {
@@ -606,11 +714,5 @@ if (require.main === module) {
 
 module.exports = {
   WatParseError,
-  atom,
-  list,
-  instrumentWat,
-  parseWat,
-  stringLiteral,
-  tokenizeWat,
-  writeWat,
+  instrumentWatFile,
 };

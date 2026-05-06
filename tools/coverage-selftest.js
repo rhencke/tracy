@@ -6,7 +6,7 @@ const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
-const { instrumentWat, parseWat } = require("./instrument.js");
+const { instrumentWatFile } = require("./instrument.js");
 
 const rootDir = path.resolve(__dirname, "..");
 
@@ -34,10 +34,10 @@ function blocksByFuncAndKind(manifest) {
   return seen;
 }
 
-async function assertInstrumenterManifest() {
+async function assertInstrumenterManifest(tmpDir) {
   const sourcePath = path.join(rootDir, "wat/watwat.cov.test.wat");
-  const source = await fsp.readFile(sourcePath, "utf8");
-  const { manifest } = instrumentWat(parseWat(source), { module: "wat/watwat.cov.test.wat" });
+  const outputPath = path.join(tmpDir, "watwat.cov.instrumented.wat");
+  const manifest = await instrumentWatFile(sourcePath, outputPath, { module: "wat/watwat.cov.test.wat" });
   const blocks = blocksByFuncAndKind(manifest);
 
   assert(blocks.has("$entry_value:func-entry"), "manifest missing function-entry block");
@@ -108,7 +108,7 @@ async function main() {
   const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "tracy-cov-selftest-"));
 
   try {
-    await assertInstrumenterManifest();
+    await assertInstrumenterManifest(tmpDir);
     await assertWatwatCoverageOutput(tmpDir);
     await assertCoverageCheckReportsUncovered(tmpDir);
   } finally {
