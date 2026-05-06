@@ -5,11 +5,12 @@
   "scripts": {
     "build": "bash tools/build.sh",
     "build:cov": "bash tools/build-cov.sh",
-    "test": "npm run test:layout && npm run test:host-abi && npm run test:parser-state-abi && npm run test:bootstrap-lines && npm run test:wat && npm run test:watwat-probe && npm run test:assert-probes && npm run test:coverage-selftest && npm run test:cold-reload-index",
+    "test": "npm run test:layout && npm run test:host-abi && npm run test:parser-state-abi && npm run test:bootstrap-lines && npm run test:wasm-modules && npm run test:wat && npm run test:watwat-probe && npm run test:assert-probes && npm run test:coverage-selftest && npm run test:cold-reload-index",
     "test:layout": "node tools/generate-layout.js --check",
     "test:host-abi": "node tools/generate-host-abi.js --check",
     "test:parser-state-abi": "node tools/generate-parser-state-abi.js --check",
     "test:bootstrap-lines": "bash tools/check-bootstrap-lines.sh",
+    "test:wasm-modules": "node tools/wasm-modules-check.js",
     "test:wat": "node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
     "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
     "test:generated-trace": "node tools/generated-trace-extractor-check.js",
