@@ -8,6 +8,18 @@
     (func $opfs_create_from_file (param i32) (result i32)))
   (import "host" "opfs_read_chunk"
     (func $opfs_read_chunk (param i32) (param i64) (param i32) (param i32) (result i32)))
+  (import "host" "opfs_source_from_file"
+    (func $opfs_source_from_file (param i32) (result i32)))
+  (import "host" "opfs_source_open"
+    (func $opfs_source_open (param i32) (param i32) (result i32)))
+  (import "host" "opfs_source_name_len"
+    (func $opfs_source_name_len (param i32) (result i32)))
+  (import "host" "opfs_source_name"
+    (func $opfs_source_name (param i32) (param i32) (param i32) (result i32)))
+  (import "host" "opfs_source_size"
+    (func $opfs_source_size (param i32) (result i64)))
+  (import "host" "opfs_source_read"
+    (func $opfs_source_read (param i32) (param i64) (param i32) (param i32) (result i32)))
 
   (func (export "tracy_main"))
   (func (export "tracy_tick"))

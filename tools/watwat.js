@@ -188,6 +188,24 @@ function createHostImports() {
     opfs_read_chunk() {
       return 16;
     },
+    opfs_source_from_file() {
+      return 11;
+    },
+    opfs_source_open() {
+      return 12;
+    },
+    opfs_source_name_len() {
+      return 14;
+    },
+    opfs_source_name() {
+      return 14;
+    },
+    opfs_source_size() {
+      return BigInt(1048576);
+    },
+    opfs_source_read() {
+      return 64;
+    },
   };
 }
 

@@ -1,10 +1,5 @@
-import { makeShim } from "./shim.js";
-
-const asyncHostImports = new Set([
-  "file_picker_open",
-  "opfs_create_from_file",
-  "opfs_read_chunk",
-]);
+import { makeShim } from "./host/shim.mjs";
+import { runApp } from "./host/runtime.mjs";
 
 const memory = new WebAssembly.Memory({
   initial: 256,
@@ -12,71 +7,4 @@ const memory = new WebAssembly.Memory({
   shared: false,
 });
 
-function supportsJSPI() {
-  return typeof WebAssembly.Suspending === "function";
-}
-
-function showError(message) {
-  const canvas = document.getElementById("tracy");
-  const error = document.createElement("div");
-
-  error.setAttribute("role", "alert");
-  error.style.position = "fixed";
-  error.style.inset = "0";
-  error.style.display = "grid";
-  error.style.placeItems = "center";
-  error.style.padding = "2rem";
-  error.style.color = "#1f1b16";
-  error.style.font = "1rem/1.4 system-ui, sans-serif";
-  error.style.textAlign = "center";
-  error.style.background = "#fbf8f4";
-  error.textContent = message;
-
-  if (canvas !== null) {
-    canvas.hidden = true;
-  }
-
-  document.body.appendChild(error);
-}
-
-function wrapAsyncHostImports(host) {
-  return Object.fromEntries(
-    Object.entries(host).map(([name, value]) => [
-      name,
-      asyncHostImports.has(name) ? new WebAssembly.Suspending(value) : value,
-    ]),
-  );
-}
-
-async function loadApp() {
-  if (!supportsJSPI()) {
-    showError(
-      "tracy needs a browser with WebAssembly JavaScript Promise Integration (JSPI) enabled.",
-    );
-    return;
-  }
-
-  const imports = {
-    env: { memory },
-    host: wrapAsyncHostImports(makeShim(memory)),
-  };
-  const { instance } = await WebAssembly.instantiateStreaming(
-    fetch("wasm/app.wasm"),
-    imports,
-  );
-  const { tracy_main, tracy_tick } = instance.exports;
-
-  tracy_main();
-
-  const loop = (ts) => {
-    tracy_tick(ts);
-    requestAnimationFrame(loop);
-  };
-
-  requestAnimationFrame(loop);
-}
-
-loadApp().catch((error) => {
-  console.error(error);
-  showError("tracy failed to load the WebAssembly viewer.");
-});
+runApp(memory, makeShim(memory));
