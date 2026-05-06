@@ -2,10 +2,12 @@
 
 const { readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
-const { constantEntries, spec } = require("./layout-spec.js");
+const { assertLayoutSpec, constantEntries, spec } = require("./layout-spec.js");
 
 const root = join(__dirname, "..");
 const checkOnly = process.argv.includes("--check");
+
+assertLayoutSpec();
 
 function hex(value) {
   return `0x${value.toString(16).toUpperCase().padStart(8, "0")}`;
