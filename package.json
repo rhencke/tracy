@@ -5,7 +5,8 @@
   "scripts": {
     "build": "bash tools/build.sh",
     "build:cov": "bash tools/build-cov.sh",
-    "test": "npm run test:wat && npm run test:watwat-probe && npm run test:assert-probes && npm run test:coverage-selftest",
+    "test": "npm run test:bootstrap-lines && npm run test:wat && npm run test:watwat-probe && npm run test:assert-probes && npm run test:coverage-selftest",
+    "test:bootstrap-lines": "bash tools/check-bootstrap-lines.sh",
     "test:wat": "node tools/watwat.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
     "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
     "test:assert-probes": "bash tools/test-assert-probes.sh",
