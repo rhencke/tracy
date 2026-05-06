@@ -2,22 +2,55 @@
 
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const {
+  COLD_RELOAD_MIN_BUDGET_MS,
+  COLD_RELOAD_TARGET_BUDGET_MS,
+  COLD_RELOAD_TARGET_TRACE_BYTES,
+  INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET,
+  INDEX_COLUMN_ENTRY_BYTES,
+  INDEX_DECODE_HINT_TRACK_ID_SHIFT,
+  INDEX_DIRECTORY_BYTES_OFFSET,
+  INDEX_DIRECTORY_COLUMN_COUNT_OFFSET,
+  INDEX_DIRECTORY_FIRST_ENTRY_OFFSET,
+  INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+  INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+  INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+  INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+  INDEX_QUERY_RESULT_FIELD_BYTES,
+  INDEX_QUERY_RESULT_FIELDS,
+  INDEX_TARGET_ENCODED_BYTES_PER_EVENT,
+  OPFS_PAGE_SIZE,
+  TOKEN_RECORD_BYTES,
+  WASM_PAGE_SIZE,
+} = require("./layout-spec.js");
 
 const MiB = 1024 * 1024;
-const GiB = 1024 * MiB;
+const DEFAULT_TRACE_BYTES = 4 * MiB;
+// Seeded fixture generation keeps cold-reload assertions deterministic while
+// still exercising varied JSON payload bytes.
+const DEFAULT_TRACE_SEED = "cold-reload-index-ci";
+// Stable host IDs let the parser and index host stubs reject accidental calls
+// to the wrong OPFS source without needing a real filesystem.
+const SOURCE_ID = 9101;
+const INDEX_ID = 77;
+// Keep the parser state and trace input far enough above null that bad pointer
+// arithmetic shows up as failed reads instead of silently aliasing low memory.
+const PARSER_STATE_PTR = 4096;
+const TRACE_INPUT_PTR = 1 * MiB;
+// The writer owns one OPFS page at this address; the query buffer starts after
+// two full page spans so read/write scratch space cannot overlap query rows.
+const WRITER_PAGE_PTR = WASM_PAGE_SIZE;
+const QUERY_OUTPUT_PAGE_GAP = 2;
+// Parser token output is estimated from fixture bytes. This fixed headroom
+// covers JSON punctuation and final-event shape drift so tokenizer capacity
+// checks fail only when the estimate is genuinely too small.
+const TOKEN_OUTPUT_SAFETY_RECORDS = 1024;
 const targetBytes = Number.parseInt(
-  process.env.TRACY_COLD_RELOAD_TRACE_BYTES ?? String(4 * MiB),
+  process.env.TRACY_COLD_RELOAD_TRACE_BYTES ?? String(DEFAULT_TRACE_BYTES),
   10,
 );
-const seedText = process.env.TRACY_COLD_RELOAD_TRACE_SEED ?? "cold-reload-index-ci";
-const sourceId = 9101;
-const indexId = 77;
-const statePtr = 4096;
-const writerPagePtr = 65536;
-const inputPtr = 1 * MiB;
-const tokenRecordBytes = 12;
-const tokenOutputSafetyRecords = 1024;
-const opfsPageSize = 65536;
+const seedText = process.env.TRACY_COLD_RELOAD_TRACE_SEED ?? DEFAULT_TRACE_SEED;
+const queryOutPtr = WRITER_PAGE_PTR + QUERY_OUTPUT_PAGE_GAP * OPFS_PAGE_SIZE;
 const wasmRoot = path.resolve(__dirname, "../dist/wasm");
 const stdRoot = path.join(wasmRoot, "std");
 
@@ -26,19 +59,23 @@ if (!Number.isInteger(targetBytes) || targetBytes <= 0) {
 }
 
 function fnv1a(text) {
-  let hash = 0x811c9dc5;
+  const FNV1A_32_OFFSET_BASIS = 0x811c9dc5;
+  const FNV1A_32_PRIME = 0x01000193;
+  let hash = FNV1A_32_OFFSET_BASIS;
   for (let i = 0; i < text.length; i += 1) {
     hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
+    hash = Math.imul(hash, FNV1A_32_PRIME) >>> 0;
   }
   return hash >>> 0;
 }
 
 function createRandom(seed) {
+  const LCG_MULTIPLIER = 1664525;
+  const LCG_INCREMENT = 1013904223;
   let state = seed >>> 0;
 
   return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    state = (Math.imul(state, LCG_MULTIPLIER) + LCG_INCREMENT) >>> 0;
     return state;
   };
 }
@@ -51,54 +88,64 @@ function hexPad(random, len) {
   return value.slice(0, len);
 }
 
-function eventJson(index, random, padLen) {
-  const phases = ["B", "E", "X", "i", "M", "C"];
+function traceEventJson(event, { pad, flag }) {
   return JSON.stringify({
-    ph: phases[random() % phases.length],
-    name: `event-${random() % 256}`,
-    ts: index * 10 + (random() % 10),
-    dur: random() % 1000,
-    pid: random() % 32,
-    tid: random() % 512,
+    ph: event.ph,
+    name: event.name,
+    ts: event.ts,
+    dur: event.dur,
+    pid: event.pid,
+    tid: event.tid,
     args: {
-      pad: hexPad(random, padLen),
-      flag: (random() & 1) === 1,
+      pad,
+      flag,
     },
   });
 }
 
-function finalEventJson(index, padLen) {
-  return JSON.stringify({
+function finalEventBytes(event, padLen) {
+  return Buffer.byteLength(
+    traceEventJson(event, { pad: "0".repeat(padLen), flag: true }),
+  );
+}
+
+function fillEvent(index) {
+  return {
     ph: "X",
-    name: "final",
-    ts: index * 10,
-    dur: 1,
-    pid: 0,
-    tid: 0,
-    args: {
-      pad: "0".repeat(padLen),
-      flag: true,
-    },
-  });
-}
-
-function finalEventBytes(index, padLen) {
-  return Buffer.byteLength(finalEventJson(index, padLen));
+    name: `fill-${String(index % 1000).padStart(3, "0")}`,
+    ts: 1000 + index * 10 + (index % 3),
+    dur: 1 + (index % 5),
+    pid: 2,
+    tid: 2,
+  };
 }
 
 function buildTrace() {
   const random = createRandom(fnv1a(seedText));
   const chunks = [Buffer.from("[")];
   let bytes = 1;
+  const events = [
+    { ph: "X", name: "known-x-a", ts: 10, dur: 5, pid: 1, tid: 1 },
+    { ph: "B", name: "known-pair", ts: 20, dur: 0, pid: 1, tid: 1 },
+    { ph: "E", name: "known-pair-end", ts: 30, dur: 0, pid: 1, tid: 1 },
+    { ph: "X", name: "known-x-b", ts: 40, dur: 4, pid: 1, tid: 1 },
+  ];
   let count = 0;
+  let sliceCount = 0;
+  // Shapes generated trace-event payloads so the cold-reload check produces a
+  // compact but multi-page index fixture with realistic args payload bytes.
   const basePadLen = 384;
 
   while (true) {
     const prefixLen = count === 0 ? 0 : 1;
     const nextFinalPrefixLen = 1;
-    const nextFinalOverhead = finalEventBytes(count + 1, 0);
+    const nextFinalEvent = fillEvent(count + 1);
+    const nextFinalOverhead = finalEventBytes(nextFinalEvent, 0);
     const suffixLen = nextFinalPrefixLen + nextFinalOverhead + 1;
-    const event = eventJson(count, random, basePadLen);
+    const event = traceEventJson(events[count] ?? fillEvent(count), {
+      pad: hexPad(random, basePadLen),
+      flag: (random() & 1) === 1,
+    });
     const eventLen = Buffer.byteLength(event);
 
     if (bytes + prefixLen + eventLen + suffixLen > targetBytes) {
@@ -112,11 +159,13 @@ function buildTrace() {
 
     chunks.push(Buffer.from(event));
     bytes += eventLen;
+    sliceCount += count === 2 ? 0 : 1;
     count += 1;
   }
 
   const prefixLen = count === 0 ? 0 : 1;
-  const finalOverhead = finalEventBytes(count, 0);
+  const finalEventModel = fillEvent(count);
+  const finalOverhead = finalEventBytes(finalEventModel, 0);
   const finalPadLen = targetBytes - bytes - prefixLen - finalOverhead - 1;
   if (finalPadLen < 0) {
     throw new Error(`target size ${targetBytes} is too small for a valid generated trace`);
@@ -127,9 +176,13 @@ function buildTrace() {
     bytes += 1;
   }
 
-  const finalEvent = finalEventJson(count, finalPadLen);
+  const finalEvent = traceEventJson(finalEventModel, {
+    pad: "0".repeat(finalPadLen),
+    flag: true,
+  });
   chunks.push(Buffer.from(finalEvent));
   bytes += Buffer.byteLength(finalEvent);
+  sliceCount += 1;
   count += 1;
 
   chunks.push(Buffer.from("]"));
@@ -140,7 +193,7 @@ function buildTrace() {
     throw new Error(`generated ${trace.length} bytes, expected ${targetBytes}`);
   }
 
-  return { trace, count };
+  return { trace, count, sliceCount };
 }
 
 async function instantiateWasm(file, imports) {
@@ -150,7 +203,7 @@ async function instantiateWasm(file, imports) {
 }
 
 function pageCount(bytes) {
-  return Math.ceil(bytes / 65536);
+  return Math.ceil(bytes / WASM_PAGE_SIZE);
 }
 
 function globalValue(value) {
@@ -158,25 +211,40 @@ function globalValue(value) {
 }
 
 async function instantiateModules(trace, indexBytes) {
-  const eventCountEstimate = Math.max(1, Math.ceil(trace.length / 470));
-  const recordCap = eventCountEstimate * 48 + tokenOutputSafetyRecords;
-  const outputPtr = (inputPtr + trace.length + 7) & ~7;
-  const outputBytes = recordCap * tokenRecordBytes;
+  // The generated fixture averages roughly this many bytes per trace event;
+  // underestimating here would starve the parser token-output buffer.
+  const GENERATED_FIXTURE_BYTES_PER_EVENT_ESTIMATE = 470;
+  // Conservative token-record capacity per estimated trace event. Trace events
+  // include object fields, nested args, punctuation, and string tokens.
+  const TOKEN_RECORDS_PER_ESTIMATED_EVENT = 48;
+  // Parser/index tests allocate a private bump heap after trace and token
+  // buffers so host stubs and module allocations never compete for fixture data.
+  const MODULE_HEAP_BYTES = 64 * MiB;
+  // Match WebAssembly's 32-bit address-space page ceiling.
+  const WASM_MAX_PAGES = 32768;
+  const eventCountEstimate = Math.max(
+    1,
+    Math.ceil(trace.length / GENERATED_FIXTURE_BYTES_PER_EVENT_ESTIMATE),
+  );
+  const recordCap =
+    eventCountEstimate * TOKEN_RECORDS_PER_ESTIMATED_EVENT + TOKEN_OUTPUT_SAFETY_RECORDS;
+  const outputPtr = (TRACE_INPUT_PTR + trace.length + 7) & ~7;
+  const outputBytes = recordCap * TOKEN_RECORD_BYTES;
   const heapPtr = (outputPtr + outputBytes + 7) & ~7;
-  const heapEnd = heapPtr + 64 * MiB;
+  const heapEnd = heapPtr + MODULE_HEAP_BYTES;
   const memory = new WebAssembly.Memory({
     initial: Math.max(pageCount(heapEnd), 1),
-    maximum: 32768,
+    maximum: WASM_MAX_PAGES,
   });
   const memoryBytes = new Uint8Array(memory.buffer);
   let sourceReads = 0;
 
-  memoryBytes.set(trace, inputPtr);
+  memoryBytes.set(trace, TRACE_INPUT_PTR);
 
   const env = { memory };
   const host = {
     opfs_source_read(readSourceId, offset, len, dest) {
-      if (readSourceId !== sourceId) {
+      if (readSourceId !== SOURCE_ID) {
         return -1;
       }
 
@@ -191,7 +259,7 @@ async function instantiateModules(trace, indexBytes) {
       return count;
     },
     opfs_index_read(readIndexId, offset, len, dest) {
-      if (readIndexId !== indexId) {
+      if (readIndexId !== INDEX_ID) {
         return -1;
       }
 
@@ -205,7 +273,7 @@ async function instantiateModules(trace, indexBytes) {
       return count;
     },
     opfs_index_write(writeIndexId, offset, src, len) {
-      if (writeIndexId !== indexId) {
+      if (writeIndexId !== INDEX_ID) {
         return -1;
       }
 
@@ -227,7 +295,7 @@ async function instantiateModules(trace, indexBytes) {
       return len;
     },
     opfs_index_flush(writeIndexId) {
-      return writeIndexId === indexId ? 0 : -1;
+      return writeIndexId === INDEX_ID ? 0 : -1;
     },
   };
 
@@ -268,8 +336,25 @@ async function instantiateModules(trace, indexBytes) {
   };
 }
 
-function readI32(memory, ptr) {
-  return new DataView(memory.buffer).getInt32(ptr, true);
+function readI32(view, ptr) {
+  return view.getInt32(ptr, true);
+}
+
+function readU32(view, ptr) {
+  return view.getUint32(ptr, true);
+}
+
+function cursorAt(view, ptr) {
+  return {
+    skip(bytes) {
+      ptr += bytes;
+    },
+    u32() {
+      const value = readU32(view, ptr);
+      ptr += INDEX_QUERY_RESULT_FIELD_BYTES;
+      return value;
+    },
+  };
 }
 
 function expectEq(actual, expected, label) {
@@ -278,20 +363,99 @@ function expectEq(actual, expected, label) {
   }
 }
 
+function expectJsonEq(actual, expected, label) {
+  const actualJson = JSON.stringify(actual);
+  const expectedJson = JSON.stringify(expected);
+  if (actualJson !== expectedJson) {
+    throw new Error(`${label}: got ${actualJson}, expected ${expectedJson}`);
+  }
+}
+
+function queryRows(index, view, trackId, tsMin, tsMax) {
+  const count = index.index_query_range(trackId, tsMin, tsMax, queryOutPtr);
+  expectEq(
+    index.index_reader_status(),
+    globalValue(index.INDEX_READER_STATUS_OK),
+    "query status",
+  );
+
+  const rowBytes = globalValue(index.INDEX_QUERY_RESULT_BYTES);
+  const rows = [];
+  for (let i = 0; i < count; i += 1) {
+    const row = cursorAt(view, queryOutPtr + i * rowBytes);
+    rows.push(
+      Object.fromEntries(INDEX_QUERY_RESULT_FIELDS.map((field) => [field.property, row.u32()])),
+    );
+  }
+
+  return rows;
+}
+
+function rebuildSliceCatalog(index, view, pages) {
+  index.index_page_catalog_reset();
+  for (let pageId = 0; pageId < pages; pageId += 1) {
+    const page = index.read_page(0, pageId);
+    expectEq(
+      index.index_reader_status(),
+      globalValue(index.INDEX_READER_STATUS_OK),
+      `catalog page ${pageId} read`,
+    );
+    expectEq(
+      index.index_validate_page(page, OPFS_PAGE_SIZE),
+      globalValue(index.INDEX_STATUS_OK),
+      `catalog page ${pageId} validates`,
+    );
+
+    const hints = readU32(view, page + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET);
+    if ((hints & globalValue(index.INDEX_DECODE_HINT_COMPACT_SLICES)) === 0) {
+      continue;
+    }
+
+    index.index_page_catalog_add_slice_page(
+      hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
+      pageId,
+      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET),
+      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET),
+      readU32(view, page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET),
+    );
+  }
+}
+
+function compactPayloadBytes(indexBytes, index, pages) {
+  let bytes = 0;
+  const view = new DataView(indexBytes.buffer, indexBytes.byteOffset, indexBytes.byteLength);
+  for (let pageId = 0; pageId < pages; pageId += 1) {
+    const page = pageId * OPFS_PAGE_SIZE;
+    const hints = view.getUint32(page + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET, true);
+    if ((hints & globalValue(index.INDEX_DECODE_HINT_COMPACT_SLICES)) !== 0) {
+      const dir = page + globalValue(index.INDEX_HEADER_BYTES);
+      const columnCount = view.getUint8(dir + INDEX_DIRECTORY_COLUMN_COUNT_OFFSET);
+      bytes += view.getUint16(dir + INDEX_DIRECTORY_BYTES_OFFSET, true);
+      for (let i = 0; i < columnCount; i += 1) {
+        const entry = dir + INDEX_DIRECTORY_FIRST_ENTRY_OFFSET + i * INDEX_COLUMN_ENTRY_BYTES;
+        bytes += view.getUint32(entry + INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET, true);
+      }
+    }
+  }
+  return bytes;
+}
+
 function scaledColdReloadBudgetMs(bytes) {
-  const scaled = (bytes / (10 * GiB)) * 30_000;
-  return Math.max(250, Math.ceil(scaled));
+  const scaled =
+    (bytes / COLD_RELOAD_TARGET_TRACE_BYTES) * COLD_RELOAD_TARGET_BUDGET_MS;
+  return Math.max(COLD_RELOAD_MIN_BUDGET_MS, Math.ceil(scaled));
 }
 
 async function main() {
-  const { trace, count: generatedCount } = buildTrace();
+  const { trace, count: generatedCount, sliceCount } = buildTrace();
   let indexBytes = Buffer.alloc(0);
   const ingest = await instantiateModules(trace, indexBytes);
+  const ingestView = new DataView(ingest.memory.buffer);
 
-  ingest.parserState.parser_state_init(statePtr, sourceId);
+  ingest.parserState.parser_state_init(PARSER_STATE_PTR, SOURCE_ID);
   const status = ingest.parser.parser_tokenize_bytes(
-    statePtr,
-    inputPtr,
+    PARSER_STATE_PTR,
+    TRACE_INPUT_PTR,
     trace.length,
     ingest.outputPtr,
     ingest.recordCap,
@@ -304,7 +468,7 @@ async function main() {
   );
 
   ingest.parser.extractor_init(ingest.outputPtr);
-  ingest.index.index_writer_init(indexId, writerPagePtr, 1);
+  ingest.index.index_writer_init(INDEX_ID, WRITER_PAGE_PTR, 1);
 
   let extractedCount = 0;
   while (true) {
@@ -313,8 +477,8 @@ async function main() {
       break;
     }
 
-    const appendStatus = ingest.index.index_writer_append_event(eventPtr);
-    expectEq(appendStatus, globalValue(ingest.index.INDEX_WRITER_STATUS_OK), "append status");
+    const appendStatus = ingest.index.index_add_event(eventPtr);
+    expectEq(appendStatus, globalValue(ingest.index.INDEX_INGEST_STATUS_OK), "ingest status");
     extractedCount += 1;
   }
 
@@ -322,11 +486,29 @@ async function main() {
 
   const flushStatus = ingest.index.index_writer_flush();
   expectEq(flushStatus, globalValue(ingest.index.INDEX_WRITER_STATUS_OK), "writer flush");
-  expectEq(ingest.index.index_writer_committed_events(), generatedCount, "indexed event count");
+  expectEq(ingest.index.index_writer_committed_events(), sliceCount, "indexed slice count");
+  expectEq(ingest.index.track_slice_count(0), 3, "known track slice count");
+  expectEq(ingest.index.track_min_ts(0), 10, "known track min ts");
+  expectEq(ingest.index.track_max_ts(0), 44, "known track max ts");
+  expectEq(ingest.index.track_max_depth(0), 0, "known track max depth");
+
+  expectEq(ingest.index.index_reader_configure_cache(2), 2, "warm reader cache slots");
+  ingest.index.index_reader_init(INDEX_ID);
+  const warmRows = queryRows(ingest.index, ingestView, 0, 0, 50);
+  expectEq(warmRows.length, 3, "warm known query row count");
+  expectJsonEq(
+    warmRows.map(({ start, dur, depth }) => ({ start, dur, depth })),
+    [
+      { start: 10, dur: 5, depth: 0 },
+      { start: 20, dur: 10, depth: 0 },
+      { start: 40, dur: 4, depth: 0 },
+    ],
+    "warm known query ordering and fields",
+  );
 
   const parserCount = readI32(
-    ingest.memory,
-    statePtr + globalValue(ingest.parserState.PARSER_STATE_EVENT_COUNT_OFFSET),
+    ingestView,
+    PARSER_STATE_PTR + globalValue(ingest.parserState.PARSER_STATE_EVENT_COUNT_OFFSET),
   );
   expectEq(parserCount, generatedCount, "parser event count");
 
@@ -336,18 +518,41 @@ async function main() {
     throw new Error(`cold-reload fixture needs at least 3 pages, got ${pages}`);
   }
 
+  const encodedBytes = compactPayloadBytes(indexBytes, ingest.index, pages);
+  const encodedBytesPerSlice = encodedBytes / sliceCount;
+  if (encodedBytesPerSlice > INDEX_TARGET_ENCODED_BYTES_PER_EVENT) {
+    throw new Error(
+      `compact slice payload used ${encodedBytesPerSlice.toFixed(2)} bytes/event, budget ${INDEX_TARGET_ENCODED_BYTES_PER_EVENT}`,
+    );
+  }
+
   const reloadStart = process.hrtime.bigint();
   const cold = await instantiateModules(Buffer.alloc(0), indexBytes);
+  const coldView = new DataView(cold.memory.buffer);
   const readsBeforeReload = cold.sourceReads();
 
   expectEq(cold.index.index_reader_configure_cache(2), 2, "reader cache slots");
-  cold.index.index_reader_init(indexId);
+  cold.index.index_reader_init(INDEX_ID);
+  rebuildSliceCatalog(cold.index, coldView, pages);
+  expectEq(cold.index.index_slice_page_count(), pages, "cold slice page catalog count");
+  cold.index.index_reader_init(INDEX_ID);
+
+  const coldRows = queryRows(cold.index, coldView, 0, 0, 50);
+  expectJsonEq(coldRows, warmRows, "cold query parity");
+  if (cold.index.index_reader_cache_misses() === 0) {
+    throw new Error("cold query did not fault any pages");
+  }
+
+  const hitsBeforeRepeat = cold.index.index_reader_cache_hits();
+  expectJsonEq(queryRows(cold.index, coldView, 0, 0, 50), warmRows, "warm cache query parity");
+  if (cold.index.index_reader_cache_hits() <= hitsBeforeRepeat) {
+    throw new Error("repeated query did not hit the page cache");
+  }
 
   const page0 = cold.index.read_page(0, 0);
   expectEq(cold.index.index_reader_status(), globalValue(cold.index.INDEX_READER_STATUS_OK), "page0 status");
-  expectEq(cold.index.index_reader_cache_hit(), 0, "page0 miss");
   expectEq(
-    cold.index.index_validate_page(page0, opfsPageSize),
+    cold.index.index_validate_page(page0, OPFS_PAGE_SIZE),
     globalValue(cold.index.INDEX_STATUS_OK),
     "page0 validates",
   );
@@ -380,7 +585,7 @@ async function main() {
   }
 
   console.log(
-    `cold reloaded ${pages} TRCI pages from ${trace.length} bytes in ${reloadMs.toFixed(2)}ms (budget ${budgetMs}ms)`,
+    `cold reloaded ${pages} TRCI pages from ${trace.length} bytes in ${reloadMs.toFixed(2)}ms (budget ${budgetMs}ms); compact payload ${encodedBytesPerSlice.toFixed(2)} bytes/event`,
   );
 }
 

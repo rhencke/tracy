@@ -7,14 +7,18 @@ trace index.
 
 All byte sizes use binary units.  One wasm page is 64 KiB.
 
+<!-- @generated layout:start -->
 ## Region map
+
+Generated from `abi/layout.json` by `tools/generate-layout.js`.
+Do not edit generated layout values by hand.
 
 | Region | Constant | Byte range | Size | Owner | Growth policy | Notes |
 |---|---:|---:|---:|---|---|---|
 | Scratch (per-tick) | `MEM_SCRATCH_BASE` | `0x00000000..0x000FFFFF` | 1 MiB | app | Fixed | Reset every `tracy_tick`; no persistent pointers. |
 | Token ring buffer | `MEM_RING_BASE` | `0x00100000..0x004FFFFF` | 4 MiB | parser | Fixed | Streaming JSON input from OPFS and the host shim. |
 | String/dict table | `MEM_DICT_BASE` | `0x00500000..0x014FFFFF` | 16 MiB | parser/index | Fixed for v0.1 | Dictionary-coded names, categories, process ids, and thread ids. |
-| Index page LRU cache | `MEM_INDEX_CACHE_BASE` | `0x01500000..0x114FFFFF` | 256 MiB | index | Fixed cache window | Demand-paged from OPFS by later index work. |
+| Index page LRU cache | `MEM_INDEX_CACHE_BASE` | `0x01500000..0x114FFFFF` | 256 MiB | index | Fixed cache window | Demand-paged from OPFS by the columnar index. |
 | LOD pyramid page cache | `MEM_PYRAMID_CACHE_BASE` | `0x11500000..0x194FFFFF` | 128 MiB | renderer | Fixed cache window | Demand-paged from OPFS by later renderer work. |
 | Render scratch | `MEM_RENDER_SCRATCH` | `0x19500000..0x1B4FFFFF` | 32 MiB | renderer | Fixed | Per-frame compositing and transient draw preparation. |
 | Bump-allocator heap | `MEM_HEAP_BASE` | `0x1B500000..0x1F4FFFFF` | 64 MiB | shared | Grow only through `app.wat` | Short-lived allocations; modules request extension through `grow_heap(pages)`. |
@@ -23,16 +27,18 @@ All byte sizes use binary units.  One wasm page is 64 KiB.
 
 The minimum initial memory for the v0.1 layout is 8,272 wasm pages
 (`0x20500000` bytes).  The 600 MiB working target is 9,600 wasm pages,
-and the 1 GiB heap ceiling is 16,384 wasm pages.  Region bases are
-MiB-aligned so 64 KiB OPFS pages never straddle two regions.
+and the 1024 MiB heap ceiling is 16,384 wasm pages.  Region bases are
+MiB-aligned so `OPFS_PAGE_SIZE` pages never straddle two regions.
 
 ## Constants
 
-The shared constants are exported by `wat/std/mem.wat` and mirrored here
-so design docs and module code use the same names.
+The shared constants are exported by `wat/std/mem.wat` and generated from
+`abi/layout.json` so design docs and module code use the same names.
 
 | Constant | Value | Meaning |
 |---|---:|---|
+| `WASM_PAGE_SIZE` | `0x00010000` | WebAssembly linear-memory page size. |
+| `OPFS_PAGE_SIZE` | `0x00010000` | Fixed OPFS page size for index and renderer page files. |
 | `MEM_SCRATCH_BASE` | `0x00000000` | Per-tick app scratch base. |
 | `MEM_RING_BASE` | `0x00100000` | Parser token ring base. |
 | `MEM_DICT_BASE` | `0x00500000` | Shared dictionary table base. |
@@ -40,10 +46,55 @@ so design docs and module code use the same names.
 | `MEM_PYRAMID_CACHE_BASE` | `0x11500000` | LOD pyramid page cache base. |
 | `MEM_RENDER_SCRATCH` | `0x19500000` | Renderer scratch base. |
 | `MEM_HEAP_BASE` | `0x1B500000` | Shared bump heap base. |
+| `MEM_STACK_BASE` | `0x1F500000` | Wasm stack base. |
+| `MEM_SCRATCH_SIZE` | `0x00100000` | Scratch (per-tick) byte length. |
+| `MEM_RING_SIZE` | `0x00400000` | Token ring buffer byte length. |
+| `MEM_DICT_SIZE` | `0x01000000` | String/dict table byte length. |
+| `MEM_INDEX_CACHE_SIZE` | `0x10000000` | Index page LRU cache byte length. |
+| `MEM_PYRAMID_CACHE_SIZE` | `0x08000000` | LOD pyramid page cache byte length. |
+| `MEM_RENDER_SCRATCH_SIZE` | `0x02000000` | Render scratch byte length. |
+| `MEM_HEAP_SIZE` | `0x04000000` | Bump-allocator heap byte length. |
+| `MEM_STACK_SIZE` | `0x01000000` | Wasm stack + globals byte length. |
+| `MEM_INITIAL_BYTES` | `0x20500000` | Minimum initial memory for the v0.1 layout. |
+| `MEM_INITIAL_PAGES` | `8272` | Minimum initial memory in WebAssembly pages. |
+| `MEM_WORKING_TARGET_BYTES` | `0x25800000` | 600 MiB working target. |
+| `MEM_WORKING_TARGET_PAGES` | `9600` | 600 MiB working target in WebAssembly pages. |
+| `MEM_HEAP_CEILING_BYTES` | `0x40000000` | 1 GiB heap ceiling. |
+| `MEM_HEAP_CEILING_PAGES` | `16384` | 1 GiB heap ceiling in WebAssembly pages. |
+| `TOKEN_RECORD_BYTES` | `12` | Parser token output record byte length. |
+| `COLD_RELOAD_TARGET_TRACE_BYTES` | `10737418240` | v0.1 mobile target trace size used to scale cold-reload parity check budgets. |
+| `COLD_RELOAD_TARGET_BUDGET_MS` | `30000` | Maximum cold-reload time budget for the v0.1 mobile target trace size. |
+| `COLD_RELOAD_MIN_BUDGET_MS` | `250` | Minimum cold-reload check budget for small local fixtures where process startup noise dominates. |
+| `INDEX_TARGET_ENCODED_BYTES_PER_EVENT` | `12` | Maximum average compact index payload bytes per event. |
+| `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
+| `INDEX_COLUMN_ENTRY_BYTES` | `16` | Byte length of one compact index column directory entry. |
+| `INDEX_QUERY_RESULT_FIELD_BYTES` | `4` | Byte length of one u32 field in an index query result row. |
+| `INDEX_PAGE_HEADER_BUCKET_START_OFFSET` | `12` | Index page header byte offset of the inclusive page timestamp start. |
+| `INDEX_PAGE_HEADER_BUCKET_END_OFFSET` | `20` | Index page header byte offset of the inclusive page timestamp end. |
+| `INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET` | `28` | Index page header byte offset of the encoded record count. |
+| `INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET` | `36` | Index page header byte offset of the decode-hints bitfield. |
+| `INDEX_DIRECTORY_COLUMN_COUNT_OFFSET` | `1` | Compact page directory byte offset of the column-count field. |
+| `INDEX_DIRECTORY_BYTES_OFFSET` | `2` | Compact page directory byte offset of the directory byte-length field. |
+| `INDEX_DIRECTORY_FIRST_ENTRY_OFFSET` | `4` | Compact page directory byte offset of the first column entry. |
+| `INDEX_COLUMN_ENTRY_BYTE_LENGTH_OFFSET` | `8` | Column directory entry byte offset of the encoded column payload length. |
+| `INDEX_QUERY_RESULT_START_TS_OFFSET` | `0` | Query result row byte offset of the slice start timestamp. |
+| `INDEX_QUERY_RESULT_DUR_OFFSET` | `4` | Query result row byte offset of the slice duration. |
+| `INDEX_QUERY_RESULT_NAME_ID_OFFSET` | `8` | Query result row byte offset of the name dictionary id. |
+| `INDEX_QUERY_RESULT_DEPTH_OFFSET` | `12` | Query result row byte offset of the nesting depth. |
+| `INDEX_QUERY_RESULT_CAT_ID_OFFSET` | `16` | Query result row byte offset of the category dictionary id. |
+| `INDEX_QUERY_RESULT_COLOR_OFFSET` | `20` | Query result row byte offset of the resolved color. |
+
+Index page header, directory, and query-result offsets are part of the
+generated layout spec so cold-reload parity checks and binary readers use
+documented names rather than ad hoc byte arithmetic.
+
+Cold-reload performance budgets are also spec values so CI checks scale
+small generated fixtures against the same documented v0.1 target.
 
 `MEM_STACK_BASE`, region sizes, page size constants, and end addresses may
 also be exported for convenience, but the base constants above are the
 cross-module ABI surface required by v0.1.
+<!-- @generated layout:end -->
 
 ## Host scratch ABI
 
@@ -168,8 +219,8 @@ aligned, and cache slots in linear memory are page aligned.  A cache slot
 contains exactly one decoded or partially decoded page.
 
 The index cache at `MEM_INDEX_CACHE_BASE` is a page cache, not an arena for
-the whole index.  OPFS page id `n` maps to byte offset `n * 65536` in the
-index file, and a loaded page occupies exactly one 64 KiB cache slot.  Slot
+the whole index.  OPFS page id `n` maps to byte offset `n * OPFS_PAGE_SIZE` in
+the index file, and a loaded page occupies exactly one `OPFS_PAGE_SIZE` cache slot.  Slot
 metadata is module-private index state; bytes inside the slot always keep the
 same header, payload, unused space, and optional footer layout used on disk.
 
@@ -286,9 +337,10 @@ different dictionary layout.
 
 ## Encoding spec
 
-The average encoded event budget is at most 12 bytes per event in index
-pages.  Wide strings and uncommon fields are dictionary-coded or moved into
-side tables so the hot event stream stays compact.
+The average encoded event budget is at most
+`INDEX_TARGET_ENCODED_BYTES_PER_EVENT` bytes per event in index pages.  Wide
+strings and uncommon fields are dictionary-coded or moved into side tables so
+the hot event stream stays compact.
 
 ### Encoding ids
 

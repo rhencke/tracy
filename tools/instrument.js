@@ -700,16 +700,16 @@ async function instrumentWatFile(inputPath, outputPath, options = {}) {
 }
 
 async function main() {
-  const [, , inputPath, outputPath, manifestPath] = process.argv;
+  const [, , inputPath, outputPath, manifestPath, modulePath] = process.argv;
 
   if (!inputPath || !outputPath) {
-    console.error("usage: instrument input.wat output.wat [output.cov.json]");
+    console.error("usage: instrument input.wat output.wat [output.cov.json] [module.wat]");
     process.exitCode = 64;
     return;
   }
 
   const covPath = manifestPath ?? path.join(path.dirname(outputPath), `${path.basename(outputPath, ".wat")}.cov.json`);
-  const manifest = await instrumentWatFile(inputPath, outputPath, { module: inputPath });
+  const manifest = await instrumentWatFile(inputPath, outputPath, { module: modulePath ?? inputPath });
   await fsp.writeFile(covPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 

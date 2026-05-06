@@ -1,3 +1,5 @@
+;; Generated from abi/layout.json by tools/generate-layout.js.
+;; Do not edit wat/std/mem.test.wat by hand.
 (module
   (import "env" "memory" (memory $memory 1))
   (import "watwat" "assert_eq_i32"

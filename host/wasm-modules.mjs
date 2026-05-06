@@ -94,18 +94,66 @@ export function wasmModuleUrl(id, baseUrl = "wasm/") {
   return `${baseUrl.replace(/\/?$/, "/")}${wasmModulePath(id)}`;
 }
 
-async function defaultInstantiate(url, imports) {
-  const { instance } = await WebAssembly.instantiateStreaming(fetch(url), imports);
+function appendWasmModuleGraph(id, ordered, seen, active) {
+  if (active.has(id)) {
+    throw new Error(`recursive wasm module dependency: ${id}`);
+  }
+  if (seen.has(id)) {
+    return;
+  }
+
+  active.add(id);
+  for (const dependency of wasmModuleDependencies(id)) {
+    appendWasmModuleGraph(dependency, ordered, seen, active);
+  }
+  active.delete(id);
+
+  seen.add(id);
+  ordered.push(id);
+}
+
+export function wasmModuleGraphIds(id) {
+  const ordered = [];
+  appendWasmModuleGraph(id, ordered, new Set(), new Set());
+  return Object.freeze(ordered);
+}
+
+async function defaultCompile(url) {
+  return WebAssembly.compileStreaming(fetch(url));
+}
+
+async function defaultInstantiate(module, imports) {
+  const instance = await WebAssembly.instantiate(module, imports);
   return instance.exports;
+}
+
+export async function compileWasmModuleGraph(
+  id,
+  { baseUrl = "wasm/", compile = defaultCompile } = {},
+) {
+  const graphIds = wasmModuleGraphIds(id);
+  const compiledEntries = await Promise.all(
+    graphIds.map(async (moduleId) => [
+      moduleId,
+      await compile(wasmModuleUrl(moduleId, baseUrl), moduleId),
+    ]),
+  );
+
+  return new Map(compiledEntries);
 }
 
 export async function instantiateWasmModule(
   id,
   baseImports,
-  { baseUrl = "wasm/", instantiate = defaultInstantiate } = {},
+  {
+    baseUrl = "wasm/",
+    compile = defaultCompile,
+    instantiate = defaultInstantiate,
+  } = {},
 ) {
   const imports = { ...baseImports };
   const loaded = new Map();
+  const compiled = await compileWasmModuleGraph(id, { baseUrl, compile });
 
   async function load(moduleId) {
     if (loaded.has(moduleId)) {
@@ -119,7 +167,12 @@ export async function instantiateWasmModule(
       }
     }
 
-    const exports = await instantiate(wasmModuleUrl(moduleId, baseUrl), imports, moduleId);
+    const exports = await instantiate(
+      compiled.get(moduleId),
+      imports,
+      moduleId,
+      wasmModuleUrl(moduleId, baseUrl),
+    );
     loaded.set(moduleId, exports);
 
     for (const alias of wasmModuleAliases(moduleId)) {

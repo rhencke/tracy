@@ -16,21 +16,36 @@ require_command() {
 }
 
 require_command wat2wasm
+require_command node
 require_command esbuild
 require_command sha256sum
 
+node "${ROOT_DIR}/tools/generate-layout.js" --check
 node "${ROOT_DIR}/tools/generate-host-abi.js" --check
 node "${ROOT_DIR}/tools/generate-parser-state-abi.js" --check
 
 rm -rf "${DIST_DIR}"
 mkdir -p "${DIST_DIR}/wasm"
+WAT_COMPAT_DIR="${DIST_DIR}/.wat-compat"
 
 if [ -d "${WAT_DIR}" ]; then
   while IFS= read -r -d '' wat_file; do
     rel_path="${wat_file#"${WAT_DIR}/"}"
     wasm_path="${DIST_DIR}/wasm/${rel_path%.wat}.wasm"
+    compiler_input="${wat_file}"
+    mapfile -t wat_inputs < <(node "${ROOT_DIR}/tools/assemble-wat.js" --inputs "${wat_file}" --relative-to "${ROOT_DIR}")
     mkdir -p "$(dirname "${wasm_path}")"
-    wat2wasm "${wat_file}" -o "${wasm_path}"
+
+    if [ "${#wat_inputs[@]}" -gt 1 ]; then
+      assembled_wat_path="${WAT_COMPAT_DIR}/${rel_path}"
+      inputs_manifest_path="${assembled_wat_path}.inputs"
+      mkdir -p "$(dirname "${assembled_wat_path}")"
+      node "${ROOT_DIR}/tools/assemble-wat.js" "${wat_file}" "${assembled_wat_path}"
+      printf '%s\n' "${wat_inputs[@]}" > "${inputs_manifest_path}"
+      compiler_input="${assembled_wat_path}"
+    fi
+
+    wat2wasm "${compiler_input}" -o "${wasm_path}"
   done < <(find "${WAT_DIR}" -type f -name '*.wat' -print0 | sort -z)
 fi
 
@@ -50,7 +65,7 @@ fi
 
 build_hash="$(
   cd "${DIST_DIR}"
-  find . -type f ! -name 'build-info.js' -print0 \
+  find . -type f ! -name 'build-info.js' ! -path './.wat-compat/*' -print0 \
     | sort -z \
     | xargs -0 sha256sum \
     | sha256sum \

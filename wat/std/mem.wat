@@ -1,7 +1,8 @@
+;; Generated from abi/layout.json by tools/generate-layout.js.
+;; Do not edit wat/std/mem.wat by hand.
 (module
   (global $WASM_PAGE_SIZE (export "WASM_PAGE_SIZE") i32 (i32.const 0x00010000))
   (global $OPFS_PAGE_SIZE (export "OPFS_PAGE_SIZE") i32 (i32.const 0x00010000))
-
   (global $MEM_SCRATCH_BASE (export "MEM_SCRATCH_BASE") i32 (i32.const 0x00000000))
   (global $MEM_RING_BASE (export "MEM_RING_BASE") i32 (i32.const 0x00100000))
   (global $MEM_DICT_BASE (export "MEM_DICT_BASE") i32 (i32.const 0x00500000))
@@ -10,7 +11,6 @@
   (global $MEM_RENDER_SCRATCH (export "MEM_RENDER_SCRATCH") i32 (i32.const 0x19500000))
   (global $MEM_HEAP_BASE (export "MEM_HEAP_BASE") i32 (i32.const 0x1B500000))
   (global $MEM_STACK_BASE (export "MEM_STACK_BASE") i32 (i32.const 0x1F500000))
-
   (global $MEM_SCRATCH_SIZE (export "MEM_SCRATCH_SIZE") i32 (i32.const 0x00100000))
   (global $MEM_RING_SIZE (export "MEM_RING_SIZE") i32 (i32.const 0x00400000))
   (global $MEM_DICT_SIZE (export "MEM_DICT_SIZE") i32 (i32.const 0x01000000))
@@ -19,7 +19,6 @@
   (global $MEM_RENDER_SCRATCH_SIZE (export "MEM_RENDER_SCRATCH_SIZE") i32 (i32.const 0x02000000))
   (global $MEM_HEAP_SIZE (export "MEM_HEAP_SIZE") i32 (i32.const 0x04000000))
   (global $MEM_STACK_SIZE (export "MEM_STACK_SIZE") i32 (i32.const 0x01000000))
-
   (global $MEM_INITIAL_BYTES (export "MEM_INITIAL_BYTES") i32 (i32.const 0x20500000))
   (global $MEM_INITIAL_PAGES (export "MEM_INITIAL_PAGES") i32 (i32.const 8272))
   (global $MEM_WORKING_TARGET_BYTES (export "MEM_WORKING_TARGET_BYTES") i32 (i32.const 0x25800000))
