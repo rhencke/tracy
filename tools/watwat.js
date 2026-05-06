@@ -166,6 +166,12 @@ function moduleImportAliases(file) {
   return [name, `${parent}/${name}`, `wat/${parent}/${name}`];
 }
 
+function memoryMaximumPagesFor(file) {
+  const constrainedSuites = new Set(["array.test.wasm", "hash.test.wasm", "pool.test.wasm"]);
+
+  return constrainedSuites.has(path.basename(file)) ? 1 : 32768;
+}
+
 function dependencyImportsFor(imports) {
   if (imports.cov === undefined) {
     return imports;
@@ -264,7 +270,10 @@ async function instantiateSiblingModule(file, imports, coverage = null) {
 }
 
 async function instantiateTestModule(file, assertPath, coverage = null) {
-  const memory = new WebAssembly.Memory({ initial: 1, maximum: 32768 });
+  const memory = new WebAssembly.Memory({
+    initial: 1,
+    maximum: memoryMaximumPagesFor(file),
+  });
   const watwat = {
     fail(code) {
       throw new WatwatFailure(code);

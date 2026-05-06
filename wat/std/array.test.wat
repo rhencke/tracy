@@ -242,6 +242,18 @@
 
     call $init_heap
 
+    i32.const 65520
+    i32.const 65536
+    call $bump_init
+
+    i32.const 1
+    call $arr_i32_new
+    i32.const 0
+    i32.const 16
+    call $assert_eq_i32
+
+    call $init_heap
+
     i32.const 0
     call $arr_i32_new
     local.set $i32_arr

@@ -214,6 +214,16 @@
     call $hash_new
     drop
 
+    i32.const 65448
+    i32.const 65536
+    call $bump_init
+
+    i32.const 1
+    call $hash_new
+    i32.const 0
+    i32.const 11
+    call $assert_eq_i32
+
     call $init_heap
 
     i32.const 1

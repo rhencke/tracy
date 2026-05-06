@@ -211,6 +211,17 @@
     i32.const 17
     call $assert_eq_i32
 
+    i32.const 65512
+    i32.const 65536
+    call $bump_init
+
+    i32.const 8
+    i32.const 1
+    call $pool_new
+    i32.const 0
+    i32.const 20
+    call $assert_eq_i32
+
     call $init_heap
 
     i32.const -8
@@ -241,6 +252,18 @@
     call $pool_count
     i32.const 1
     i32.const 15
+    call $assert_eq_i32
+
+    local.get $pool
+    local.get $slot
+    i32.const 8
+    i32.add
+    call $pool_free
+
+    local.get $pool
+    call $pool_count
+    i32.const 1
+    i32.const 19
     call $assert_eq_i32
 
     local.get $pool
