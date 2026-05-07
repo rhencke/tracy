@@ -483,6 +483,76 @@ async function checkWorkerRuntimeReleasesFullParserTokenBuffer() {
   assert.equal(indexedEvents.at(4096), 14096);
 }
 
+async function checkWorkerRuntimeRequiresParserResetAbi() {
+  const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 2 });
+  const parserState = {
+    PARSER_STATE_EVENT_COUNT_OFFSET: 8,
+    PARSER_STATE_FILE_OFFSET_OFFSET: 0,
+    PARSER_STATUS_DONE: 2,
+    PARSER_STATUS_YIELDED: 1,
+    parser_state_init() {},
+  };
+  const requiredParserExports = makeParserExports(memory, parserState);
+
+  async function runWithParserExports(parserExports) {
+    await runtime.runWorkerIngest(
+      {
+        indexId: 22,
+        sourceId: 11,
+        statePtr: 1000,
+        tokenOutputPtr: 7000,
+        type: runtime.INGEST_WORKER_MESSAGE.START,
+      },
+      {
+        hostFactory: () => ({}),
+        instantiateWasmModuleForThread: async (id) => {
+          if (id === "parser") {
+            return {
+              exports: parserExports,
+              imports: {
+                alloc: {
+                  bump_init() {},
+                },
+                mem: {
+                  MEM_HEAP_BASE: 1024,
+                  MEM_STACK_BASE: 2048,
+                },
+                parser_state: parserState,
+              },
+            };
+          }
+          if (id === "index") {
+            return { exports: makeIndexExports(), imports: {} };
+          }
+
+          throw new Error(`unexpected module ${id}`);
+        },
+        memoryFactory: () => memory,
+        now: () => 0,
+        postMessage() {},
+      },
+    );
+  }
+
+  await assert.rejects(
+    () =>
+      runWithParserExports({
+        ...requiredParserExports,
+        parser_token_output_reset: undefined,
+      }),
+    /parser module missing required export parser_token_output_reset/,
+  );
+  await assert.rejects(
+    () =>
+      runWithParserExports({
+        ...requiredParserExports,
+        extractor_reset_cursor: undefined,
+      }),
+    /parser module missing required export extractor_reset_cursor/,
+  );
+}
+
 async function checkMessageHandler() {
   const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
   const messages = [];
@@ -516,6 +586,7 @@ async function checkMessageHandler() {
 async function main() {
   await checkWorkerRuntime();
   await checkWorkerRuntimeReleasesFullParserTokenBuffer();
+  await checkWorkerRuntimeRequiresParserResetAbi();
   await checkMessageHandler();
 }
 

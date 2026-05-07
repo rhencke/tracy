@@ -76,6 +76,17 @@ function initAllocator(imports) {
   );
 }
 
+function requireParserExport(parser, name) {
+  if (typeof parser?.[name] !== "function") {
+    throw new Error(`parser module missing required export ${name}`);
+  }
+}
+
+function assertParserStreamingAbi(parser) {
+  requireParserExport(parser, "parser_token_output_reset");
+  requireParserExport(parser, "extractor_reset_cursor");
+}
+
 function readI64AsNumber(view, ptr) {
   return Number(view.getBigUint64(ptr, true));
 }
@@ -200,15 +211,15 @@ function drainExtractedEvents({ index, parser }) {
 }
 
 function releaseParserOutput({ parser, statePtr }) {
-  const resetStatus = parser.parser_token_output_reset?.(
+  const resetStatus = parser.parser_token_output_reset(
     statePtr,
     DEFAULT_PARSE_OUTPUT_RECORDS,
   );
-  if (resetStatus !== undefined && resetStatus !== 1) {
+  if (resetStatus !== 1) {
     throw new Error("parser token output reset failed");
   }
 
-  parser.extractor_reset_cursor?.();
+  parser.extractor_reset_cursor();
 }
 
 async function instantiateIngestModules(options, memory, host) {
@@ -239,6 +250,7 @@ async function instantiateIngestModules(options, memory, host) {
   );
 
   initAllocator(parserLoaded.imports);
+  assertParserStreamingAbi(parserLoaded.exports);
 
   return {
     index: indexLoaded.exports,

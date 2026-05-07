@@ -102,6 +102,7 @@ function makeParserExports(memory, parserState) {
       extracted += 1;
       return 8192 + extracted * 32;
     },
+    extractor_reset_cursor() {},
     parser_parse_with_budget(statePtr) {
       const view = new DataView(memory.buffer);
 
@@ -120,6 +121,9 @@ function makeParserExports(memory, parserState) {
       return parseCalls < parseOffsets.length
         ? parserState.PARSER_STATUS_YIELDED
         : parserState.PARSER_STATUS_DONE;
+    },
+    parser_token_output_reset() {
+      return 1;
     },
   };
 }
