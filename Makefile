@@ -9,6 +9,9 @@ WAT_SOURCES := $(shell find wat -type f -name '*.wat' -print | sort)
 WAT_INCLUDES := $(shell find wat -type f -name '*.inc' -print | sort)
 WASM_FILES := $(patsubst wat/%.wat,dist/wasm/%.wasm,$(WAT_SOURCES))
 WAT_COMPAT_FILES :=
+COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
+COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
+COV_MANIFEST_FILES :=
 
 MODULE_DOC_GENERATOR := $(wildcard tools/generate-wasm-modules-docs.js)
 
@@ -47,7 +50,7 @@ GENERATED_INPUTS := \
 	$(WAT_SOURCES) \
 	$(WAT_INCLUDES)
 
-.PHONY: all generated wasm check-generated
+.PHONY: all generated wasm wasm-cov check-generated
 
 all: generated wasm
 
@@ -86,6 +89,33 @@ endef
 $(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_WASM_RULE,$(wat))))
 
 wasm: $(WASM_FILES)
+
+define WAT_COV_RULE
+$(eval _rel_wat := $(patsubst wat/%,%,$(1)))
+$(eval _compat_wat := dist/.wat-compat/$(_rel_wat))
+$(eval _compat_inputs := dist/.wat-compat/$(_rel_wat).inputs)
+$(eval _cov_wat := dist/wasm-cov/$(_rel_wat))
+$(eval _cov_manifest := dist/wasm-cov/$(patsubst %.wat,%.cov.json,$(_rel_wat)))
+$(eval _cov_wasm := dist/wasm-cov/$(patsubst %.wat,%.wasm,$(_rel_wat)))
+$(if $(filter %.test.wat,$(1)),\
+$(_cov_wat): $(_compat_wat) $(_compat_inputs)
+	mkdir -p $$(dir $$@)
+	cp $$< $$@
+,\
+$(eval COV_MANIFEST_FILES += $(_cov_manifest))\
+$(_cov_wat) $(_cov_manifest) &: $(_compat_wat) $(_compat_inputs) tools/instrument.js tools/wat-parser.js
+	mkdir -p $$(dir $(_cov_wat))
+	node tools/instrument.js $(_compat_wat) $(_cov_wat) $(_cov_manifest) $(1)
+)
+
+$(_cov_wasm): $(_cov_wat)
+	mkdir -p $$(dir $$@)
+	wat2wasm $$< -o $$@
+endef
+
+$(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_COV_RULE,$(wat))))
+
+wasm-cov: $(COV_WAT_FILES) $(COV_MANIFEST_FILES) $(COV_WASM_FILES)
 
 check-generated: generated
 	git diff --exit-code -- $(GENERATED_FILES)
