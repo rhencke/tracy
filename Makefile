@@ -229,6 +229,7 @@ test: dist check-generated
 	node tools/host-shim-check.js
 	node tools/ingest-worker-runtime-check.js
 	node tools/runtime-worker-orchestration-check.js
+	node tools/interactive-ingest-check.js
 	node tools/direct-esm-check.js
 	node tools/service-worker-check.js
 	node tools/dist-budget-check.js --self-test
