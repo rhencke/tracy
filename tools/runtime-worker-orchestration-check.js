@@ -429,7 +429,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
 }
 
 async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
   const operations = [];
   const canvas = {
@@ -504,7 +504,7 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
       return { coveredRange, state: "running" };
     },
   };
-  const renderer = runtime.createProgressiveTraceRenderer(memory, ingestWorker, {
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
     canvas,
     queryOutPtr: 2048,
     queryWindow: 100,
@@ -550,12 +550,74 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   assert.deepEqual(renderer.status(), { error: null, rows: 2 });
 }
 
+async function checkRuntimeLoadsProgressiveTraceRendererLazily() {
+  const { frames } = installBrowserStubs();
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let coveredRange = null;
+  let readerState = "idle";
+  let importCalls = 0;
+  let drawCalls = 0;
+  const ingestWorker = {
+    indexReader: {
+      status() {
+        return { state: readerState };
+      },
+    },
+    status() {
+      return { coveredRange, state: "running" };
+    },
+  };
+
+  runtime.runApp(memory, {}, {
+    importProgressiveTraceRenderer: async () => {
+      importCalls += 1;
+      return {
+        createProgressiveTraceRenderer() {
+          return {
+            draw() {
+              drawCalls += 1;
+            },
+          };
+        },
+      };
+    },
+    ingestWorker,
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        tracy_main() {},
+        tracy_tick() {},
+      },
+    }),
+    worker: {
+      Worker: FakeWorker,
+    },
+  });
+
+  await Promise.resolve();
+  await Promise.resolve();
+
+  frames[0](1);
+  assert.equal(importCalls, 0, "renderer should stay off the cold startup path");
+
+  coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
+  readerState = "ready";
+  frames[1](2);
+  assert.equal(importCalls, 1, "renderer should load once covered pages are queryable");
+
+  await Promise.resolve();
+  frames[2](3);
+  assert.equal(importCalls, 1);
+  assert.equal(drawCalls, 1);
+}
+
 async function main() {
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
+  await checkRuntimeLoadsProgressiveTraceRendererLazily();
 }
 
 main().catch((error) => {
