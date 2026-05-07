@@ -1,4 +1,4 @@
-import { makeShim } from "./host/shim.mjs";
+import { makeMainThreadHost } from "./host/shim.mjs";
 import { runApp } from "./host/runtime.mjs";
 
 const memory = new WebAssembly.Memory({
@@ -7,4 +7,4 @@ const memory = new WebAssembly.Memory({
   shared: false,
 });
 
-runApp(memory, makeShim(memory));
+runApp(memory, makeMainThreadHost(memory));
