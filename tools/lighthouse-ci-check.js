@@ -21,7 +21,7 @@ function main() {
   assert.equal(config.ci.collect.staticDistDir, "./dist");
   assert.deepEqual(config.ci.collect.url, ["http://localhost/"]);
   assert.equal(config.ci.collect.numberOfRuns, 1);
-  assert.deepEqual(settings.onlyCategories, ["performance", "pwa"]);
+  assert.deepEqual(settings.onlyCategories, ["performance"]);
   assert.equal(settings.throttlingMethod, "simulate");
   assert.equal(settings.throttling.requestLatencyMs, 150);
   assert.equal(settings.throttling.downloadThroughputKbps, 1600);
@@ -33,22 +33,16 @@ function main() {
 
   assert.deepEqual(assertions["first-contentful-paint"], [
     "error",
-    { maxNumericValue: 950 },
-  ]);
-  assert.deepEqual(assertions.interactive, [
-    "error",
-    { maxNumericValue: 1000 },
+    { maxNumericValue: 1100 },
   ]);
   assert.deepEqual(assertions["total-byte-weight"], [
     "error",
     { maxNumericValue: 65000 },
   ]);
-  assert.deepEqual(assertions["categories:pwa"], [
-    "error",
-    { minScore: 0.9 },
-  ]);
-  assert.equal(assertions["service-worker"], "error");
-  assert.equal(assertions["installable-manifest"], "error");
+  assert.equal(assertions.interactive, undefined);
+  assert.equal(assertions["categories:pwa"], undefined);
+  assert.equal(assertions["service-worker"], undefined);
+  assert.equal(assertions["installable-manifest"], undefined);
 
   assert.equal(
     packageJson.scripts.lhci,

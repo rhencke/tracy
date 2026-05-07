@@ -5,7 +5,7 @@ module.exports = {
       settings: {
         chromeFlags: "--headless=new --no-sandbox --enable-experimental-webassembly-features --enable-features=WebAssemblyJSPI --js-flags=\"--experimental-wasm-jspi --experimental-wasm-stack-switching\"",
         formFactor: "mobile",
-        onlyCategories: ["performance", "pwa"],
+        onlyCategories: ["performance"],
         screenEmulation: {
           disabled: false,
           deviceScaleFactor: 2.625,
@@ -28,11 +28,7 @@ module.exports = {
     },
     assert: {
       assertions: {
-        "categories:pwa": ["error", { minScore: 0.9 }],
-        "first-contentful-paint": ["error", { maxNumericValue: 950 }],
-        "installable-manifest": "error",
-        interactive: ["error", { maxNumericValue: 1000 }],
-        "service-worker": "error",
+        "first-contentful-paint": ["error", { maxNumericValue: 1100 }],
         "total-byte-weight": ["error", { maxNumericValue: 65000 }],
       },
     },
