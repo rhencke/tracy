@@ -17,6 +17,7 @@
     "test:ingest-worker-runtime": "node tools/ingest-worker-runtime-check.js",
     "test:runtime-worker": "node tools/runtime-worker-orchestration-check.js",
     "test:direct-esm": "node tools/direct-esm-check.js",
+    "test:service-worker": "node tools/service-worker-check.js",
     "test:wat": "node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm",
     "test:watwat-probe": "node tools/watwat.js --expect-failure probe_assert_eq_i32_failure \"deliberate i32 failure\" dist/wasm/watwat.test.wasm",
     "test:generated-trace": "node tools/generated-trace-extractor-check.js",
