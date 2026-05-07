@@ -341,6 +341,7 @@ async function checkInteractiveIngestGate() {
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
       assert.equal(fileHandle, 77);
+      hostCalls.push(["source-from-file", fileHandle]);
       return Promise.resolve(12);
     },
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN](sourceId) {
@@ -492,8 +493,10 @@ async function checkInteractiveIngestGate() {
   await runFrame(frames, canvasHarness, 0);
   assert.equal(importCalls.length, 0, "renderer should stay off cold startup");
 
+  const selectedFile = { name: "throttled-100mb.json", size: HUNDRED_MB };
+
   fileSelectionCallbacks[0]({
-    file: { size: HUNDRED_MB },
+    file: selectedFile,
     handle: 77,
   });
   await flushMicrotasks();
@@ -502,13 +505,15 @@ async function checkInteractiveIngestGate() {
   assert.deepEqual(controller.worker.posted, [
     {
       indexName: "indexes/throttled-100mb.json.idx",
+      sourceFile: selectedFile,
+      sourceFileHandle: 77,
       sourceName,
       sourceSize: HUNDRED_MB,
       type: "start",
     },
   ]);
   assert.deepEqual(hostCalls.slice(0, 2), [
-    ["source-open", sourceName],
+    ["source-from-file", 77],
     ["index-create", "indexes/throttled-100mb.json.idx"],
   ]);
   assert.deepEqual(indexBacking.createdNames, ["indexes/throttled-100mb.json.idx"]);

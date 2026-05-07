@@ -71,6 +71,26 @@ async function main() {
 
   const mainHost = makeMainThreadHost(memory);
   const workerHost = makeWorkerThreadHost(memory);
+  const workerFileHost = makeWorkerThreadHost(
+    memory,
+    new Map([
+      [
+        7,
+        {
+          size: 3,
+          slice(start, end) {
+            assert.equal(start, 1);
+            assert.equal(end, 3);
+            return {
+              async arrayBuffer() {
+                return Uint8Array.from([8, 9]).buffer;
+              },
+            };
+          },
+        },
+      ],
+    ]),
+  );
   const legacyHost = makeShim(memory);
   const mainKeys = hostKeys(mainHost);
   const workerKeys = hostKeys(workerHost);
@@ -120,6 +140,14 @@ async function main() {
     () => workerHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](1),
     /file handles are owned by the main thread/,
   );
+  const sourceId = await workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](7);
+
+  assert.equal(sourceId, 1);
+  assert.equal(
+    await workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, 1n, 2, 32),
+    2,
+  );
+  assert.deepEqual(Array.from(new Uint8Array(memory.buffer, 32, 2)), [8, 9]);
 }
 
 main().catch((error) => {

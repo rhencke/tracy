@@ -252,6 +252,14 @@ async function resolveSourceId({ data, host, memory, namePtr }) {
     return data.sourceId;
   }
 
+  if (
+    data.sourceFile !== null &&
+    typeof data.sourceFile === "object" &&
+    Number.isInteger(data.sourceFileHandle)
+  ) {
+    return host[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](data.sourceFileHandle);
+  }
+
   return openNamedHostResource(
     memory,
     host,
@@ -285,9 +293,24 @@ async function resolveIndexId({ data, host, memory, namePtr }) {
   );
 }
 
+function sourceFilesForWorker(data) {
+  if (
+    data?.sourceFile !== null &&
+    typeof data?.sourceFile === "object" &&
+    Number.isInteger(data.sourceFileHandle)
+  ) {
+    return new Map([[data.sourceFileHandle, data.sourceFile]]);
+  }
+
+  return new Map();
+}
+
 export async function runWorkerIngest(data, options = {}) {
   const memory = (options.memoryFactory ?? makeDefaultMemory)();
-  const host = (options.hostFactory ?? makeWorkerThreadHost)(memory);
+  const host = (options.hostFactory ?? makeWorkerThreadHost)(
+    memory,
+    sourceFilesForWorker(data),
+  );
   const { parser, parserState, index } = await instantiateIngestModules(
     options,
     memory,

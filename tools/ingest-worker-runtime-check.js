@@ -151,11 +151,13 @@ async function checkWorkerRuntime() {
   };
   const instantiated = [];
   const hostCalls = [];
+  const selectedFile = { name: "trace.json", size: 64 };
   let indexExports;
   let parserExports;
   const host = {
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
-      hostCalls.push(["source", decodeString(memory, namePtr, nameLen)]);
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
+      assert.equal(fileHandle, 77);
+      hostCalls.push(["source-file", fileHandle]);
       return 11;
     },
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
@@ -179,13 +181,19 @@ async function checkWorkerRuntime() {
       indexName: "indexes/trace.idx",
       progressWindowMs: 50,
       statePtr: 1000,
-      sourceName: "sources/trace.json",
+      sourceFile: selectedFile,
+      sourceFileHandle: 77,
+      sourceSize: selectedFile.size,
       tokenOutputPtr: 7000,
       writerPagePtr: 6000,
       type: runtime.INGEST_WORKER_MESSAGE.START,
     },
     {
-      hostFactory: () => host,
+      hostFactory: (nextMemory, sourceFiles) => {
+        assert.equal(nextMemory, memory);
+        assert.equal(sourceFiles.get(77), selectedFile);
+        return host;
+      },
       instantiateWasmModuleForThread: async (id, thread, imports) => {
         instantiated.push({ id, thread, hasMemory: imports.env.memory === memory });
         if (id === "parser") {
@@ -225,7 +233,7 @@ async function checkWorkerRuntime() {
     { id: "index", thread: "worker", hasMemory: true },
   ]);
   assert.deepEqual(hostCalls, [
-    ["source", "sources/trace.json"],
+    ["source-file", 77],
     ["index", "indexes/trace.idx"],
   ]);
   assert.equal(result.committedEvents, 3);

@@ -508,11 +508,36 @@ function indexNameForSource(sourceName) {
   return `indexes/${safeLeaf}.idx`;
 }
 
+function sourceNameForSelectedFile(selection) {
+  const rawName =
+    typeof selection?.file?.name === "string" && selection.file.name.length > 0
+      ? selection.file.name
+      : "trace";
+
+  return `sources/${rawName}`;
+}
+
 async function startIngestForSelectedFile(selection, context) {
   const fileHandle = selection?.handle ?? selection?.fileHandle;
 
   if (!Number.isInteger(fileHandle) || fileHandle < 0) {
     return false;
+  }
+
+  if (
+    selection?.file !== null &&
+    typeof selection?.file === "object" &&
+    typeof selection.file.size === "number"
+  ) {
+    const sourceName = sourceNameForSelectedFile(selection);
+
+    return context.ingestWorker.start({
+      indexName: indexNameForSource(sourceName),
+      sourceFile: selection.file,
+      sourceFileHandle: fileHandle,
+      sourceName,
+      sourceSize: selection.file.size,
+    });
   }
 
   const sourceId = await context.host[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](

@@ -30,8 +30,8 @@ export function makeMainThreadHost(memory, options = {}) {
   };
 }
 
-export function makeWorkerThreadHost(memory) {
-  return makeOpfsWorkerHost(makeMemoryView(memory));
+export function makeWorkerThreadHost(memory, files = new Map()) {
+  return makeOpfsWorkerHost(makeMemoryView(memory), files);
 }
 
 export function makeShim(memory) {

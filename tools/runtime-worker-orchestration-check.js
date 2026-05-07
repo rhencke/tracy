@@ -242,23 +242,14 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   const abi = await import(moduleUrl("host/abi.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
   const sourceName = "sources/selected trace.json";
-  const sourceNameBytes = new TextEncoder().encode(sourceName);
   const callbacks = [];
   const workerStatus = [];
+  const selectedFile = { name: "selected trace.json", size: 1234 };
+  let opfsCopyStarted = false;
   const host = {
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
-      assert.equal(fileHandle, 9);
-      return Promise.resolve(41);
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN](sourceId) {
-      assert.equal(sourceId, 41);
-      return sourceNameBytes.byteLength;
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_NAME](sourceId, destPtr, destLen) {
-      assert.equal(sourceId, 41);
-      assert.equal(destLen, sourceNameBytes.byteLength);
-      new Uint8Array(memory.buffer, destPtr, destLen).set(sourceNameBytes);
-      return sourceNameBytes.byteLength;
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]() {
+      opfsCopyStarted = true;
+      return new Promise(() => {});
     },
     opfs_index_create() {
       return 0;
@@ -291,14 +282,21 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   assert.equal(callbacks.length, 1);
   assert.equal(controller.worker, null);
 
-  callbacks[0]({ file: { size: 1234 }, handle: 9 });
+  callbacks[0]({ file: selectedFile, handle: 9 });
   await Promise.resolve();
   await Promise.resolve();
 
   const worker = controller.worker;
+  assert.equal(
+    opfsCopyStarted,
+    false,
+    "file selection should post worker ingest before any full OPFS copy",
+  );
   assert.deepEqual(worker.posted, [
     {
       indexName: "indexes/selected_trace.json.idx",
+      sourceFile: selectedFile,
+      sourceFileHandle: 9,
       sourceName,
       sourceSize: 1234,
       type: "start",
