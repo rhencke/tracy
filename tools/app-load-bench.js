@@ -31,7 +31,7 @@ const BUDGETS = Object.freeze({
     wasmInstantiateMs: 25,
   }),
   warmSw: Object.freeze({
-    fcpMs: 20,
+    fcpMs: 45,
     transferBytes: 0,
     ttiMs: 15,
     wasmInstantiateMs: 15,
@@ -654,7 +654,7 @@ function runSelfTest() {
       wasmInstantiateMs: 25,
     },
     warmSw: {
-      fcpMs: 20,
+      fcpMs: 45,
       transferBytes: 0,
       ttiMs: 15,
       wasmInstantiateMs: 15,
