@@ -46,6 +46,21 @@ const MIME_TYPES = Object.freeze({
   ".wasm": "application/wasm",
   ".webmanifest": "application/manifest+json",
 });
+const REQUIRED_DIST_FILES = Object.freeze([
+  "bootstrap.js",
+  "build-info.js",
+  "host/abi.mjs",
+  "host/wasm-modules.mjs",
+  "index.html",
+  "manifest.webmanifest",
+  "precache-manifest.js",
+  "service-worker.js",
+  "wasm/app.wasm",
+  "wasm/index.wasm",
+  "wasm/parser.wasm",
+  "wasm/parser_state.wasm",
+  "worker.js",
+]);
 
 function parseArgs(argv) {
   const options = {
@@ -115,6 +130,38 @@ function findBrowser(explicitPath) {
 
 function contentType(file) {
   return MIME_TYPES[path.extname(file)] ?? "application/octet-stream";
+}
+
+function assertDistReady(distDir) {
+  const missing = REQUIRED_DIST_FILES.filter((file) =>
+    !fs.existsSync(path.join(distDir, file)),
+  );
+
+  if (missing.length > 0) {
+    throw new Error(`app-load bench dist is incomplete; missing ${missing.join(", ")}`);
+  }
+
+  const buildInfo = fs.readFileSync(path.join(distDir, "build-info.js"), "utf8");
+  if (!/TRACY_BUILD_HASH = "[0-9a-f]{64}"/.test(buildInfo)) {
+    throw new Error("app-load bench dist is incomplete; build-info.js lacks TRACY_BUILD_HASH");
+  }
+
+  const precache = fs.readFileSync(path.join(distDir, "precache-manifest.js"), "utf8");
+  const precacheUrls = precache.match(/urls: Object\.freeze\((\[[\s\S]*?\])\),/);
+  if (precacheUrls === null) {
+    throw new Error("app-load bench dist is incomplete; precache-manifest.js lacks urls");
+  }
+
+  const precacheFiles = JSON.parse(precacheUrls[1]);
+  if (!Array.isArray(precacheFiles)) {
+    throw new Error("app-load bench dist is incomplete; precache-manifest.js urls is not an array");
+  }
+
+  for (const file of REQUIRED_DIST_FILES.filter((entry) => entry !== "precache-manifest.js")) {
+    if (!precacheFiles.includes(file)) {
+      throw new Error(`app-load bench dist is incomplete; precache-manifest.js missing ${file}`);
+    }
+  }
 }
 
 function resolveDistPath(distDir, requestUrl) {
@@ -358,6 +405,37 @@ function launchBrowser(browserPath) {
   ], {
     stdio: ["ignore", "ignore", "pipe"],
   });
+  let settled = false;
+
+  function waitForExit(timeoutMs = DEFAULT_TIMEOUT_MS) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      let forceKillTimeout;
+      let failTimeout;
+
+      function cleanup() {
+        clearTimeout(forceKillTimeout);
+        clearTimeout(failTimeout);
+      }
+
+      forceKillTimeout = setTimeout(() => {
+        child.kill("SIGKILL");
+      }, timeoutMs);
+
+      failTimeout = setTimeout(() => {
+        cleanup();
+        reject(new Error(`browser did not exit within ${timeoutMs}ms after close`));
+      }, timeoutMs + 5000);
+
+      child.once("exit", () => {
+        cleanup();
+        resolve();
+      });
+    });
+  }
 
   return new Promise((resolve, reject) => {
     let stderr = "";
@@ -371,9 +449,13 @@ function launchBrowser(browserPath) {
       const match = stderr.match(/DevTools listening on (ws:\/\/[^\s]+)/);
       if (match !== null) {
         clearTimeout(timeout);
+        settled = true;
         resolve({
-          close() {
-            child.kill();
+          async close() {
+            if (child.exitCode === null && child.signalCode === null) {
+              child.kill();
+            }
+            await waitForExit();
             fs.rmSync(userDataDir, { recursive: true, force: true });
           },
           webSocketUrl: match[1],
@@ -382,7 +464,9 @@ function launchBrowser(browserPath) {
     });
     child.once("exit", (code) => {
       clearTimeout(timeout);
-      reject(new Error(`browser exited before DevTools endpoint: ${code}`));
+      if (!settled) {
+        reject(new Error(`browser exited before DevTools endpoint: ${code}`));
+      }
     });
   });
 }
@@ -523,6 +607,8 @@ async function primeServiceWorker(cdp, page, url) {
 }
 
 async function runBench(options) {
+  assertDistReady(options.distDir);
+
   const browserPath = findBrowser(options.browser);
   const server = await createServer(options.distDir);
   const browser = await launchBrowser(browserPath);
@@ -548,7 +634,7 @@ async function runBench(options) {
     console.log(JSON.stringify({ cold, warmHttp, warmSw }, null, 2));
   } finally {
     cdp.close();
-    browser.close();
+    await browser.close();
     await server.close();
   }
 }
@@ -592,12 +678,49 @@ function runSelfTest() {
     /fixture fcpMs 2.0 > 1/,
   );
 
+  const tmpDist = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-app-load-dist-"));
+  try {
+    assert.throws(() => assertDistReady(tmpDist), /dist is incomplete; missing/);
+
+    for (const file of REQUIRED_DIST_FILES) {
+      const absolute = path.join(tmpDist, file);
+      fs.mkdirSync(path.dirname(absolute), { recursive: true });
+      fs.writeFileSync(absolute, "");
+    }
+    fs.writeFileSync(
+      path.join(tmpDist, "build-info.js"),
+      `export const TRACY_BUILD_HASH = "${"a".repeat(64)}";\n`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDist, "precache-manifest.js"),
+      [
+        "self.TRACY_PRECACHE = Object.freeze({",
+        `  urls: Object.freeze(${JSON.stringify(
+          REQUIRED_DIST_FILES.filter((entry) => entry !== "precache-manifest.js"),
+        )}),`,
+        "});",
+        "",
+      ].join("\n"),
+    );
+    assert.doesNotThrow(() => assertDistReady(tmpDist));
+  } finally {
+    fs.rmSync(tmpDist, { recursive: true, force: true });
+  }
+
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
 
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
+  assert.match(
+    makefile,
+    /dist\/precache-manifest\.js: \$\(filter-out dist\/precache-manifest\.js,\$\(DIST_FILES\)\) tools\/generate-precache-manifest\.js/,
+  );
+  assert.match(
+    makefile,
+    /dist\/build-info\.js: \$\(filter-out dist\/build-info\.js \$\(SERVICE_WORKER_FILES\),\$\(DIST_FILES\)\)/,
+  );
   assert.match(makefile, /node tools\/app-load-bench\.js --self-test/);
 }
 
