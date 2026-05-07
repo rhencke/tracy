@@ -533,6 +533,7 @@
     (local $dur i32)
     (local $color i32)
     (local $result i32)
+    (local $page_hints i32)
 
     global.get $index_reader_file
     i32.eqz
@@ -590,6 +591,7 @@
           i32.const 36
           i32.add
           i32.load
+          local.tee $page_hints
           global.get $INDEX_DECODE_HINT_COMPACT_SLICES
           i32.and
           i32.eqz
@@ -810,6 +812,16 @@
                 i32.const 20
                 i32.add
                 local.get $color
+                i32.store
+
+                local.get $result
+                i32.const 24
+                i32.add
+                local.get $page_hints
+                global.get $INDEX_DECODE_HINT_PARTIAL
+                i32.and
+                i32.eqz
+                i32.eqz
                 i32.store
 
                 local.get $count

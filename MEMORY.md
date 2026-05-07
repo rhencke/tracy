@@ -84,6 +84,7 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `INDEX_QUERY_RESULT_DEPTH_OFFSET` | `12` | Query result row byte offset of the nesting depth. |
 | `INDEX_QUERY_RESULT_CAT_ID_OFFSET` | `16` | Query result row byte offset of the category dictionary id. |
 | `INDEX_QUERY_RESULT_COLOR_OFFSET` | `20` | Query result row byte offset of the resolved color. |
+| `INDEX_QUERY_RESULT_PARTIAL_OFFSET` | `24` | Query result row byte offset of the per-row partial-page flag. |
 
 Index page header, directory, and query-result offsets are part of the
 generated layout spec so cold-reload parity checks and binary readers use

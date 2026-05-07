@@ -428,11 +428,134 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.deepEqual(openedNames, ["indexes/trace.idx"]);
 }
 
+async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const operations = [];
+  const canvas = {
+    height: 160,
+    width: 320,
+    getContext() {
+      return context;
+    },
+  };
+  const context = {
+    beginPath() {
+      operations.push({ op: "beginPath" });
+    },
+    clearRect(x, y, width, height) {
+      operations.push({ height, op: "clearRect", width, x, y });
+    },
+    clip() {
+      operations.push({ op: "clip" });
+    },
+    fillRect(x, y, width, height) {
+      operations.push({
+        fillStyle: this.fillStyle,
+        height,
+        op: "fillRect",
+        width,
+        x,
+        y,
+      });
+    },
+    lineTo(x, y) {
+      operations.push({ op: "lineTo", x, y });
+    },
+    moveTo(x, y) {
+      operations.push({ op: "moveTo", x, y });
+    },
+    rect(x, y, width, height) {
+      operations.push({ height, op: "rect", width, x, y });
+    },
+    restore() {
+      operations.push({ op: "restore" });
+    },
+    save() {
+      operations.push({ op: "save" });
+    },
+    stroke() {
+      operations.push({ op: "stroke", strokeStyle: this.strokeStyle });
+    },
+  };
+  let coveredRange = { end: 140, start: 100, type: "covered_range", valid: true };
+  const queryCalls = [];
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr) {
+      queryCalls.push({ outPtr, trackId, tsMax, tsMin });
+      const view = new DataView(memory.buffer);
+      view.setUint32(outPtr, trackId === 0 ? 104 : 120, true);
+      view.setUint32(outPtr + 4, trackId === 0 ? 8 : 12, true);
+      view.setUint32(outPtr + 12, trackId, true);
+      view.setUint32(outPtr + 20, trackId === 0 ? 0x2d74da : 0x6b7280, true);
+      view.setUint32(outPtr + 24, trackId === 1 ? 1 : 0, true);
+      return 1;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 2;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return { coveredRange, state: "running" };
+    },
+  };
+  const renderer = runtime.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    queryOutPtr: 2048,
+    queryWindow: 100,
+  });
+
+  const rows = renderer.draw(123);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    queryCalls,
+    [
+      { outPtr: 2048, trackId: 0, tsMax: 140, tsMin: 100 },
+      { outPtr: 2048, trackId: 1, tsMax: 140, tsMin: 100 },
+    ],
+  );
+  assert.equal(
+    operations.some((operation) => operation.op === "fillRect" && operation.fillStyle === "#2d74da"),
+    true,
+    "committed row should draw with its resolved color",
+  );
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "fillRect" &&
+        operation.fillStyle === "rgba(92, 109, 130, 0.58)",
+    ),
+    true,
+    "partial row should draw with unfinished styling",
+  );
+  assert.equal(
+    operations.some((operation) => operation.op === "stroke"),
+    true,
+    "partial row should get a hatch overlay",
+  );
+
+  coveredRange = { end: 180, start: 100, type: "covered_range", valid: true };
+  renderer.draw(124);
+  assert.deepEqual(queryCalls.at(-1), {
+    outPtr: 2048,
+    trackId: 1,
+    tsMax: 180,
+    tsMin: 100,
+  });
+  assert.deepEqual(renderer.status(), { error: null, rows: 2 });
+}
+
 async function main() {
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
+  await checkProgressiveTraceRendererDrawsCoveredPartialRows();
 }
 
 main().catch((error) => {
