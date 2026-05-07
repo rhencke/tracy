@@ -52,7 +52,7 @@ function main() {
   assert.match(workflow, /run: make lighthouse-ci/);
   assert.match(workflow, /sudo apt-get install -y google-chrome-stable/);
   assert.match(workflow, /google-chrome --version/);
-  assert.match(workflow, /make app-load-bench/);
+  assert.match(workflow, /- name: Run app-load bench[\s\S]+if: github\.event_name == 'pull_request'[\s\S]+timeout-minutes: 5[\s\S]+run: make app-load-bench/);
   assert.match(makefile, /lighthouse-ci: dist \.lighthouserc\.cjs/);
   assert.match(makefile, /npx --yes @lhci\/cli@0\.15\.1 autorun --config=\.lighthouserc\.cjs/);
   assert.match(makefile, /node tools\/lighthouse-ci-check\.js/);

@@ -68,6 +68,7 @@ jobs:
 
       - name: Run app-load bench
         if: github.event_name == 'pull_request'
+        timeout-minutes: 5
         run: make app-load-bench
 
       - name: Run Lighthouse CI cold-load gate
