@@ -659,19 +659,11 @@
         local.get $kind
         global.get $PARSER_JSON_TOKEN_EOF
         i32.eq
-        if
-          i32.const -1
-          return
-        end
-
         local.get $kind
         global.get $PARSER_JSON_TOKEN_NEED_MORE
         i32.eq
+        i32.or
         if
-          global.get $extractor_cursor
-          i32.const 1
-          i32.add
-          global.set $extractor_cursor
           i32.const -1
           return
         end
@@ -1218,11 +1210,19 @@
         local.get $kind
         global.get $PARSER_JSON_TOKEN_EOF
         i32.eq
+        if
+          i32.const -1
+          return
+        end
+
         local.get $kind
         global.get $PARSER_JSON_TOKEN_NEED_MORE
         i32.eq
-        i32.or
         if
+          global.get $extractor_cursor
+          i32.const 1
+          i32.add
+          global.set $extractor_cursor
           i32.const -1
           return
         end

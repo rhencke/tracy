@@ -1167,10 +1167,20 @@
   (func (export "test_extractor_resumes_after_need_more_value")
     (local $event_ptr i32)
 
+    i32.const 55296
     i32.const 183
-    i32.const 2725
-    i32.const 2
-    call $emit_recovery_prefix
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 32
+    call $parser_token_output_reset
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACK
+    call $parser_emit_structural_token
+    drop
 
     i32.const 55296
     i32.const 57344
@@ -1185,7 +1195,50 @@
     i32.const 401
     call $assert_eq_i32
 
-    call $emit_recovery_valid_tail
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_LBRACE
+    call $parser_emit_structural_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_STRING
+    i32.const 2703
+    i32.const 2
+    call $parser_emit_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_COLON
+    call $parser_emit_structural_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_STRING
+    i32.const 2708
+    i32.const 1
+    call $parser_emit_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_RBRACE
+    call $parser_emit_structural_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    global.get $PARSER_JSON_TOKEN_RBRACK
+    call $parser_emit_structural_token
+    drop
+
+    i32.const 55296
+    i32.const 57344
+    call $parser_emit_eof_token
+    drop
 
     call $extractor_next
     local.tee $event_ptr
