@@ -73,6 +73,7 @@ function assertComesBefore(values, before, after) {
 async function main() {
   const manifestUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
   const {
+    compileWasmModuleGraph,
     instantiateWasmModule,
     wasmModuleGraphIds,
     wasmModuleIds,
@@ -97,7 +98,16 @@ async function main() {
   assertComesBefore(parserGraphIds, "std/strtab", "parser");
   assert.equal(wasmModuleUrl("std/strtab", "/assets/wasm"), "/assets/wasm/std/strtab.wasm");
 
-  const compiledIds = [];
+  const registryModuleIds = wasmModuleIds();
+  const compiledGraph = await compileWasmModuleGraph("parser", {
+    baseUrl: "/assets/wasm",
+    compile(url, moduleId) {
+      return Promise.resolve({ moduleId, url });
+    },
+  });
+  assert.deepEqual(new Set(compiledGraph.keys()), new Set(registryModuleIds));
+
+  const compileStartedIds = [];
   const instantiatedIds = [];
   const { exports, imports } = await instantiateWasmModule(
     "parser",
@@ -105,7 +115,10 @@ async function main() {
     {
       baseUrl: "/assets/wasm",
       async compile(url, moduleId) {
-        compiledIds.push(moduleId);
+        compileStartedIds.push(moduleId);
+        if (!parserGraphIds.includes(moduleId)) {
+          return new Promise(() => {});
+        }
         await Promise.resolve();
         return { moduleId, url };
       },
@@ -119,7 +132,7 @@ async function main() {
     },
   );
 
-  assert.deepEqual(new Set(compiledIds), new Set(parserGraphIds));
+  assert.deepEqual(new Set(compileStartedIds), new Set(registryModuleIds));
   assert.deepEqual(new Set(instantiatedIds), new Set(parserGraphIds));
   assertComesBefore(instantiatedIds, "std/mem", "parser");
   assertComesBefore(instantiatedIds, "parser_state", "parser");
@@ -133,7 +146,7 @@ async function main() {
   assert.equal(imports.hash.moduleId, "std/hash");
   assert.equal(imports.strtab.moduleId, "std/strtab");
 
-  for (const moduleId of wasmModuleIds()) {
+  for (const moduleId of registryModuleIds) {
     const loaded = await instantiateWasmModule(
       moduleId,
       { env: { memory: "shared-memory" } },

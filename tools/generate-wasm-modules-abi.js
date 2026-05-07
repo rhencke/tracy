@@ -115,16 +115,33 @@ async function defaultInstantiate(module, imports) {
   return instance.exports;
 }
 
+function compileWasmModuleRegistry(
+  { baseUrl = "wasm/", compile = defaultCompile } = {},
+) {
+  const compiled = new Map();
+
+  for (const moduleId of wasmModuleIds()) {
+    let promise;
+    try {
+      promise = Promise.resolve(compile(wasmModuleUrl(moduleId, baseUrl), moduleId));
+    } catch (error) {
+      promise = Promise.reject(error);
+    }
+    promise.catch(() => {});
+    compiled.set(moduleId, promise);
+  }
+
+  return compiled;
+}
+
 export async function compileWasmModuleGraph(
   id,
   { baseUrl = "wasm/", compile = defaultCompile } = {},
 ) {
-  const graphIds = wasmModuleGraphIds(id);
+  wasmModuleGraphIds(id);
+  const compiled = compileWasmModuleRegistry({ baseUrl, compile });
   const compiledEntries = await Promise.all(
-    graphIds.map(async (moduleId) => [
-      moduleId,
-      await compile(wasmModuleUrl(moduleId, baseUrl), moduleId),
-    ]),
+    [...compiled].map(async ([moduleId, promise]) => [moduleId, await promise]),
   );
 
   return new Map(compiledEntries);
@@ -141,32 +158,59 @@ export async function instantiateWasmModule(
 ) {
   const imports = { ...baseImports };
   const instances = new Map();
-  const graphIds = wasmModuleGraphIds(id);
-  const compiled = await compileWasmModuleGraph(id, { baseUrl, compile });
+  wasmModuleGraphIds(id);
+  const compiled = compileWasmModuleRegistry({ baseUrl, compile });
+  const instantiating = new Map();
 
-  for (const moduleId of graphIds) {
+  async function instantiateModule(moduleId) {
+    if (instances.has(moduleId)) {
+      return instances.get(moduleId);
+    }
+    if (instantiating.has(moduleId)) {
+      return instantiating.get(moduleId);
+    }
+
+    const promise = (async () => {
+      await Promise.all(wasmModuleDependencies(moduleId).map(instantiateModule));
+
+      for (const dependency of wasmModuleDependencies(moduleId)) {
+        const dependencyExports = instances.get(dependency);
+        for (const alias of wasmModuleAliases(dependency)) {
+          imports[alias] = dependencyExports;
+        }
+      }
+
+      const exports = await instantiate(
+        await compiled.get(moduleId),
+        imports,
+        moduleId,
+        wasmModuleUrl(moduleId, baseUrl),
+      );
+      instances.set(moduleId, exports);
+
+      for (const alias of wasmModuleAliases(moduleId)) {
+        imports[alias] = exports;
+      }
+
+      return exports;
+    })();
+    instantiating.set(moduleId, promise);
+    return promise;
+  }
+
+  const exports = await instantiateModule(id);
+
+  for (const moduleId of wasmModuleGraphIds(id)) {
     for (const dependency of wasmModuleDependencies(moduleId)) {
       const dependencyExports = instances.get(dependency);
       for (const alias of wasmModuleAliases(dependency)) {
         imports[alias] = dependencyExports;
       }
     }
-
-    const exports = await instantiate(
-      compiled.get(moduleId),
-      imports,
-      moduleId,
-      wasmModuleUrl(moduleId, baseUrl),
-    );
-    instances.set(moduleId, exports);
-
-    for (const alias of wasmModuleAliases(moduleId)) {
-      imports[alias] = exports;
-    }
   }
 
   return {
-    exports: instances.get(id),
+    exports,
     imports,
   };
 }
