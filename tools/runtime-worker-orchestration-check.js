@@ -73,10 +73,19 @@ async function checkRuntimeOrchestratesWorker() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const workerMessages = [];
   const instantiateCalls = [];
+  const performanceEntries = [];
   const ticks = [];
   const memory = new WebAssembly.Memory({ initial: 1 });
   const host = {};
   const workerStatus = [];
+  const performance = {
+    mark(name) {
+      performanceEntries.push({ kind: "mark", name });
+    },
+    measure(name, start, end) {
+      performanceEntries.push({ kind: "measure", name, start, end });
+    },
+  };
 
   const controller = runtime.runApp(memory, host, {
     ingest: {
@@ -96,6 +105,7 @@ async function checkRuntimeOrchestratesWorker() {
         },
       };
     },
+    performance,
     worker: {
       Worker: FakeWorker,
       onWorkerStatus(status, message) {
@@ -114,6 +124,31 @@ async function checkRuntimeOrchestratesWorker() {
   assert.deepEqual(worker.options, { type: "module" });
   assert.deepEqual(instantiateCalls, [
     { id: "app", thread: "main", memory },
+  ]);
+  assert.deepEqual(performanceEntries, [
+    { kind: "mark", name: "tracy.wasm.instantiate.start" },
+    { kind: "mark", name: "tracy.wasm.instantiate.end" },
+    {
+      kind: "measure",
+      name: "tracy.wasm.instantiate",
+      start: "tracy.wasm.instantiate.start",
+      end: "tracy.wasm.instantiate.end",
+    },
+    { kind: "mark", name: "tracy.main.start" },
+    { kind: "mark", name: "tracy.main.end" },
+    {
+      kind: "measure",
+      name: "tracy.main",
+      start: "tracy.main.start",
+      end: "tracy.main.end",
+    },
+    { kind: "mark", name: "tracy.app.ready" },
+    {
+      kind: "measure",
+      name: "tracy.app.load",
+      start: "tracy.bootstrap.start",
+      end: "tracy.app.ready",
+    },
   ]);
   assert.equal(frames.length, 1, "requestAnimationFrame should be scheduled");
   assert.deepEqual(worker.posted, [

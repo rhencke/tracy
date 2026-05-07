@@ -1,6 +1,8 @@
 import { makeMainThreadHost } from "./host/shim.mjs";
 import { runApp } from "./host/runtime.mjs";
 
+globalThis.performance?.mark?.("tracy.bootstrap.start");
+
 const memory = new WebAssembly.Memory({
   initial: 256,
   maximum: 32768,
