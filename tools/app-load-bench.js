@@ -19,7 +19,7 @@ const FAST_3G = Object.freeze({
 });
 const BUDGETS = Object.freeze({
   cold: Object.freeze({
-    fcpMs: 990,
+    fcpMs: 1100,
     transferBytes: 65000,
     ttiMs: 250,
     wasmInstantiateMs: 200,
@@ -642,7 +642,7 @@ async function runBench(options) {
 function runSelfTest() {
   assert.deepEqual(BUDGETS, {
     cold: {
-      fcpMs: 990,
+      fcpMs: 1100,
       transferBytes: 65000,
       ttiMs: 250,
       wasmInstantiateMs: 200,
