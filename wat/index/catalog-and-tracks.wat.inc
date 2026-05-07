@@ -89,18 +89,6 @@
     (local $ts_min i32)
     (local $ts_max i32)
 
-    global.get $index_slice_page_count
-    i32.eqz
-    if
-      i32.const 0
-      global.set $index_covered_range_valid
-      i32.const 0
-      global.set $index_covered_range_start
-      i32.const 0
-      global.set $index_covered_range_end
-      return
-    end
-
     i32.const 0
     call $index_page_catalog_ptr
     local.set $entry
