@@ -54,13 +54,13 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: bash tools/build.sh
+        run: make -j dist
 
       - name: Test WAT
-        run: npm test
+        run: make test
 
       - name: Test WAT coverage
-        run: npm run coverage
+        run: make coverage
 
       - name: Detect Playwright golden tests
         if: github.event_name == 'pull_request'
@@ -133,7 +133,7 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: bash tools/build.sh
+        run: make -j dist
 
       - name: Derive generated trace seed
         shell: bash

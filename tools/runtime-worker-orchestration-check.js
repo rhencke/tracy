@@ -101,7 +101,7 @@ async function checkRuntimeOrchestratesWorker() {
       onWorkerStatus(status, message) {
         workerStatus.push({ status, message });
       },
-      workerUrl: "worker.bundle.js",
+      workerUrl: "worker.js",
     },
   });
 
@@ -110,7 +110,7 @@ async function checkRuntimeOrchestratesWorker() {
 
   assert.equal(FakeWorker.instances.length, 1);
   const worker = FakeWorker.instances[0];
-  assert.equal(worker.url, "worker.bundle.js");
+  assert.equal(worker.url, "worker.js");
   assert.deepEqual(worker.options, { type: "module" });
   assert.deepEqual(instantiateCalls, [
     { id: "app", thread: "main", memory },

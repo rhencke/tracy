@@ -4,7 +4,7 @@ import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
 
 const asyncHostImports = new Set(HOST_ASYNC_IMPORTS);
 const MAIN_THREAD = "main";
-const WORKER_URL = "worker.bundle.js";
+const WORKER_URL = "worker.js";
 
 function cloneWorkerStatus(status) {
   return {
