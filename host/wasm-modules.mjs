@@ -9,7 +9,7 @@ export const WASM_MODULES = Object.freeze({
     dependencies: Object.freeze([]),
   }),
   "index": Object.freeze({
-    thread: "shared",
+    thread: "worker",
     wasmPath: "index.wasm",
     aliases: Object.freeze(["index"]),
     dependencies: Object.freeze(["std/mem"]),

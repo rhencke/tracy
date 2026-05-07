@@ -364,10 +364,9 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
     },
   };
   const reader = runtime.createMainThreadIndexReaderController(memory, host, {
-    instantiateWasmModuleForThread: async (id, thread, imports, options) => {
+    instantiateWasmModule: async (id, imports, options) => {
       calls.push({
         id,
-        thread,
         hasMemory: imports.env.memory === memory,
         baseUrl: options.baseUrl,
       });
@@ -414,7 +413,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
 
   assert.deepEqual(openedNames, ["indexes/trace.idx"]);
   assert.deepEqual(calls, [
-    { id: "index", thread: "main", hasMemory: true, baseUrl: "wasm/" },
+    { id: "index", hasMemory: true, baseUrl: "wasm/" },
   ]);
   assert.deepEqual(reader.status(), {
     error: null,

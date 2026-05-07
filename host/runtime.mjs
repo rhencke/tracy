@@ -1,6 +1,9 @@
 import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
 import { HOST_IMPORT_NAME } from "./abi.mjs";
-import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
+import {
+  instantiateWasmModule,
+  instantiateWasmModuleForThread,
+} from "./wasm-modules.mjs";
 
 const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
@@ -87,8 +90,7 @@ function writeHostString(memory, ptr, value, label) {
 }
 
 export function createMainThreadIndexReaderController(memory, host, options = {}) {
-  const instantiate =
-    options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
+  const instantiate = options.instantiateWasmModule ?? instantiateWasmModule;
   const readerState = {
     error: null,
     exports: null,
@@ -114,7 +116,6 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
     const loaded = await instantiate(
       "index",
-      MAIN_THREAD,
       { env: { memory }, host },
       {
         baseUrl: options.baseUrl ?? "wasm/",
@@ -513,7 +514,7 @@ export function runApp(memory, host, options = {}) {
           baseUrl: options.baseUrl,
           compile: options.compile,
           instantiate: options.instantiate,
-          instantiateWasmModuleForThread: options.instantiateWasmModuleForThread,
+          instantiateWasmModule: options.instantiateWasmModule,
         });
   const ingestWorker =
     options.ingestWorker ??

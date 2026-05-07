@@ -1,5 +1,5 @@
 (module
-  ;; @thread shared
+  ;; @thread worker
   ;; @include index/constants-and-helpers.wat.inc
   ;; @include index/codecs.wat.inc
   ;; @include index/page-layout-and-writer-pages.wat.inc
