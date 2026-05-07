@@ -4,6 +4,14 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
+const OPFS_PAGE_SIZE = 0x00010000;
+const INDEX_DECODE_HINT_COMPACT_SLICES = 1;
+const INDEX_DECODE_HINT_TRACK_ID_SHIFT = 8;
+const INDEX_PAGE_HEADER_BUCKET_START_OFFSET = 12;
+const INDEX_PAGE_HEADER_BUCKET_END_OFFSET = 20;
+const INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET = 28;
+const INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET = 36;
+
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
 }
@@ -353,14 +361,22 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const pagePtr = 32768;
+  const pageCatalog = [];
   const openedNames = [];
   const calls = [];
+  const readerInitIds = [];
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
       openedNames.push(
         new TextDecoder().decode(new Uint8Array(memory.buffer, namePtr, nameLen)),
       );
       return 70;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
+      assert.equal(indexId, 70);
+      return BigInt(OPFS_PAGE_SIZE);
     },
   };
   const reader = runtime.createMainThreadIndexReaderController(memory, host, {
@@ -377,7 +393,35 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
             assert.equal(tsMin, 100);
             assert.equal(tsMax, 140);
             assert.equal(outPtr, 4096);
+            assert.deepEqual(pageCatalog, [
+              {
+                bucketEnd: 140,
+                bucketStart: 100,
+                pageId: 0,
+                recordCount: 3,
+                trackId: 4,
+              },
+            ]);
             return 3;
+          },
+          INDEX_STATUS_OK: 0,
+          index_page_catalog_add_slice_page(
+            trackId,
+            pageId,
+            bucketStart,
+            bucketEnd,
+            recordCount,
+          ) {
+            pageCatalog.push({
+              bucketEnd,
+              bucketStart,
+              pageId,
+              recordCount,
+              trackId,
+            });
+          },
+          index_page_catalog_reset() {
+            pageCatalog.length = 0;
           },
           index_reader_configure_cache(slotCount) {
             assert.equal(slotCount, 2);
@@ -394,6 +438,38 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
           },
           index_reader_init(indexId) {
             assert.equal(indexId, 70);
+            readerInitIds.push(indexId);
+          },
+          index_validate_page(ptr, len) {
+            assert.equal(ptr, pagePtr);
+            assert.equal(len, OPFS_PAGE_SIZE);
+            return 0;
+          },
+          read_page(level, pageId) {
+            assert.equal(level, 0);
+            assert.equal(pageId, 0);
+            view.setUint32(
+              pagePtr + INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+              100,
+              true,
+            );
+            view.setUint32(
+              pagePtr + INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+              140,
+              true,
+            );
+            view.setUint32(
+              pagePtr + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+              3,
+              true,
+            );
+            view.setUint32(
+              pagePtr + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+              INDEX_DECODE_HINT_COMPACT_SLICES |
+                (4 << INDEX_DECODE_HINT_TRACK_ID_SHIFT),
+              true,
+            );
+            return pagePtr;
           },
         },
       };
@@ -421,6 +497,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
     indexName: "indexes/trace.idx",
     state: "ready",
   });
+  assert.deepEqual(readerInitIds, [70, 70]);
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
   assert.equal(reader.queryRange(4, 100, 140, 4096), 3);
 
