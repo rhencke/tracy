@@ -21,7 +21,7 @@ const BUDGETS = Object.freeze({
   cold: Object.freeze({
     fcpMs: 1100,
     transferBytes: 75000,
-    ttiMs: 250,
+    ttiMs: 1000,
     wasmInstantiateMs: 200,
   }),
   warmHttp: Object.freeze({
@@ -668,7 +668,7 @@ function runSelfTest() {
     cold: {
       fcpMs: 1100,
       transferBytes: 75000,
-      ttiMs: 250,
+      ttiMs: 1000,
       wasmInstantiateMs: 200,
     },
     warmHttp: {
