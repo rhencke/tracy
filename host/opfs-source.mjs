@@ -37,6 +37,7 @@ const OPFS_INDEX_WRITER_IMPORTS = Object.freeze([
 const OPFS_MAIN_IMPORTS = Object.freeze([
   ...OPFS_SOURCE_IMPORTS,
   ...OPFS_INDEX_READER_IMPORTS,
+  ...OPFS_INDEX_WRITER_IMPORTS,
 ]);
 
 const OPFS_WORKER_IMPORTS = Object.freeze([

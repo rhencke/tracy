@@ -1,10 +1,35 @@
-import { HOST_ASYNC_IMPORTS } from "./abi.mjs";
 import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
 import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
 
-const asyncHostImports = new Set(HOST_ASYNC_IMPORTS);
 const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
+const PERFORMANCE_MARKS = Object.freeze({
+  appReady: "tracy.app.ready",
+  bootstrapStart: "tracy.bootstrap.start",
+  tracyMainEnd: "tracy.main.end",
+  tracyMainStart: "tracy.main.start",
+  wasmInstantiateEnd: "tracy.wasm.instantiate.end",
+  wasmInstantiateStart: "tracy.wasm.instantiate.start",
+});
+const PERFORMANCE_MEASURES = Object.freeze({
+  appLoad: "tracy.app.load",
+  tracyMain: "tracy.main",
+  wasmInstantiate: "tracy.wasm.instantiate",
+});
+
+function markPerformance(name, options) {
+  const performance = options.performance ?? globalThis.performance;
+
+  performance?.mark?.(name);
+}
+
+function measurePerformance(name, start, end, options) {
+  const performance = options.performance ?? globalThis.performance;
+
+  try {
+    performance?.measure?.(name, start, end);
+  } catch {}
+}
 
 function cloneWorkerStatus(status) {
   return {
@@ -160,13 +185,8 @@ function showError(message) {
   document.body.appendChild(error);
 }
 
-function wrapAsyncHostImports(host) {
-  return Object.fromEntries(
-    Object.entries(host).map(([name, value]) => [
-      name,
-      asyncHostImports.has(name) ? new WebAssembly.Suspending(value) : value,
-    ]),
-  );
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function loadApp(memory, host, options = {}) {
@@ -177,16 +197,39 @@ async function loadApp(memory, host, options = {}) {
     return;
   }
 
-  const imports = { env: { memory }, host: wrapAsyncHostImports(host) };
+  const imports = { env: { memory }, host };
   const instantiate = options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
+  markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
   const { exports } = await instantiate("app", MAIN_THREAD, imports, {
     baseUrl: options.baseUrl ?? "wasm/",
     compile: options.compile,
     instantiate: options.instantiate,
   });
+  markPerformance(PERFORMANCE_MARKS.wasmInstantiateEnd, options);
+  measurePerformance(
+    PERFORMANCE_MEASURES.wasmInstantiate,
+    PERFORMANCE_MARKS.wasmInstantiateStart,
+    PERFORMANCE_MARKS.wasmInstantiateEnd,
+    options,
+  );
   const { tracy_main, tracy_tick } = exports;
 
+  markPerformance(PERFORMANCE_MARKS.tracyMainStart, options);
   tracy_main();
+  markPerformance(PERFORMANCE_MARKS.tracyMainEnd, options);
+  measurePerformance(
+    PERFORMANCE_MEASURES.tracyMain,
+    PERFORMANCE_MARKS.tracyMainStart,
+    PERFORMANCE_MARKS.tracyMainEnd,
+    options,
+  );
+  markPerformance(PERFORMANCE_MARKS.appReady, options);
+  measurePerformance(
+    PERFORMANCE_MEASURES.appLoad,
+    PERFORMANCE_MARKS.bootstrapStart,
+    PERFORMANCE_MARKS.appReady,
+    options,
+  );
 
   const loop = (ts) => {
     tracy_tick(ts);
@@ -208,6 +251,7 @@ export function runApp(memory, host, options = {}) {
 
   loadApp(memory, host, { ...options, ingestWorker }).catch((error) => {
     console.error(error);
+    globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
     showError("tracy failed to load the WebAssembly viewer.");
   });
 

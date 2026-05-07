@@ -101,9 +101,10 @@ async function main() {
 
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_OPEN), "main host missing index open");
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_READ), "main host missing index read");
+  assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_CREATE), "main host missing index create");
+  assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_WRITE), "main host missing index write");
+  assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_FLUSH), "main host missing index flush");
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_SIZE), "main host missing index size");
-  assert(!mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_WRITE), "main host should not expose index write");
-  assert(!mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_FLUSH), "main host should not expose index flush");
 
   assert.throws(
     () => workerHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](1),

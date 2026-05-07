@@ -2,6 +2,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
 PATH := $(CURDIR)/node_modules/.bin:$(PATH)
+DIST_COMPRESSED_BUDGET_BYTES ?= 200000
 
 .DELETE_ON_ERROR:
 
@@ -33,12 +34,14 @@ JS_DIST_FILES := \
 STATIC_FILES := $(shell find static -type f -print | sort)
 STATIC_DIST_FILES := $(patsubst static/%,dist/%,$(STATIC_FILES))
 APP_SHELL_FILES := dist/index.html dist/manifest.webmanifest
+SERVICE_WORKER_FILES := dist/service-worker.js dist/precache-manifest.js
 DIST_FILES := \
 	$(WASM_FILES) \
 	$(JS_DIST_FILES) \
 	$(APP_SHELL_FILES) \
 	$(STATIC_DIST_FILES) \
-	dist/build-info.js
+	dist/build-info.js \
+	$(SERVICE_WORKER_FILES)
 
 MODULE_DOC_GENERATOR := $(wildcard tools/generate-wasm-modules-docs.js)
 
@@ -82,19 +85,28 @@ GENERATED_INPUTS := \
 
 .PHONY: \
 	all \
+	app-load-bench \
 	check-generated \
 	clean \
 	coverage \
 	coverage-report \
 	coverage-strict \
 	dist \
+	dist-size-budget \
 	generated \
 	js \
+	lighthouse-ci \
 	test \
 	wasm \
 	wasm-cov
 
 all: dist
+
+app-load-bench: dist tools/app-load-bench.js
+	node tools/app-load-bench.js
+
+lighthouse-ci: dist .lighthouserc.cjs
+	npx --yes @lhci/cli@0.15.1 autorun --config=.lighthouserc.cjs
 
 generated: $(GENERATED_FILES)
 
@@ -185,7 +197,14 @@ dist/%: static/%
 	mkdir -p $(dir $@)
 	cp $< $@
 
-dist/build-info.js: $(filter-out dist/build-info.js,$(DIST_FILES))
+dist/service-worker.js: service-worker.js
+	mkdir -p $(dir $@)
+	cp $< $@
+
+dist/precache-manifest.js: $(filter-out dist/precache-manifest.js,$(DIST_FILES)) tools/generate-precache-manifest.js
+	node tools/generate-precache-manifest.js dist $@ $(filter-out dist/precache-manifest.js,$(DIST_FILES))
+
+dist/build-info.js: $(filter-out dist/build-info.js $(SERVICE_WORKER_FILES),$(DIST_FILES))
 	build_hash="$$( \
 		cd dist && \
 		find . -type f ! -name 'build-info.js' ! -path './.wat-compat/*' -print0 \
@@ -196,7 +215,10 @@ dist/build-info.js: $(filter-out dist/build-info.js,$(DIST_FILES))
 	)"; \
 	printf 'export const TRACY_BUILD_HASH = "%s";\n' "$$build_hash" > $@
 
-dist: $(DIST_FILES)
+dist-size-budget: $(DIST_FILES) tools/dist-budget-check.js
+	node tools/dist-budget-check.js --budget $(DIST_COMPRESSED_BUDGET_BYTES) $(DIST_FILES)
+
+dist: $(DIST_FILES) dist-size-budget
 
 check-generated: generated
 	git diff --exit-code -- $(GENERATED_FILES)
@@ -208,6 +230,10 @@ test: dist check-generated
 	node tools/ingest-worker-runtime-check.js
 	node tools/runtime-worker-orchestration-check.js
 	node tools/direct-esm-check.js
+	node tools/service-worker-check.js
+	node tools/dist-budget-check.js --self-test
+	node tools/app-load-bench.js --self-test
+	node tools/lighthouse-ci-check.js
 	node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 	node tools/watwat.js --expect-failure probe_assert_eq_i32_failure "deliberate i32 failure" dist/wasm/watwat.test.wasm
 	bash tools/test-assert-probes.sh
