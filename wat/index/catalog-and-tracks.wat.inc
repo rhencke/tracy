@@ -58,19 +58,133 @@
     end
 
     local.get $ts_min
+    global.get $index_covered_range_end
+    i32.le_u
+    local.get $ts_max
+    global.get $index_covered_range_end
+    i32.gt_u
+    i32.and
+    if
+      local.get $ts_max
+      global.set $index_covered_range_end
+    end
+
+    local.get $ts_max
+    global.get $index_covered_range_start
+    i32.ge_u
+    local.get $ts_min
     global.get $index_covered_range_start
     i32.lt_u
+    i32.and
     if
       local.get $ts_min
       global.set $index_covered_range_start
     end
+  )
 
-    local.get $ts_max
-    global.get $index_covered_range_end
-    i32.gt_u
+  (func $index_covered_range_recompute_from_catalog
+    (local $entry i32)
+    (local $i i32)
+    (local $changed i32)
+    (local $ts_min i32)
+    (local $ts_max i32)
+
+    global.get $index_slice_page_count
+    i32.eqz
     if
-      local.get $ts_max
+      i32.const 0
+      global.set $index_covered_range_valid
+      i32.const 0
+      global.set $index_covered_range_start
+      i32.const 0
       global.set $index_covered_range_end
+      return
+    end
+
+    i32.const 0
+    call $index_page_catalog_ptr
+    local.set $entry
+
+    i32.const 1
+    global.set $index_covered_range_valid
+    local.get $entry
+    i32.const 8
+    i32.add
+    i32.load
+    global.set $index_covered_range_start
+    local.get $entry
+    i32.const 12
+    i32.add
+    i32.load
+    global.set $index_covered_range_end
+
+    block $done
+      loop $expand
+        i32.const 0
+        local.set $changed
+        i32.const 0
+        local.set $i
+
+        loop $scan
+          local.get $i
+          global.get $index_slice_page_count
+          i32.lt_u
+          if
+            local.get $i
+            call $index_page_catalog_ptr
+            local.set $entry
+            local.get $entry
+            i32.const 8
+            i32.add
+            i32.load
+            local.set $ts_min
+            local.get $entry
+            i32.const 12
+            i32.add
+            i32.load
+            local.set $ts_max
+
+            local.get $ts_min
+            global.get $index_covered_range_end
+            i32.le_u
+            local.get $ts_max
+            global.get $index_covered_range_end
+            i32.gt_u
+            i32.and
+            if
+              local.get $ts_max
+              global.set $index_covered_range_end
+              i32.const 1
+              local.set $changed
+            end
+
+            local.get $ts_max
+            global.get $index_covered_range_start
+            i32.ge_u
+            local.get $ts_min
+            global.get $index_covered_range_start
+            i32.lt_u
+            i32.and
+            if
+              local.get $ts_min
+              global.set $index_covered_range_start
+              i32.const 1
+              local.set $changed
+            end
+
+            local.get $i
+            i32.const 1
+            i32.add
+            local.set $i
+            br $scan
+          end
+        end
+
+        local.get $changed
+        i32.eqz
+        br_if $done
+        br $expand
+      end
     end
   )
 
@@ -129,6 +243,7 @@
     local.get $ts_min
     local.get $ts_max
     call $index_covered_range_add
+    call $index_covered_range_recompute_from_catalog
   )
 
   (func (export "index_covered_range_valid") (result i32)

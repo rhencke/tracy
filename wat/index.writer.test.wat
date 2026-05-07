@@ -1352,7 +1352,7 @@
     call $assert_eq_i32
 
     call $index_writer_covered_range_end
-    i32.const 37
+    i32.const 15
     i32.const 451
     call $assert_eq_i32
 

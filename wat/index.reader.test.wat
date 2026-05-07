@@ -1444,4 +1444,81 @@
     i32.const 433
     call $assert_eq_i32
   )
+
+  (func (export "test_index_reader_catalog_keeps_covered_range_contiguous")
+    call $index_page_catalog_reset
+
+    i32.const 3
+    i32.const 10
+    i32.const 10
+    i32.const 20
+    i32.const 2
+    call $index_page_catalog_add_slice_page
+
+    call $index_reader_covered_range_valid
+    i32.const 1
+    i32.const 434
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_start
+    i32.const 10
+    i32.const 435
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 20
+    i32.const 436
+    call $assert_eq_i32
+
+    i32.const 3
+    i32.const 11
+    i32.const 40
+    i32.const 50
+    i32.const 2
+    call $index_page_catalog_add_slice_page
+
+    call $index_reader_covered_range_start
+    i32.const 10
+    i32.const 437
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 20
+    i32.const 438
+    call $assert_eq_i32
+
+    i32.const 3
+    i32.const 12
+    i32.const 0
+    i32.const 5
+    i32.const 2
+    call $index_page_catalog_add_slice_page
+
+    call $index_reader_covered_range_start
+    i32.const 10
+    i32.const 439
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 20
+    i32.const 440
+    call $assert_eq_i32
+
+    i32.const 3
+    i32.const 13
+    i32.const 20
+    i32.const 40
+    i32.const 2
+    call $index_page_catalog_add_slice_page
+
+    call $index_reader_covered_range_start
+    i32.const 10
+    i32.const 441
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 50
+    i32.const 442
+    call $assert_eq_i32
+  )
 )
