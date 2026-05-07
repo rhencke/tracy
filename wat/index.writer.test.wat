@@ -866,6 +866,11 @@
     i32.const 60
     call $assert_eq_i32
 
+    call $index_writer_publish_partial
+    global.get $INDEX_WRITER_STATUS_NOT_INITIALIZED
+    i32.const 456
+    call $assert_eq_i32
+
     i32.const 21
     global.get $ALT_PAGE
     i32.const 0
@@ -951,6 +956,31 @@
     global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
     i32.const 64
     call $assert_eq_i32
+
+    i32.const 111
+    global.get $ALT_PAGE
+    i32.const 0
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 10
+    f64.const 1000
+    f64.const 1
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 457
+    call $assert_eq_i32
+
+    call $index_writer_publish_partial
+    global.get $INDEX_WRITER_STATUS_HOST_WRITE_FAILED
+    i32.const 458
+    call $assert_eq_i32
   )
 
   (func (export "test_index_writer_reports_host_flush_failure")
@@ -981,6 +1011,31 @@
     call $index_writer_flush
     global.get $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED
     i32.const 66
+    call $assert_eq_i32
+
+    i32.const 112
+    global.get $ALT_PAGE
+    i32.const 0
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 10
+    f64.const 1000
+    f64.const 1
+    i32.const 1
+    i32.const 2
+    i32.const 0
+    call $write_event
+
+    global.get $EVENT
+    call $index_writer_append_event
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 459
+    call $assert_eq_i32
+
+    call $index_writer_publish_partial
+    global.get $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED
+    i32.const 460
     call $assert_eq_i32
   )
 
