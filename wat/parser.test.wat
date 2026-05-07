@@ -34,6 +34,8 @@
     (func $parser_emit_error_token (param i32) (param i32) (param i32) (param i32) (result i32)))
   (import "parser" "extractor_init"
     (func $extractor_init (param i32)))
+  (import "parser" "extractor_reset_cursor"
+    (func $extractor_reset_cursor))
   (import "parser" "extractor_next"
     (func $extractor_next (result i32)))
   (import "alloc" "bump_init"
@@ -1542,6 +1544,47 @@
     i32.const -1
     i32.const 155
     call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_reset_cursor_replays_current_tokens")
+    (local $event_ptr i32)
+
+    i32.const 55296
+    i32.const 175
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 2600
+    i32.const 7
+    i32.const 57344
+    i32.const 16
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 156
+    call $assert_eq_i32
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 157
+    call $assert_true
+
+    call $extractor_reset_cursor
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 158
+    call $assert_true
+
+    local.get $event_ptr
+    i32.const 159
+    call $assert_zero_event_record
   )
 
   (func (export "test_extractor_finds_trace_events_wrapper")
