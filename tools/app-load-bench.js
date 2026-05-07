@@ -194,11 +194,11 @@ function connectWebSocket(url) {
         }
 
         const rest = Buffer.from(handshake.slice(end + 4), "binary");
-        handshake = null;
         if (!/^HTTP\/1\.1 101 /.test(handshake)) {
           reject(new Error("DevTools WebSocket handshake failed"));
           return;
         }
+        handshake = null;
         buffer = Buffer.concat([buffer, rest]);
         resolve({ buffer, socket });
       }
