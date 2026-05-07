@@ -603,6 +603,170 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.deepEqual(openedNames, ["indexes/trace.idx"]);
 }
 
+async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const pagePtr = 32768;
+  const pageCatalog = [];
+  const pageRecords = [
+    {
+      bucketEnd: 140,
+      bucketStart: 100,
+      recordCount: 3,
+      trackId: 4,
+    },
+    {
+      bucketEnd: 180,
+      bucketStart: 140,
+      recordCount: 2,
+      trackId: 4,
+    },
+  ];
+  let readablePageCount = 1;
+  const readPages = [];
+  const readerInitIds = [];
+  const host = {
+    "tracy.opfsIndexSizeMayBeStale": true,
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN]() {
+      return 70;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
+      assert.equal(indexId, 70);
+      return BigInt(OPFS_PAGE_SIZE);
+    },
+  };
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        index_query_range(trackId, tsMin, tsMax, outPtr) {
+          assert.equal(trackId, 4);
+          assert.equal(tsMin, 100);
+          assert.equal(outPtr, 4096);
+          if (tsMax === 140) {
+            assert.deepEqual(pageCatalog, [
+              {
+                bucketEnd: 140,
+                bucketStart: 100,
+                pageId: 0,
+                recordCount: 3,
+                trackId: 4,
+              },
+            ]);
+            return 3;
+          }
+
+          assert.equal(tsMax, 180);
+          assert.deepEqual(pageCatalog, [
+            {
+              bucketEnd: 140,
+              bucketStart: 100,
+              pageId: 0,
+              recordCount: 3,
+              trackId: 4,
+            },
+            {
+              bucketEnd: 180,
+              bucketStart: 140,
+              pageId: 1,
+              recordCount: 2,
+              trackId: 4,
+            },
+          ]);
+          return 5;
+        },
+        INDEX_STATUS_OK: 0,
+        index_page_catalog_add_slice_page(
+          trackId,
+          pageId,
+          bucketStart,
+          bucketEnd,
+          recordCount,
+        ) {
+          pageCatalog.push({
+            bucketEnd,
+            bucketStart,
+            pageId,
+            recordCount,
+            trackId,
+          });
+        },
+        index_page_catalog_reset() {
+          pageCatalog.length = 0;
+        },
+        index_reader_init(indexId) {
+          assert.equal(indexId, 70);
+          readerInitIds.push(indexId);
+        },
+        index_validate_page(ptr, len) {
+          assert.equal(ptr, pagePtr);
+          assert.equal(len, OPFS_PAGE_SIZE);
+          return 0;
+        },
+        read_page(level, pageId) {
+          assert.equal(level, 0);
+          readPages.push(pageId);
+          if (pageId >= readablePageCount) {
+            return 0;
+          }
+
+          const record = pageRecords[pageId];
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+            record.bucketStart,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+            record.bucketEnd,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+            record.recordCount,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+            INDEX_DECODE_HINT_COMPACT_SLICES |
+              (record.trackId << INDEX_DECODE_HINT_TRACK_ID_SHIFT),
+            true,
+          );
+          return pagePtr;
+        },
+      },
+    }),
+  });
+
+  await reader.open("indexes/trace.idx");
+  assert.deepEqual(readPages, [0]);
+  assert.equal(reader.queryRange(4, 100, 140, 4096), 3);
+  assert.deepEqual(
+    readPages,
+    [0, 1],
+    "stale-size hosts should probe one appended page until a miss",
+  );
+  assert.deepEqual(readerInitIds, [70, 70]);
+
+  readablePageCount = 2;
+  assert.equal(reader.queryRange(4, 100, 180, 4096), 5);
+  assert.deepEqual(
+    readPages,
+    [0, 1, 1, 2],
+    "stale-size hosts should discover worker-published pages by probing",
+  );
+  assert.deepEqual(readerInitIds, [70, 70, 70]);
+
+  assert.equal(reader.queryRange(4, 100, 180, 4096), 5);
+  assert.deepEqual(
+    readPages,
+    [0, 1, 1, 2, 2],
+    "stale-size hosts should not reset below already discovered pages",
+  );
+  assert.deepEqual(readerInitIds, [70, 70, 70]);
+}
+
 async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -986,6 +1150,7 @@ async function main() {
   await checkRuntimeStartsIngestFromFileSelection();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
+  await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimeLoadsProgressiveTraceRendererLazily();

@@ -33,6 +33,7 @@ const OPFS_INDEX_WRITER_IMPORTS = Object.freeze([
   HOST_IMPORT_NAME.OPFS_INDEX_FLUSH,
   HOST_IMPORT_NAME.OPFS_INDEX_WRITE,
 ]);
+const OPFS_INDEX_SIZE_MAY_BE_STALE = "tracy.opfsIndexSizeMayBeStale";
 
 const OPFS_MAIN_IMPORTS = Object.freeze([
   ...OPFS_SOURCE_IMPORTS,
@@ -409,7 +410,10 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
 export function makeOpfsMainHost(memoryView, files = new Map()) {
   const opfsHost = makeOpfsSourceHost(memoryView, files);
 
-  return makeHostImports(opfsHost, OPFS_MAIN_IMPORTS);
+  return {
+    ...makeHostImports(opfsHost, OPFS_MAIN_IMPORTS),
+    [OPFS_INDEX_SIZE_MAY_BE_STALE]: true,
+  };
 }
 
 export function makeOpfsWorkerHost(memoryView) {

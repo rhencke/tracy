@@ -175,6 +175,33 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         indexId,
       );
     const previousPageCount = readerState.catalogPageCount;
+    const shouldProbe =
+      readerState.rebuildSliceCatalog.shouldProbeMainThreadSliceCatalog(host);
+    if (
+      !force &&
+      shouldProbe &&
+      previousPageCount !== null &&
+      pageCount <= previousPageCount
+    ) {
+      const probed =
+        readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
+          memory,
+          host,
+          index,
+          indexId,
+          {
+            pageCount,
+            probeUntilMissing: true,
+            reset: false,
+            startPage: previousPageCount,
+          },
+        );
+      readerState.catalogPageCount = probed.pageCount;
+      if (probed.rebuilt) {
+        index.index_reader_init(indexId);
+      }
+      return probed.rebuilt;
+    }
     if (!force && previousPageCount === pageCount) {
       return false;
     }
@@ -198,12 +225,12 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
           startPage,
         },
       );
-    readerState.catalogPageCount = pageCount;
-    if (rebuilt) {
+    readerState.catalogPageCount = rebuilt.pageCount;
+    if (rebuilt.rebuilt) {
       index.index_reader_init(indexId);
     }
 
-    return rebuilt;
+    return rebuilt.rebuilt;
   }
 
   async function open(indexName) {

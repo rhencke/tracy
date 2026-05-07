@@ -7,6 +7,8 @@ const INDEX_PAGE_HEADER_BUCKET_START_OFFSET = 12;
 const INDEX_PAGE_HEADER_BUCKET_END_OFFSET = 20;
 const INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET = 28;
 const INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET = 36;
+export const OPFS_INDEX_SIZE_MAY_BE_STALE =
+  "tracy.opfsIndexSizeMayBeStale";
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;
@@ -42,8 +44,9 @@ export function rebuildMainThreadSliceCatalog(
   const pageCount =
     options.pageCount ?? mainThreadSliceCatalogPageCount(host, indexId);
   const startPage = Math.max(0, options.startPage ?? 0);
-  if (pageCount <= 0 || startPage >= pageCount) {
-    return false;
+  const probeUntilMissing = options.probeUntilMissing === true;
+  if (!probeUntilMissing && (pageCount <= 0 || startPage >= pageCount)) {
+    return { pageCount: Math.max(0, pageCount), rebuilt: false };
   }
 
   if (!hasCatalogRebuildExports(index)) {
@@ -54,11 +57,19 @@ export function rebuildMainThreadSliceCatalog(
     index.index_page_catalog_reset();
   }
   const view = new DataView(memory.buffer);
-  for (let pageId = startPage; pageId < pageCount; pageId += 1) {
+  let rebuilt = false;
+  let nextPageId = startPage;
+  const endPage = probeUntilMissing ? Number.MAX_SAFE_INTEGER : pageCount;
+  for (let pageId = startPage; pageId < endPage; pageId += 1) {
     const page = index.read_page(0, pageId);
     if (page === 0) {
+      if (probeUntilMissing) {
+        return { pageCount: pageId, rebuilt };
+      }
       throw new Error(`main-thread index reader failed to read page ${pageId}`);
     }
+    rebuilt = true;
+    nextPageId = pageId + 1;
 
     const status = index.index_validate_page(page, OPFS_PAGE_SIZE);
     if (globalValue(status) !== globalValue(index.INDEX_STATUS_OK ?? 0)) {
@@ -82,7 +93,7 @@ export function rebuildMainThreadSliceCatalog(
     );
   }
 
-  return true;
+  return { pageCount: nextPageId, rebuilt };
 }
 
 export function mainThreadSliceCatalogPageCount(host, indexId) {
@@ -92,4 +103,8 @@ export function mainThreadSliceCatalogPageCount(host, indexId) {
   }
 
   return indexPageCountFromSize(sizeFn(indexId));
+}
+
+export function shouldProbeMainThreadSliceCatalog(host) {
+  return host?.[OPFS_INDEX_SIZE_MAY_BE_STALE] === true;
 }

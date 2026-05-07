@@ -105,6 +105,16 @@ async function main() {
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_WRITE), "main host missing index write");
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_FLUSH), "main host missing index flush");
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_SIZE), "main host missing index size");
+  assert.equal(
+    mainHost["tracy.opfsIndexSizeMayBeStale"],
+    true,
+    "main OPFS host should probe for worker-appended index pages",
+  );
+  assert.equal(
+    workerHost["tracy.opfsIndexSizeMayBeStale"],
+    undefined,
+    "worker OPFS host should not expose main-thread catalog probe marker",
+  );
 
   assert.throws(
     () => workerHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](1),
