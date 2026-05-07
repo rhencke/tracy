@@ -3,7 +3,7 @@ module.exports = {
     collect: {
       numberOfRuns: 1,
       settings: {
-        chromeFlags: "--headless=new --no-sandbox --enable-features=WebAssemblyJSPI --js-flags=--experimental-wasm-jspi",
+        chromeFlags: "--headless=new --no-sandbox --enable-experimental-webassembly-features --enable-features=WebAssemblyJSPI --js-flags=--experimental-wasm-jspi",
         formFactor: "mobile",
         onlyCategories: ["performance", "pwa"],
         screenEmulation: {

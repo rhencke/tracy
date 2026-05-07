@@ -349,6 +349,7 @@ function launchBrowser(browserPath) {
     "--disable-dev-shm-usage",
     "--disable-extensions",
     "--disable-sync",
+    "--enable-experimental-webassembly-features",
     "--enable-features=WebAssemblyJSPI",
     "--js-flags=--experimental-wasm-jspi",
     "--remote-debugging-port=0",

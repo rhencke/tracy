@@ -27,6 +27,7 @@ function main() {
   assert.equal(settings.throttling.downloadThroughputKbps, 1600);
   assert.equal(settings.throttling.uploadThroughputKbps, 750);
   assert.equal(settings.throttling.cpuSlowdownMultiplier, 1);
+  assert.match(settings.chromeFlags, /--enable-experimental-webassembly-features/);
   assert.match(settings.chromeFlags, /WebAssemblyJSPI/);
 
   assert.deepEqual(assertions["first-contentful-paint"], [
