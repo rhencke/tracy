@@ -1,3 +1,5 @@
+globalThis.performance?.mark?.("tracy.bootstrap.start");
+
 const canvas = globalThis.document?.getElementById?.("tracy");
 const context = canvas?.getContext?.("2d");
 if (context !== undefined) {
@@ -25,8 +27,6 @@ const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
   import("./host/shim.mjs"),
   import("./host/runtime.mjs"),
 ]);
-
-globalThis.performance?.mark?.("tracy.bootstrap.start");
 
 const memory = new WebAssembly.Memory({
   initial: 256,

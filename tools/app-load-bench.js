@@ -601,11 +601,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? 0;
+      const bootstrapStart = performance.getEntriesByName("tracy.bootstrap.start")[0]?.startTime;
       const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
-        coreTtiMs: coreReady,
+        coreTtiMs: coreReady - bootstrapStart,
         fcpMs: fcp,
         fullLoadMs: appLoad,
         wasmInstantiateMs: wasm,
@@ -752,11 +753,14 @@ function runSelfTest() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
+  const bootstrapStartOffset = bootstrap.indexOf('performance?.mark?.("tracy.bootstrap.start")');
   const coreReadyOffset = bootstrap.indexOf('performance?.mark?.("tracy.core.ready")');
 
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
+  assert.notEqual(bootstrapStartOffset, -1);
   assert.notEqual(coreReadyOffset, -1);
+  assert.ok(bootstrapStartOffset < coreReadyOffset);
   assert.ok(coreReadyOffset < bootstrap.indexOf('import("./host/runtime.mjs")'));
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
   assert.match(
