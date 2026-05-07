@@ -140,16 +140,13 @@ export async function instantiateWasmModule(
   } = {},
 ) {
   const imports = { ...baseImports };
-  const loaded = new Map();
+  const instances = new Map();
+  const graphIds = wasmModuleGraphIds(id);
   const compiled = await compileWasmModuleGraph(id, { baseUrl, compile });
 
-  async function load(moduleId) {
-    if (loaded.has(moduleId)) {
-      return loaded.get(moduleId);
-    }
-
+  for (const moduleId of graphIds) {
     for (const dependency of wasmModuleDependencies(moduleId)) {
-      const dependencyExports = await load(dependency);
+      const dependencyExports = instances.get(dependency);
       for (const alias of wasmModuleAliases(dependency)) {
         imports[alias] = dependencyExports;
       }
@@ -161,17 +158,15 @@ export async function instantiateWasmModule(
       moduleId,
       wasmModuleUrl(moduleId, baseUrl),
     );
-    loaded.set(moduleId, exports);
+    instances.set(moduleId, exports);
 
     for (const alias of wasmModuleAliases(moduleId)) {
       imports[alias] = exports;
     }
-
-    return exports;
   }
 
   return {
-    exports: await load(id),
+    exports: instances.get(id),
     imports,
   };
 }

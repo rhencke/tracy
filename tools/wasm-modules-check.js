@@ -23,17 +23,21 @@ async function main() {
   assert.equal(wasmModuleUrl("std/strtab", "/assets/wasm"), "/assets/wasm/std/strtab.wasm");
 
   const compiledIds = [];
+  let compileCompleted = 0;
   const instantiatedIds = [];
   const { exports, imports } = await instantiateWasmModule(
     "parser",
     { env: { memory: "shared-memory" } },
     {
       baseUrl: "/assets/wasm",
-      compile(url, moduleId) {
+      async compile(url, moduleId) {
         compiledIds.push(moduleId);
-        return Promise.resolve({ moduleId, url });
+        await Promise.resolve();
+        compileCompleted += 1;
+        return { moduleId, url };
       },
       instantiate(module, moduleImports, moduleId, url) {
+        assert.equal(compileCompleted, compiledIds.length);
         assert.equal(module.moduleId, moduleId);
         assert.equal(module.url, url);
         assert.equal(moduleImports.env.memory, "shared-memory");
