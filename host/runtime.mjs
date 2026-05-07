@@ -1,8 +1,11 @@
 import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
+import { HOST_IMPORT_NAME } from "./abi.mjs";
 import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
 
 const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
+const DEFAULT_INGEST_NAME_PTR = 4096;
+const DEFAULT_INGEST_NAME_MAX_BYTES = 4096;
 const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
   bootstrapStart: "tracy.bootstrap.start",
@@ -149,6 +152,11 @@ export function createIngestWorkerController(options = {}) {
     status() {
       return cloneWorkerStatus(status);
     },
+    fail(error) {
+      status.error = errorMessage(error);
+      status.state = "error";
+      notifyWorkerStatus(status, options, null);
+    },
     terminate() {
       worker.terminate?.();
       status.state = "terminated";
@@ -187,6 +195,91 @@ function showError(message) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function readHostString(memory, ptr, len) {
+  return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
+}
+
+function sourceNameForId(memory, host, sourceId, options) {
+  const nameLen = host[HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN]?.(sourceId);
+
+  if (!Number.isInteger(nameLen) || nameLen <= 0) {
+    throw new Error(`OPFS source ${sourceId} did not report a valid name`);
+  }
+
+  const namePtr = options.ingestNamePtr ?? DEFAULT_INGEST_NAME_PTR;
+  const maxNameBytes = options.ingestNameMaxBytes ?? DEFAULT_INGEST_NAME_MAX_BYTES;
+
+  if (nameLen > maxNameBytes) {
+    throw new Error(`OPFS source name is too long: ${nameLen} bytes`);
+  }
+
+  const written = host[HOST_IMPORT_NAME.OPFS_SOURCE_NAME]?.(
+    sourceId,
+    namePtr,
+    nameLen,
+  );
+  if (written !== nameLen) {
+    throw new Error(`OPFS source ${sourceId} name read failed`);
+  }
+
+  return readHostString(memory, namePtr, nameLen);
+}
+
+function indexNameForSource(sourceName) {
+  const leaf = sourceName
+    .split("/")
+    .filter((part) => part.length > 0)
+    .at(-1);
+  const safeLeaf = (leaf ?? "trace").replace(/[^A-Za-z0-9._-]/g, "_");
+
+  return `indexes/${safeLeaf}.idx`;
+}
+
+async function startIngestForSelectedFile(selection, context) {
+  const fileHandle = selection?.handle ?? selection?.fileHandle;
+
+  if (!Number.isInteger(fileHandle) || fileHandle < 0) {
+    return false;
+  }
+
+  const sourceId = await context.host[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](
+    fileHandle,
+  );
+  const sourceName = sourceNameForId(
+    context.memory,
+    context.host,
+    sourceId,
+    context.options,
+  );
+  const sourceSize =
+    typeof selection.file?.size === "number" ? selection.file.size : undefined;
+
+  return context.ingestWorker.start({
+    indexName: indexNameForSource(sourceName),
+    sourceName,
+    sourceSize,
+  });
+}
+
+function installFileSelectionIngest(memory, host, ingestWorker, options) {
+  if (
+    options.ingestFromFileSelection === false ||
+    typeof host.setFileSelectedCallback !== "function" ||
+    typeof host[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE] !== "function"
+  ) {
+    return;
+  }
+
+  host.setFileSelectedCallback((selection) => {
+    startIngestForSelectedFile(selection, {
+      host,
+      ingestWorker,
+      memory,
+      options,
+    }).catch((error) => ingestWorker.fail?.(error));
+  });
 }
 
 async function loadApp(memory, host, options = {}) {
@@ -248,6 +341,8 @@ async function loadApp(memory, host, options = {}) {
 export function runApp(memory, host, options = {}) {
   const ingestWorker =
     options.ingestWorker ?? createIngestWorkerController(options.worker ?? {});
+
+  installFileSelectionIngest(memory, host, ingestWorker, options);
 
   loadApp(memory, host, { ...options, ingestWorker }).catch((error) => {
     console.error(error);

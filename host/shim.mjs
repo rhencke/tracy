@@ -8,9 +8,9 @@ import {
 } from "./opfs-source.mjs";
 import { makePointerHost } from "./pointer.mjs";
 
-function makeBrowserHost(memoryView) {
+function makeBrowserHost(memoryView, options = {}) {
   const canvas = document.getElementById("tracy");
-  const { files, ...fileHost } = makeFilePickerHost(memoryView);
+  const { files, ...fileHost } = makeFilePickerHost(memoryView, options);
 
   return {
     files,
@@ -20,9 +20,9 @@ function makeBrowserHost(memoryView) {
   };
 }
 
-export function makeMainThreadHost(memory) {
+export function makeMainThreadHost(memory, options = {}) {
   const memoryView = makeMemoryView(memory);
-  const { files, ...browserHost } = makeBrowserHost(memoryView);
+  const { files, ...browserHost } = makeBrowserHost(memoryView, options);
 
   return {
     ...browserHost,
