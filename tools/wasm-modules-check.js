@@ -234,6 +234,7 @@ async function main() {
   assert.equal(imports.strtab.moduleId, "std/strtab");
 
   const workerInstantiatedIds = [];
+  const workerInstantiateCompileStartedIds = [];
   const workerLoaded = await instantiateWasmModuleForThread(
     "parser",
     "worker",
@@ -241,6 +242,7 @@ async function main() {
     {
       baseUrl: "/assets/wasm",
       compile(url, moduleId) {
+        workerInstantiateCompileStartedIds.push(moduleId);
         assert(wasmModuleIdsForThread("worker").includes(moduleId));
         return Promise.resolve({ moduleId, url });
       },
@@ -251,9 +253,34 @@ async function main() {
       },
     },
   );
+  assert.deepEqual(new Set(workerInstantiateCompileStartedIds), new Set(parserGraphIds));
   assert.deepEqual(new Set(workerInstantiatedIds), new Set(parserGraphIds));
   assert.equal(workerLoaded.exports.moduleId, "parser");
   assert.equal(workerLoaded.imports.mem.thread, "worker");
+
+  const mainIndexCompileStartedIds = [];
+  const mainLoadedIndex = await instantiateWasmModuleForThread(
+    "index",
+    "main",
+    { env: { memory: "main-memory" } },
+    {
+      compile(url, moduleId) {
+        mainIndexCompileStartedIds.push(moduleId);
+        assert(wasmModuleIdsForThread("main").includes(moduleId));
+        return Promise.resolve({ moduleId, url });
+      },
+      instantiate(module, moduleImports, moduleId) {
+        assert.equal(moduleImports.env.memory, "main-memory");
+        return Promise.resolve({ moduleId, thread: "main" });
+      },
+    },
+  );
+  assert.deepEqual(new Set(mainIndexCompileStartedIds), new Set([
+    "std/mem",
+    "index",
+  ]));
+  assert.equal(mainLoadedIndex.exports.moduleId, "index");
+  assert.equal(mainLoadedIndex.imports.mem.thread, "main");
 
   const mainLoadedShared = await instantiateWasmModuleForThread(
     "std/mem",

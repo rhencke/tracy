@@ -313,11 +313,11 @@ export async function instantiateWasmModuleForThread(
 ) {
   const imports = { ...baseImports };
   const instances = new Map();
-  wasmModuleGraphIdsForThread(id, thread);
+  const graphIds = wasmModuleGraphIdsForThread(id, thread);
   const compiled = compileWasmModuleRegistry({
     baseUrl,
     compile,
-    moduleIds: wasmModuleIdsForThread(thread),
+    moduleIds: graphIds,
   });
   const instantiating = new Map();
 
@@ -359,7 +359,7 @@ export async function instantiateWasmModuleForThread(
 
   const exports = await instantiateModule(id);
 
-  for (const moduleId of wasmModuleGraphIdsForThread(id, thread)) {
+  for (const moduleId of graphIds) {
     for (const dependency of wasmModuleDependencies(moduleId)) {
       const dependencyExports = instances.get(dependency);
       for (const alias of wasmModuleAliases(dependency)) {
