@@ -1,7 +1,9 @@
-import { makeMainThreadHost } from "./host/shim.mjs";
-import { runApp } from "./host/runtime.mjs";
-
-globalThis.performance?.mark?.("tracy.bootstrap.start");
+const canvas = globalThis.document?.getElementById?.("tracy");
+const context = canvas?.getContext?.("2d");
+if (context !== undefined) {
+  context.fillStyle = "#fbf8f4";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+}
 
 if ("serviceWorker" in (globalThis.navigator ?? {})) {
   const registerServiceWorker = () =>
@@ -16,6 +18,13 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
 
   globalThis.addEventListener?.("load", registerAfterReady);
 }
+
+const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
+  import("./host/shim.mjs"),
+  import("./host/runtime.mjs"),
+]);
+
+globalThis.performance?.mark?.("tracy.bootstrap.start");
 
 const memory = new WebAssembly.Memory({
   initial: 256,
