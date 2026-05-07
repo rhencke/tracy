@@ -575,7 +575,7 @@
     call $assert_eq_i32
 
     global.get $INDEX_QUERY_RESULT_BYTES
-    i32.const 24
+    i32.const 28
     i32.const 391
     call $assert_eq_i32
 
