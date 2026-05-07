@@ -31,13 +31,13 @@ then [v1.0 — release](https://github.com/rhencke/tracy/issues/35).
 | Design language | Material 3 (everywhere) |
 | Hosting | Client-side only.  GitHub Pages at <https://rhencke.github.io/tracy/>. |
 | Implementation | Core app logic in WAT.  JavaScript is used for the bootstrap, host/browser boundary, build tooling, and browser-boundary checks. |
-| Build | `make` drives the artifact DAG: `wat2wasm` (wabt), `esbuild`, generated ABI/test artifacts, coverage wasm, and the deployable `dist/` tree.  Driven by GitHub Actions. |
+| Build | `make` drives the artifact DAG: `wat2wasm` (wabt), generated ABI/test artifacts, copied unminified ESM files, coverage wasm, and the deployable `dist/` tree.  Driven by GitHub Actions. |
 | Tests | `watwat` — agnostic wasm test runner for WAT modules, TAP output, plus Node/browser-boundary checks where the host surface needs JavaScript. |
 
 ## Why this way
 
 - **No framework runtime tax.**  No virtual DOM, no GC pauses
-  during pan, no bundle bloat.  The whole app can be measured in
+  during pan, no packaging bloat.  The whole app can be measured in
   KB before compression.
 - **Memory you control.**  Linear memory laid out region-by-region
   in [`MEMORY.md`](MEMORY.md).  No per-allocation `malloc`/`free`
@@ -70,7 +70,7 @@ make dist
 make -j4 dist
 
 # produced app shell
-ls dist/index.html dist/bootstrap.bundle.js dist/wasm/app.wasm
+ls dist/index.html dist/bootstrap.js dist/host/runtime.mjs dist/wasm/app.wasm
 
 # run the local test gate
 make test

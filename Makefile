@@ -22,18 +22,20 @@ WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
 COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
 COV_MANIFEST_FILES :=
-HOST_JS := $(shell find host -type f -name '*.mjs' -print | sort)
+HOST_JS_GENERATED := host/abi.mjs host/wasm-modules.mjs
+HOST_JS := $(sort $(shell find host -type f -name '*.mjs' -print) $(HOST_JS_GENERATED))
+APP_JS_SOURCES := bootstrap.js worker.js
+APP_JS_DIST_FILES := $(patsubst %,dist/%,$(APP_JS_SOURCES))
+HOST_JS_DIST_FILES := $(patsubst host/%,dist/host/%,$(HOST_JS))
+JS_DIST_FILES := \
+	$(APP_JS_DIST_FILES) \
+	$(HOST_JS_DIST_FILES)
 STATIC_FILES := $(shell find static -type f -print | sort)
 STATIC_DIST_FILES := $(patsubst static/%,dist/%,$(STATIC_FILES))
 APP_SHELL_FILES := dist/index.html dist/manifest.webmanifest
-BUNDLE_FILES := \
-	dist/bootstrap.bundle.js \
-	dist/bootstrap.bundle.js.map \
-	dist/worker.bundle.js \
-	dist/worker.bundle.js.map
 DIST_FILES := \
 	$(WASM_FILES) \
-	$(BUNDLE_FILES) \
+	$(JS_DIST_FILES) \
 	$(APP_SHELL_FILES) \
 	$(STATIC_DIST_FILES) \
 	dist/build-info.js
@@ -80,7 +82,6 @@ GENERATED_INPUTS := \
 
 .PHONY: \
 	all \
-	bundle \
 	check-generated \
 	clean \
 	coverage \
@@ -88,6 +89,7 @@ GENERATED_INPUTS := \
 	coverage-strict \
 	dist \
 	generated \
+	js \
 	test \
 	wasm \
 	wasm-cov
@@ -157,24 +159,19 @@ $(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_COV_RULE,$(wat))))
 
 wasm-cov: $(COV_WAT_FILES) $(COV_MANIFEST_FILES) $(COV_WASM_FILES)
 
-dist/bootstrap.bundle.js dist/bootstrap.bundle.js.map &: bootstrap.js $(HOST_JS) $(GENERATED_FILES) package-lock.json
+dist/bootstrap.js: bootstrap.js
 	mkdir -p $(dir $@)
-	esbuild bootstrap.js \
-		--bundle \
-		--minify \
-		--sourcemap \
-		--outfile=dist/bootstrap.bundle.js
+	cp $< $@
 
-dist/worker.bundle.js dist/worker.bundle.js.map &: worker.js $(HOST_JS) $(GENERATED_FILES) package-lock.json
+dist/worker.js: worker.js
 	mkdir -p $(dir $@)
-	esbuild worker.js \
-		--bundle \
-		--format=esm \
-		--minify \
-		--sourcemap \
-		--outfile=dist/worker.bundle.js
+	cp $< $@
 
-bundle: $(BUNDLE_FILES)
+dist/host/%.mjs: host/%.mjs
+	mkdir -p $(dir $@)
+	cp $< $@
+
+js: $(JS_DIST_FILES)
 
 dist/index.html: index.html
 	mkdir -p $(dir $@)
@@ -210,7 +207,7 @@ test: dist check-generated
 	node tools/host-shim-check.js
 	node tools/ingest-worker-runtime-check.js
 	node tools/runtime-worker-orchestration-check.js
-	node tools/worker-bundle-check.js
+	node tools/direct-esm-check.js
 	node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 	node tools/watwat.js --expect-failure probe_assert_eq_i32_failure "deliberate i32 failure" dist/wasm/watwat.test.wasm
 	bash tools/test-assert-probes.sh
