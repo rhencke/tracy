@@ -10,6 +10,7 @@ const root = path.dirname(__dirname);
 const checkOnly = process.argv.includes("--check");
 const watRoot = path.join(root, "wat");
 const outputPath = path.join(root, "abi/wasm-modules.json");
+const validThreads = new Set(["main", "worker", "shared"]);
 
 function toPosixPath(value) {
   return value.split(path.sep).join("/");
@@ -29,6 +30,39 @@ function aliasesForModuleId(id) {
   }
 
   return [path.posix.basename(id), id, `wat/${id}`];
+}
+
+async function scanThreadMarker(inputPath) {
+  const source = await fs.readFile(inputPath, "utf8");
+  const markers = [];
+
+  for (const [index, line] of source.split(/\r?\n/).entries()) {
+    if (!/;;\s*@thread\b/.test(line)) {
+      continue;
+    }
+
+    const match = line.match(/^\s*;;\s*@thread\s+(\S+)\s*$/);
+    if (match === null) {
+      throw new Error(`${inputPath}:${index + 1}: malformed @thread marker`);
+    }
+
+    markers.push({ thread: match[1], line: index + 1 });
+  }
+
+  if (markers.length === 0) {
+    throw new Error(`${inputPath}: missing @thread marker`);
+  }
+
+  if (markers.length > 1) {
+    throw new Error(`${inputPath}:${markers[1].line}: duplicate @thread marker`);
+  }
+
+  const [{ thread, line }] = markers;
+  if (!validThreads.has(thread)) {
+    throw new Error(`${inputPath}:${line}: invalid @thread marker ${thread}`);
+  }
+
+  return thread;
 }
 
 async function listProductionWatFiles(dir = watRoot) {
@@ -147,6 +181,7 @@ async function extractWasmModules() {
     const id = moduleIdForWatPath(relativePath);
 
     modules[id] = {
+      thread: await scanThreadMarker(watFile),
       wasmPath: wasmPathForModuleId(id),
       aliases: aliasesForModuleId(id),
       dependencies: [],
@@ -219,5 +254,6 @@ module.exports = {
   moduleIdForWatPath,
   resolveDependencies,
   scanImportNames,
+  scanThreadMarker,
   wasmPathForModuleId,
 };

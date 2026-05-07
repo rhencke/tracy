@@ -1,7 +1,56 @@
 import { HOST_IMPORT_NAME } from "./abi.mjs";
 import { u64ToNumber } from "./memory.mjs";
 
-export function makeOpfsSourceHost(memoryView, files) {
+function makeUnsupportedHostImport(name, reason) {
+  return () => {
+    throw new Error(`${name}: ${reason}`);
+  };
+}
+
+function makeHostImports(source, importNames) {
+  return Object.fromEntries(importNames.map((name) => [name, source[name]]));
+}
+
+const OPFS_SOURCE_IMPORTS = Object.freeze([
+  HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE,
+  HOST_IMPORT_NAME.OPFS_READ_CHUNK,
+  HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE,
+  HOST_IMPORT_NAME.OPFS_SOURCE_NAME,
+  HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN,
+  HOST_IMPORT_NAME.OPFS_SOURCE_OPEN,
+  HOST_IMPORT_NAME.OPFS_SOURCE_READ,
+  HOST_IMPORT_NAME.OPFS_SOURCE_SIZE,
+]);
+
+const OPFS_INDEX_READER_IMPORTS = Object.freeze([
+  HOST_IMPORT_NAME.OPFS_INDEX_OPEN,
+  HOST_IMPORT_NAME.OPFS_INDEX_READ,
+  HOST_IMPORT_NAME.OPFS_INDEX_SIZE,
+]);
+
+const OPFS_INDEX_WRITER_IMPORTS = Object.freeze([
+  HOST_IMPORT_NAME.OPFS_INDEX_CREATE,
+  HOST_IMPORT_NAME.OPFS_INDEX_FLUSH,
+  HOST_IMPORT_NAME.OPFS_INDEX_WRITE,
+]);
+
+const OPFS_MAIN_IMPORTS = Object.freeze([
+  ...OPFS_SOURCE_IMPORTS,
+  ...OPFS_INDEX_READER_IMPORTS,
+]);
+
+const OPFS_WORKER_IMPORTS = Object.freeze([
+  ...OPFS_SOURCE_IMPORTS,
+  ...OPFS_INDEX_READER_IMPORTS,
+  ...OPFS_INDEX_WRITER_IMPORTS,
+]);
+
+const WORKER_UNSUPPORTED_FILE_IMPORTS = Object.freeze([
+  HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE,
+  HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE,
+]);
+
+export function makeOpfsSourceHost(memoryView, files = new Map()) {
   const sources = new Map();
   const indexes = new Map();
   let nextSourceId = 1;
@@ -336,13 +385,7 @@ export function makeOpfsSourceHost(memoryView, files) {
     }
   }
 
-  return {
-    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE]: opfsIndexCreate,
-    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH]: opfsIndexFlush,
-    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsIndexOpen,
-    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsIndexRead,
-    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsIndexSize,
-    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE]: opfsIndexWrite,
+  const opfsHost = {
     [HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]: opfsSourceFromFile,
     [HOST_IMPORT_NAME.OPFS_READ_CHUNK]: opfsSourceRead,
     [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]: opfsSourceFromFile,
@@ -351,5 +394,33 @@ export function makeOpfsSourceHost(memoryView, files) {
     [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN]: opfsSourceOpen,
     [HOST_IMPORT_NAME.OPFS_SOURCE_READ]: opfsSourceRead,
     [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE]: opfsSourceSize,
+    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsIndexOpen,
+    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsIndexRead,
+    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsIndexSize,
+    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE]: opfsIndexCreate,
+    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH]: opfsIndexFlush,
+    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE]: opfsIndexWrite,
   };
+
+  return makeHostImports(opfsHost, OPFS_WORKER_IMPORTS);
+}
+
+export function makeOpfsMainHost(memoryView, files = new Map()) {
+  const opfsHost = makeOpfsSourceHost(memoryView, files);
+
+  return makeHostImports(opfsHost, OPFS_MAIN_IMPORTS);
+}
+
+export function makeOpfsWorkerHost(memoryView) {
+  const opfsHost = makeOpfsSourceHost(memoryView);
+  const workerHost = makeHostImports(opfsHost, OPFS_WORKER_IMPORTS);
+
+  for (const name of WORKER_UNSUPPORTED_FILE_IMPORTS) {
+    workerHost[name] = makeUnsupportedHostImport(
+      name,
+      "file handles are owned by the main thread",
+    );
+  }
+
+  return workerHost;
 }

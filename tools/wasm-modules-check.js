@@ -10,6 +10,7 @@ const {
   extractWasmModules,
   resolveDependencies,
   scanImportNames,
+  scanThreadMarker,
 } = require("./extract-wasm-modules.js");
 
 async function withFixtureWat(source, callback) {
@@ -30,6 +31,22 @@ async function testExtractorFixtures() {
 
   await withFixtureWat("(module)\n", async (fixturePath) => {
     assert.deepEqual(await scanImportNames(fixturePath), []);
+  });
+
+  await withFixtureWat(";; @thread worker\n(module)\n", async (fixturePath) => {
+    assert.equal(await scanThreadMarker(fixturePath), "worker");
+  });
+
+  await withFixtureWat(";; @thread main\n;; @thread worker\n(module)\n", async (fixturePath) => {
+    await assert.rejects(scanThreadMarker(fixturePath), /duplicate @thread marker/);
+  });
+
+  await withFixtureWat(";; @thread render\n(module)\n", async (fixturePath) => {
+    await assert.rejects(scanThreadMarker(fixturePath), /invalid @thread marker render/);
+  });
+
+  await withFixtureWat("(module)\n", async (fixturePath) => {
+    await assert.rejects(scanThreadMarker(fixturePath), /missing @thread marker/);
   });
 
   await withFixtureWat(
@@ -59,6 +76,10 @@ async function testExtractorFixtures() {
   );
 
   const manifest = await extractWasmModules();
+  assert.equal(manifest.modules.app.thread, "main");
+  assert.equal(manifest.modules.index.thread, "worker");
+  assert.equal(manifest.modules.parser.thread, "worker");
+  assert.equal(manifest.modules["std/mem"].thread, "shared");
   assert.deepEqual(manifest.modules.app.dependencies, []);
   assert.deepEqual(manifest.modules.index.dependencies, ["std/mem"]);
   assert.deepEqual(manifest.modules.parser.dependencies, ["std/mem", "std/strtab", "parser_state"]);
@@ -74,9 +95,15 @@ async function main() {
   const manifestUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
   const {
     compileWasmModuleGraph,
+    compileWasmModuleGraphForThread,
+    instantiateWasmModuleForThread,
     instantiateWasmModule,
     wasmModuleGraphIds,
+    wasmModuleGraphIdsForThread,
     wasmModuleIds,
+    wasmModuleIdsForThread,
+    wasmModuleRunsOnThread,
+    wasmModuleThread,
     wasmModuleUrl,
   } = await import(manifestUrl);
 
@@ -92,6 +119,42 @@ async function main() {
     "parser_state",
     "parser",
   ]));
+  assert.equal(wasmModuleThread("app"), "main");
+  assert.equal(wasmModuleThread("parser"), "worker");
+  assert.equal(wasmModuleThread("std/mem"), "shared");
+  assert.equal(wasmModuleRunsOnThread("app", "main"), true);
+  assert.equal(wasmModuleRunsOnThread("app", "worker"), false);
+  assert.equal(wasmModuleRunsOnThread("std/mem", "main"), true);
+  assert.equal(wasmModuleRunsOnThread("std/mem", "worker"), true);
+  assert.deepEqual(new Set(wasmModuleIdsForThread("main")), new Set([
+    "app",
+    "std/alloc",
+    "std/array",
+    "std/assert",
+    "std/hash",
+    "std/mem",
+    "std/pool",
+    "std/ring",
+    "std/strtab",
+  ]));
+  assert.deepEqual(new Set(wasmModuleIdsForThread("worker")), new Set([
+    "index",
+    "parser",
+    "parser_state",
+    "std/alloc",
+    "std/array",
+    "std/assert",
+    "std/hash",
+    "std/mem",
+    "std/pool",
+    "std/ring",
+    "std/strtab",
+  ]));
+  assert.deepEqual(new Set(wasmModuleGraphIdsForThread("parser", "worker")), new Set(parserGraphIds));
+  assert.throws(
+    () => wasmModuleGraphIdsForThread("parser", "main"),
+    /wasm module parser does not run on main/,
+  );
   assert.equal(wasmModuleUrl("std/strtab", "/assets/wasm"), "/assets/wasm/std/strtab.wasm");
 
   const registryModuleIds = wasmModuleIds();
@@ -102,6 +165,30 @@ async function main() {
     },
   });
   assert.deepEqual(new Set(compiledGraph.keys()), new Set(registryModuleIds));
+
+  const workerCompileStartedIds = [];
+  const compiledWorkerGraph = await compileWasmModuleGraphForThread("parser", "worker", {
+    baseUrl: "/assets/wasm",
+    compile(url, moduleId) {
+      workerCompileStartedIds.push(moduleId);
+      assert(wasmModuleIdsForThread("worker").includes(moduleId));
+      return Promise.resolve({ moduleId, url });
+    },
+  });
+  assert.deepEqual(new Set(workerCompileStartedIds), new Set(wasmModuleIdsForThread("worker")));
+  assert.deepEqual(new Set(compiledWorkerGraph.keys()), new Set(wasmModuleIdsForThread("worker")));
+
+  const mainCompileStartedIds = [];
+  const compiledMainGraph = await compileWasmModuleGraphForThread("app", "main", {
+    baseUrl: "/assets/wasm",
+    compile(url, moduleId) {
+      mainCompileStartedIds.push(moduleId);
+      assert(wasmModuleIdsForThread("main").includes(moduleId));
+      return Promise.resolve({ moduleId, url });
+    },
+  });
+  assert.deepEqual(new Set(mainCompileStartedIds), new Set(wasmModuleIdsForThread("main")));
+  assert.deepEqual(new Set(compiledMainGraph.keys()), new Set(wasmModuleIdsForThread("main")));
 
   const compileStartedIds = [];
   const instantiatedIds = [];
@@ -141,6 +228,62 @@ async function main() {
   assert.equal(imports.alloc.moduleId, "std/alloc");
   assert.equal(imports.hash.moduleId, "std/hash");
   assert.equal(imports.strtab.moduleId, "std/strtab");
+
+  const workerInstantiatedIds = [];
+  const workerLoaded = await instantiateWasmModuleForThread(
+    "parser",
+    "worker",
+    { env: { memory: "worker-memory" } },
+    {
+      baseUrl: "/assets/wasm",
+      compile(url, moduleId) {
+        assert(wasmModuleIdsForThread("worker").includes(moduleId));
+        return Promise.resolve({ moduleId, url });
+      },
+      instantiate(module, moduleImports, moduleId) {
+        assert.equal(moduleImports.env.memory, "worker-memory");
+        workerInstantiatedIds.push(moduleId);
+        return Promise.resolve({ moduleId, thread: "worker" });
+      },
+    },
+  );
+  assert.deepEqual(new Set(workerInstantiatedIds), new Set(parserGraphIds));
+  assert.equal(workerLoaded.exports.moduleId, "parser");
+  assert.equal(workerLoaded.imports.mem.thread, "worker");
+
+  const mainLoadedShared = await instantiateWasmModuleForThread(
+    "std/mem",
+    "main",
+    { env: { memory: "main-memory" } },
+    {
+      compile(url, moduleId) {
+        assert(wasmModuleIdsForThread("main").includes(moduleId));
+        return Promise.resolve({ moduleId, url });
+      },
+      instantiate(module, moduleImports, moduleId) {
+        assert.equal(moduleImports.env.memory, "main-memory");
+        return Promise.resolve({ moduleId, thread: "main" });
+      },
+    },
+  );
+  const workerLoadedShared = await instantiateWasmModuleForThread(
+    "std/mem",
+    "worker",
+    { env: { memory: "worker-memory" } },
+    {
+      compile(url, moduleId) {
+        assert(wasmModuleIdsForThread("worker").includes(moduleId));
+        return Promise.resolve({ moduleId, url });
+      },
+      instantiate(module, moduleImports, moduleId) {
+        assert.equal(moduleImports.env.memory, "worker-memory");
+        return Promise.resolve({ moduleId, thread: "worker" });
+      },
+    },
+  );
+  assert.notEqual(mainLoadedShared.exports, workerLoadedShared.exports);
+  assert.equal(mainLoadedShared.exports.thread, "main");
+  assert.equal(workerLoadedShared.exports.thread, "worker");
 
   for (const moduleId of registryModuleIds) {
     const loaded = await instantiateWasmModule(

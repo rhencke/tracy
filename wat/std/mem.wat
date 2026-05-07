@@ -1,6 +1,7 @@
 ;; Generated from abi/layout.json by tools/generate-layout.js.
 ;; Do not edit wat/std/mem.wat by hand.
 (module
+  ;; @thread shared
   (global $WASM_PAGE_SIZE (export "WASM_PAGE_SIZE") i32 (i32.const 0x00010000))
   (global $OPFS_PAGE_SIZE (export "OPFS_PAGE_SIZE") i32 (i32.const 0x00010000))
   (global $MEM_SCRATCH_BASE (export "MEM_SCRATCH_BASE") i32 (i32.const 0x00000000))

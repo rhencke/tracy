@@ -1,4 +1,5 @@
 (module
+  ;; @thread main
   ;; @generated host-imports app:start
   (import "host" "canvas_get_size" (func $canvas_get_size (result i64)))
   (import "host" "canvas_listen_resize" (func $canvas_listen_resize))

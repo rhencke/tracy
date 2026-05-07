@@ -37,7 +37,7 @@ function generatedHeader(kind) {
 }
 
 function renderMemWat() {
-  const lines = ["(module"];
+  const lines = ["(module", "  ;; @thread shared"];
   for (const entry of constantEntries()) {
     lines.push(
       `  (global $${entry.name} (export "${entry.name}") i32 (i32.const ${watValue(entry)}))`,

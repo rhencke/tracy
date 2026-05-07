@@ -1,6 +1,7 @@
 {
   "modules": {
     "app": {
+      "thread": "main",
       "wasmPath": "app.wasm",
       "aliases": [
         "app"
@@ -8,6 +9,7 @@
       "dependencies": []
     },
     "index": {
+      "thread": "worker",
       "wasmPath": "index.wasm",
       "aliases": [
         "index"
@@ -17,6 +19,7 @@
       ]
     },
     "parser": {
+      "thread": "worker",
       "wasmPath": "parser.wasm",
       "aliases": [
         "parser"
@@ -28,6 +31,7 @@
       ]
     },
     "parser_state": {
+      "thread": "worker",
       "wasmPath": "parser_state.wasm",
       "aliases": [
         "parser_state"
@@ -35,6 +39,7 @@
       "dependencies": []
     },
     "std/alloc": {
+      "thread": "shared",
       "wasmPath": "std/alloc.wasm",
       "aliases": [
         "alloc",
@@ -44,6 +49,7 @@
       "dependencies": []
     },
     "std/array": {
+      "thread": "shared",
       "wasmPath": "std/array.wasm",
       "aliases": [
         "array",
@@ -55,6 +61,7 @@
       ]
     },
     "std/assert": {
+      "thread": "shared",
       "wasmPath": "std/assert.wasm",
       "aliases": [
         "assert",
@@ -64,6 +71,7 @@
       "dependencies": []
     },
     "std/hash": {
+      "thread": "shared",
       "wasmPath": "std/hash.wasm",
       "aliases": [
         "hash",
@@ -75,6 +83,7 @@
       ]
     },
     "std/mem": {
+      "thread": "shared",
       "wasmPath": "std/mem.wasm",
       "aliases": [
         "mem",
@@ -84,6 +93,7 @@
       "dependencies": []
     },
     "std/pool": {
+      "thread": "shared",
       "wasmPath": "std/pool.wasm",
       "aliases": [
         "pool",
@@ -95,6 +105,7 @@
       ]
     },
     "std/ring": {
+      "thread": "shared",
       "wasmPath": "std/ring.wasm",
       "aliases": [
         "ring",
@@ -106,6 +117,7 @@
       ]
     },
     "std/strtab": {
+      "thread": "shared",
       "wasmPath": "std/strtab.wasm",
       "aliases": [
         "strtab",
