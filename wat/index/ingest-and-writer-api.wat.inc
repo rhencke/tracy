@@ -395,6 +395,8 @@
     global.set $index_writer_bucket_end
     i32.const 0
     global.set $index_writer_mode
+    i32.const 0
+    global.set $index_writer_partial_commit
     call $index_tracks_reset
     call $index_page_catalog_reset
     call $index_writer_prepare_page
@@ -724,6 +726,43 @@
 
     call $index_writer_commit_page
     local.tee $status
+    i32.const 0
+    global.set $index_writer_partial_commit
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.ne
+    if
+      local.get $status
+      return
+    end
+
+    global.get $index_writer_file
+    call $opfs_index_flush
+    i32.const 0
+    i32.ne
+    if
+      global.get $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED
+      return
+    end
+
+    global.get $INDEX_WRITER_STATUS_OK
+  )
+
+  (func (export "index_writer_publish_partial") (result i32)
+    (local $status i32)
+
+    global.get $index_writer_file
+    i32.eqz
+    if
+      global.get $INDEX_WRITER_STATUS_NOT_INITIALIZED
+      return
+    end
+
+    i32.const 1
+    global.set $index_writer_partial_commit
+    call $index_writer_commit_page
+    local.tee $status
+    i32.const 0
+    global.set $index_writer_partial_commit
     global.get $INDEX_WRITER_STATUS_OK
     i32.ne
     if

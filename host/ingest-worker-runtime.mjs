@@ -112,6 +112,24 @@ function postProgress(state, phase) {
   });
 }
 
+function drainExtractedEvents({ index, parser }) {
+  let extractedEvents = 0;
+
+  while (true) {
+    const eventPtr = parser.extractor_next();
+    if (eventPtr === -1) {
+      return extractedEvents;
+    }
+
+    const appendStatus = index.index_add_event(eventPtr);
+    if (appendStatus !== globalValue(index.INDEX_INGEST_STATUS_OK)) {
+      throw new Error(`index ingest failed with status ${appendStatus}`);
+    }
+
+    extractedEvents += 1;
+  }
+}
+
 async function instantiateIngestModules(options, memory, host) {
   const instantiate =
     options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
@@ -222,8 +240,10 @@ export async function runWorkerIngest(data, options = {}) {
 
   parserState.parser_state_init(statePtr, sourceId);
   index.index_writer_init(indexId, writerPagePtr, dictEpoch);
+  parser.extractor_init(data.tokenOutputPtr ?? TOKEN_OUTPUT_BASE);
   postProgress(workerState, "parse");
 
+  let extractedEvents = 0;
   while (true) {
     const status = parser.parser_parse_with_budget(
       statePtr,
@@ -231,33 +251,25 @@ export async function runWorkerIngest(data, options = {}) {
       byteBudget,
     );
 
-    postCoveredRangeIfDue(workerState);
+    extractedEvents += drainExtractedEvents({ index, parser });
+
     if (status === globalValue(parserState.PARSER_STATUS_DONE)) {
+      postCoveredRangeIfDue(workerState);
       break;
     }
     if (status !== globalValue(parserState.PARSER_STATUS_YIELDED)) {
       throw new Error(`parser failed with status ${status}`);
     }
+
+    const publishStatus = index.index_writer_publish_partial?.();
+    if (publishStatus !== globalValue(index.INDEX_WRITER_STATUS_OK)) {
+      throw new Error(`index partial publish failed with status ${publishStatus}`);
+    }
+    postCoveredRangeIfDue(workerState);
   }
 
   postCoveredRangeIfDue(workerState, true);
   postProgress(workerState, "index");
-  parser.extractor_init(data.tokenOutputPtr ?? TOKEN_OUTPUT_BASE);
-
-  let extractedEvents = 0;
-  while (true) {
-    const eventPtr = parser.extractor_next();
-    if (eventPtr === -1) {
-      break;
-    }
-
-    const appendStatus = index.index_add_event(eventPtr);
-    if (appendStatus !== globalValue(index.INDEX_INGEST_STATUS_OK)) {
-      throw new Error(`index ingest failed with status ${appendStatus}`);
-    }
-
-    extractedEvents += 1;
-  }
 
   const flushStatus = index.index_writer_flush();
   if (flushStatus !== globalValue(index.INDEX_WRITER_STATUS_OK)) {

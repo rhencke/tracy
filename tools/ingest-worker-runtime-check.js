@@ -17,6 +17,7 @@ function makeParserExports(memory, parserState) {
   const parseEventCounts = [1, 2, 3];
   let parseCalls = 0;
   let nextEvent = 0;
+  let extractorInits = 0;
 
   function writeParserState(statePtr, index) {
     const view = new DataView(memory.buffer);
@@ -35,9 +36,12 @@ function makeParserExports(memory, parserState) {
   return {
     extractor_init(ptr) {
       assert.equal(ptr, 7000);
+      assert.equal(parseCalls, 0);
+      extractorInits += 1;
     },
     extractor_next() {
-      if (nextEvent >= 3) {
+      assert.equal(extractorInits, 1);
+      if (nextEvent >= parseCalls) {
         return -1;
       }
 
@@ -58,6 +62,7 @@ function makeParserExports(memory, parserState) {
 
 function makeIndexExports() {
   const events = [];
+  const partialPublishes = [];
 
   return {
     INDEX_INGEST_STATUS_OK: 0,
@@ -81,6 +86,11 @@ function makeIndexExports() {
       assert.equal(writerPagePtr, 6000);
       assert.equal(dictEpoch, 5);
     },
+    index_writer_publish_partial() {
+      partialPublishes.push(events.length);
+      return 0;
+    },
+    partialPublishes,
   };
 }
 
@@ -100,6 +110,7 @@ async function checkWorkerRuntime() {
   };
   const instantiated = [];
   const hostCalls = [];
+  let indexExports;
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
       hostCalls.push(["source", decodeString(memory, namePtr, nameLen)]);
@@ -145,8 +156,9 @@ async function checkWorkerRuntime() {
           };
         }
         if (id === "index") {
+          indexExports = makeIndexExports();
           return {
-            exports: makeIndexExports(),
+            exports: indexExports,
             imports: {},
           };
         }
@@ -169,6 +181,7 @@ async function checkWorkerRuntime() {
   ]);
   assert.equal(result.committedEvents, 3);
   assert.equal(result.extractedEvents, 3);
+  assert.deepEqual(indexExports.partialPublishes, [1, 2]);
 
   const coveredRangeMessages = messages.filter(
     (message) => message.type === runtime.INGEST_WORKER_MESSAGE.COVERED_RANGE,

@@ -131,6 +131,7 @@
   (global $index_writer_bucket_end (mut i32) (i32.const 0))
   (global $index_writer_mode (mut i32) (i32.const 0))
   (global $index_writer_page_track (mut i32) (i32.const -1))
+  (global $index_writer_partial_commit (mut i32) (i32.const 0))
   (global $index_slice_writer_start_len (mut i32) (i32.const 0))
   (global $index_slice_writer_dur_len (mut i32) (i32.const 0))
   (global $index_slice_writer_color_len (mut i32) (i32.const 0))

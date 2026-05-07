@@ -646,6 +646,11 @@
         i32.const 0
       end
     end
+    global.get $index_writer_partial_commit
+    if
+      global.get $INDEX_DECODE_HINT_PARTIAL
+      i32.or
+    end
     global.get $index_writer_dict_epoch
     global.get $index_writer_next_page_id
     i64.extend_i32_u

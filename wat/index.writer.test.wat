@@ -147,6 +147,8 @@
     (func $index_add_event (param i32) (result i32)))
   (import "index" "index_writer_flush"
     (func $index_writer_flush (result i32)))
+  (import "index" "index_writer_publish_partial"
+    (func $index_writer_publish_partial (result i32)))
   (import "index" "index_writer_pending_rows"
     (func $index_writer_pending_rows (result i32)))
   (import "index" "index_writer_committed_pages"
@@ -1213,6 +1215,143 @@
     call $index_writer_covered_range_end
     i32.const 37
     i32.const 440
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_writer_publish_partial_marks_yield_pages")
+    (local $page i32)
+
+    call $grow_to_index_cache
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 24
+    call $index_writer_init
+
+    i32.const 88
+    i32.const 201
+    f64.const 10
+    f64.const 5
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 441
+    call $assert_eq_i32
+
+    call $index_writer_publish_partial
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 442
+    call $assert_eq_i32
+
+    call $index_writer_pending_rows
+    i32.const 0
+    i32.const 443
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 1
+    i32.const 444
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_valid
+    i32.const 1
+    i32.const 445
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_end
+    i32.const 15
+    i32.const 446
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 202
+    f64.const 30
+    f64.const 7
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 447
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 448
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 2
+    i32.const 449
+    call $assert_eq_i32
+
+    call $index_writer_committed_events
+    i32.const 2
+    i32.const 450
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_end
+    i32.const 37
+    i32.const 451
+    call $assert_eq_i32
+
+    i32.const 21
+    call $index_reader_init
+
+    i32.const 0
+    i32.const 0
+    call $read_page
+    local.set $page
+
+    local.get $page
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_PARTIAL
+    i32.and
+    global.get $INDEX_DECODE_HINT_PARTIAL
+    i32.const 452
+    call $assert_eq_i32
+
+    local.get $page
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.and
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.const 453
+    call $assert_eq_i32
+
+    i32.const 1
+    i32.const 0
+    call $read_page
+    local.set $page
+
+    local.get $page
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_PARTIAL
+    i32.and
+    i32.const 0
+    i32.const 454
+    call $assert_eq_i32
+
+    local.get $page
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.and
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.const 455
     call $assert_eq_i32
   )
 
