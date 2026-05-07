@@ -21,8 +21,6 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
   globalThis.addEventListener?.("load", registerAfterReady);
 }
 
-globalThis.performance?.mark?.("tracy.core.ready");
-
 const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
   import("./host/shim.mjs"),
   import("./host/runtime.mjs"),

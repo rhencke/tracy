@@ -166,6 +166,7 @@ async function checkRuntimeOrchestratesWorker() {
       start: "tracy.main.start",
       end: "tracy.main.end",
     },
+    { kind: "mark", name: "tracy.core.ready" },
     { kind: "mark", name: "tracy.app.ready" },
     {
       kind: "measure",

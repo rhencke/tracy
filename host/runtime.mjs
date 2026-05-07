@@ -17,6 +17,7 @@ const PROGRESSIVE_TRACE_RENDERER_URL = "./progressive-trace-renderer.mjs";
 const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
   bootstrapStart: "tracy.bootstrap.start",
+  coreReady: "tracy.core.ready",
   tracyMainEnd: "tracy.main.end",
   tracyMainStart: "tracy.main.start",
   wasmInstantiateEnd: "tracy.wasm.instantiate.end",
@@ -586,6 +587,7 @@ async function loadApp(memory, host, options = {}) {
     PERFORMANCE_MARKS.tracyMainEnd,
     options,
   );
+  markPerformance(PERFORMANCE_MARKS.coreReady, options);
   markPerformance(PERFORMANCE_MARKS.appReady, options);
   measurePerformance(
     PERFORMANCE_MEASURES.appLoad,

@@ -753,15 +753,26 @@ function runSelfTest() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
+  const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf('performance?.mark?.("tracy.bootstrap.start")');
-  const coreReadyOffset = bootstrap.indexOf('performance?.mark?.("tracy.core.ready")');
+  const bootstrapCoreReadyOffset = bootstrap.indexOf('performance?.mark?.("tracy.core.ready")');
+  const runtimeCoreReadyOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.coreReady",
+  );
+  const tracyMainOffset = runtime.indexOf("tracy_main();");
+  const appReadyOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.appReady",
+  );
 
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
   assert.notEqual(bootstrapStartOffset, -1);
-  assert.notEqual(coreReadyOffset, -1);
-  assert.ok(bootstrapStartOffset < coreReadyOffset);
-  assert.ok(coreReadyOffset < bootstrap.indexOf('import("./host/runtime.mjs")'));
+  assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.notEqual(runtimeCoreReadyOffset, -1);
+  assert.notEqual(tracyMainOffset, -1);
+  assert.notEqual(appReadyOffset, -1);
+  assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
+  assert.ok(runtimeCoreReadyOffset < appReadyOffset);
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
   assert.match(
     makefile,
