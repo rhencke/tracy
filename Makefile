@@ -106,7 +106,7 @@ app-load-bench: dist tools/app-load-bench.js
 	node tools/app-load-bench.js
 
 lighthouse-ci: dist .lighthouserc.cjs
-	npx --yes @lhci/cli@0.15.1 autorun --config=.lighthouserc.cjs
+	npm run lhci:autorun
 
 generated: $(GENERATED_FILES)
 

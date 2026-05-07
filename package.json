@@ -7,6 +7,9 @@
     "build:cov": "make wasm-cov",
     "bench:app-load": "node tools/app-load-bench.js",
     "lhci": "make lighthouse-ci",
+    "lhci:autorun": "lhci autorun --config=.lighthouserc.cjs",
+    "playwright:install": "playwright install --with-deps",
+    "playwright:test": "playwright test",
     "test": "make test",
     "test:layout": "node tools/generate-layout.js --check",
     "test:host-abi": "node tools/generate-host-abi.js --check",
@@ -34,5 +37,9 @@
     "test:coverage:strict": "node tools/coverage-run.js --check dist/wasm-cov",
     "coverage": "make coverage",
     "coverage:strict": "make coverage-strict"
+  },
+  "devDependencies": {
+    "@lhci/cli": "0.15.1",
+    "@playwright/test": "1.59.1"
   }
 }
