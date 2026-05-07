@@ -150,6 +150,7 @@ async function checkRuntimeOrchestratesWorker() {
     { hostImport: host.opfs_index_create, id: "app", memory, thread: "main" },
   ]);
   assert.deepEqual(performanceEntries, [
+    { kind: "mark", name: "tracy.core.start" },
     { kind: "mark", name: "tracy.wasm.instantiate.start" },
     { kind: "mark", name: "tracy.wasm.instantiate.end" },
     {

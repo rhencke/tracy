@@ -19,7 +19,7 @@ const FAST_3G = Object.freeze({
 });
 const BUDGETS = Object.freeze({
   cold: Object.freeze({
-    coreTtiMs: 1000,
+    coreTtiMs: 250,
     fcpMs: 1100,
     fullLoadMs: 1000,
     transferBytes: 75000,
@@ -601,12 +601,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? 0;
-      const bootstrapStart = performance.getEntriesByName("tracy.bootstrap.start")[0]?.startTime;
+      const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
       const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
-        coreTtiMs: coreReady - bootstrapStart,
+        coreTtiMs: coreReady - coreStart,
         fcpMs: fcp,
         fullLoadMs: appLoad,
         wasmInstantiateMs: wasm,
@@ -676,7 +676,7 @@ async function runBench(options) {
 function runSelfTest() {
   assert.deepEqual(BUDGETS, {
     cold: {
-      coreTtiMs: 1000,
+      coreTtiMs: 250,
       fcpMs: 1100,
       fullLoadMs: 1000,
       transferBytes: 75000,
@@ -756,6 +756,9 @@ function runSelfTest() {
   const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf('performance?.mark?.("tracy.bootstrap.start")');
   const bootstrapCoreReadyOffset = bootstrap.indexOf('performance?.mark?.("tracy.core.ready")');
+  const runtimeCoreStartOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.coreStart",
+  );
   const runtimeCoreReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreReady",
   );
@@ -768,9 +771,11 @@ function runSelfTest() {
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
   assert.notEqual(bootstrapStartOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeCoreReadyOffset, -1);
   assert.notEqual(tracyMainOffset, -1);
   assert.notEqual(appReadyOffset, -1);
+  assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
   assert.ok(runtimeCoreReadyOffset < appReadyOffset);
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);

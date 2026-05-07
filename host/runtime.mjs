@@ -18,6 +18,7 @@ const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
   bootstrapStart: "tracy.bootstrap.start",
   coreReady: "tracy.core.ready",
+  coreStart: "tracy.core.start",
   tracyMainEnd: "tracy.main.end",
   tracyMainStart: "tracy.main.start",
   wasmInstantiateEnd: "tracy.wasm.instantiate.end",
@@ -526,6 +527,8 @@ function shouldLoadProgressiveTraceRenderer(ingestWorker) {
 }
 
 async function loadApp(memory, host, options = {}) {
+  markPerformance(PERFORMANCE_MARKS.coreStart, options);
+
   if (!supportsJSPI()) {
     showError(
       "tracy needs a browser with WebAssembly JavaScript Promise Integration (JSPI) enabled.",
