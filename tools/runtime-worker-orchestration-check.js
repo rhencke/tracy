@@ -629,10 +629,11 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
       return 2;
     },
   };
+  let workerState = "running";
   const ingestWorker = {
     indexReader: reader,
     status() {
-      return { coveredRange, state: "running" };
+      return { coveredRange, state: workerState };
     },
   };
   const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
@@ -682,6 +683,36 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
     error: null,
     rows: 2,
     unknownRange: { pending: true, start: 180 },
+    userInteracted: false,
+    viewport: { end: 180, start: 100, valid: true },
+  });
+
+  workerState = "complete";
+  operations.length = 0;
+  renderer.draw(125);
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "fillRect" &&
+        operation.fillStyle === "rgba(92, 109, 130, 0.58)",
+    ),
+    false,
+    "completed ingest should stop drawing partial rows with unfinished styling",
+  );
+  assert.equal(
+    operations.some((operation) => operation.op === "stroke"),
+    false,
+    "completed ingest should stop drawing partial hatch overlays",
+  );
+  assert.equal(
+    operations.some((operation) => operation.op === "fillRect" && operation.fillStyle === "#6b7280"),
+    true,
+    "completed ingest should draw formerly partial rows with their resolved color",
+  );
+  assert.deepEqual(renderer.status(), {
+    error: null,
+    rows: 2,
+    unknownRange: null,
     userInteracted: false,
     viewport: { end: 180, start: 100, valid: true },
   });

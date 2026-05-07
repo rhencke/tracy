@@ -164,6 +164,10 @@ function drawUnknownRangeAffordance(context, width, bandHeight, options) {
   context.restore?.();
 }
 
+function isIngestActive(workerStatus) {
+  return workerStatus?.state !== "complete" && workerStatus?.state !== "idle";
+}
+
 function drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStatus, options) {
   const width = canvasDimension(canvas, "width", 800);
   const height = canvasDimension(canvas, "height", 400);
@@ -173,6 +177,7 @@ function drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStat
   const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0);
   const bandHeight = Math.min(height, top + (maxDepth + 1) * (laneHeight + laneGap) + 8);
   const span = Math.max(1, viewport.end - viewport.start);
+  const ingestActive = isIngestActive(workerStatus);
 
   context.save?.();
   context.clearRect?.(0, 0, width, bandHeight);
@@ -185,22 +190,19 @@ function drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStat
     const endX = Math.min(width, ((sliceEnd - viewport.start) / span) * width);
     const sliceWidth = Math.max(1, endX - x);
     const y = top + row.depth * (laneHeight + laneGap);
+    const showPartial = row.partial && ingestActive;
 
-    context.fillStyle = row.partial
+    context.fillStyle = showPartial
       ? (options.partialFillStyle ?? "rgba(92, 109, 130, 0.58)")
       : colorForSlice(row.color);
     context.fillRect?.(x, y, sliceWidth, laneHeight);
 
-    if (row.partial) {
+    if (showPartial) {
       drawPartialHatch(context, x, y, sliceWidth, laneHeight, options.hatchSpacing ?? 6);
     }
   }
 
-  if (
-    coveredRange.end <= viewport.end &&
-    workerStatus?.state !== "complete" &&
-    workerStatus?.state !== "idle"
-  ) {
+  if (coveredRange.end <= viewport.end && ingestActive) {
     drawUnknownRangeAffordance(context, width, bandHeight, options);
   }
 
@@ -376,10 +378,9 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
 
       state.error = null;
       state.lastRows = rows;
-      state.unknownRange =
-        workerStatus?.state !== "complete" && workerStatus?.state !== "idle"
-          ? { pending: true, start: coveredRange.end }
-          : null;
+      state.unknownRange = isIngestActive(workerStatus)
+        ? { pending: true, start: coveredRange.end }
+        : null;
       drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStatus, options);
     } catch (error) {
       state.error = errorMessage(error);
