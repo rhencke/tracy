@@ -67,6 +67,166 @@ class FakeWorker {
   }
 }
 
+function decodeString(memory, ptr, len) {
+  return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
+}
+
+function makeParserState() {
+  return {
+    PARSER_STATE_EVENT_COUNT_OFFSET: 8,
+    PARSER_STATE_FILE_OFFSET_OFFSET: 0,
+    PARSER_STATUS_DONE: 2,
+    PARSER_STATUS_YIELDED: 1,
+    parser_state_init(statePtr, sourceId) {
+      assert.equal(sourceId, 12);
+      const view = new DataView(this.memory.buffer);
+      view.setBigUint64(statePtr + this.PARSER_STATE_FILE_OFFSET_OFFSET, 0n, true);
+      view.setInt32(statePtr + this.PARSER_STATE_EVENT_COUNT_OFFSET, 0, true);
+    },
+  };
+}
+
+function makeParserExports(memory, parserState) {
+  const parseOffsets = [TEN_MB / 10, TEN_MB, 2 * TEN_MB];
+  let parseCalls = 0;
+  let extracted = 0;
+  parserState.memory = memory;
+
+  return {
+    extractor_init() {},
+    extractor_next() {
+      if (extracted >= parseCalls) {
+        return -1;
+      }
+
+      extracted += 1;
+      return 8192 + extracted * 32;
+    },
+    parser_parse_with_budget(statePtr) {
+      const view = new DataView(memory.buffer);
+
+      view.setBigUint64(
+        statePtr + parserState.PARSER_STATE_FILE_OFFSET_OFFSET,
+        BigInt(parseOffsets[parseCalls]),
+        true,
+      );
+      view.setInt32(
+        statePtr + parserState.PARSER_STATE_EVENT_COUNT_OFFSET,
+        parseCalls + 1,
+        true,
+      );
+      parseCalls += 1;
+
+      return parseCalls < parseOffsets.length
+        ? parserState.PARSER_STATUS_YIELDED
+        : parserState.PARSER_STATUS_DONE;
+    },
+  };
+}
+
+function makeSharedIndexBacking(memory) {
+  const backing = {
+    createdNames: [],
+    events: [],
+    openedNames: [],
+    queryCalls: [],
+    readerIndexId: null,
+    writerIndexId: null,
+  };
+
+  function coveredRange() {
+    if (backing.events.length === 0) {
+      return null;
+    }
+
+    return {
+      start: 100,
+      end: backing.events.length >= 3 ? 1000 : 100 + backing.events.length * 10,
+    };
+  }
+
+  function writeQueryRow(outPtr, trackId, tsMin) {
+    const range = coveredRange();
+    const view = new DataView(memory.buffer);
+
+    view.setUint32(outPtr, Math.max(range.start, Math.floor(tsMin) + trackId * 8), true);
+    view.setUint32(outPtr + 4, trackId === 0 ? 8 : 14, true);
+    view.setUint32(outPtr + 12, trackId, true);
+    view.setUint32(outPtr + 20, trackId === 0 ? 0x2d74da : 0x6b7280, true);
+    view.setUint32(outPtr + 24, trackId === 1 ? 1 : 0, true);
+  }
+
+  const exports = {
+    INDEX_INGEST_STATUS_OK: 0,
+    INDEX_QUERY_RESULT_BYTES: 28,
+    INDEX_WRITER_STATUS_OK: 0,
+    index_add_event(eventPtr) {
+      backing.events.push(eventPtr);
+      return 0;
+    },
+    index_query_range(trackId, tsMin, tsMax, outPtr) {
+      const range = coveredRange();
+
+      assert.notEqual(backing.readerIndexId, null, "main reader should be opened before queries");
+      assert.notEqual(backing.writerIndexId, null, "worker writer should create the index first");
+      assert.ok(range !== null, "query should wait for an indexed covered range");
+      assert.ok(tsMin >= range.start, "queries should stay inside covered time");
+      assert.ok(tsMax <= range.end, "queries should not reach unknown time");
+      backing.queryCalls.push({ outPtr, trackId, tsMax, tsMin });
+      writeQueryRow(outPtr, trackId, tsMin);
+      return 1;
+    },
+    index_reader_configure_cache(slotCount) {
+      return slotCount;
+    },
+    index_reader_covered_range_end() {
+      return coveredRange()?.end ?? 0;
+    },
+    index_reader_covered_range_start() {
+      return coveredRange()?.start ?? 0;
+    },
+    index_reader_covered_range_valid() {
+      return coveredRange() === null ? 0 : 1;
+    },
+    index_reader_init(indexId) {
+      assert.equal(indexId, 22);
+      backing.readerIndexId = indexId;
+    },
+    index_track_count() {
+      return 2;
+    },
+    index_writer_committed_events() {
+      return backing.events.length;
+    },
+    index_writer_committed_pages() {
+      return backing.events.length === 0 ? 0 : 1;
+    },
+    index_writer_covered_range_end() {
+      return coveredRange()?.end ?? 0;
+    },
+    index_writer_covered_range_start() {
+      return coveredRange()?.start ?? 0;
+    },
+    index_writer_covered_range_valid() {
+      return coveredRange() === null ? 0 : 1;
+    },
+    index_writer_flush() {
+      assert.equal(backing.events.length, 3);
+      return 0;
+    },
+    index_writer_init(indexId) {
+      assert.equal(indexId, 22);
+      backing.writerIndexId = indexId;
+    },
+    index_writer_publish_partial() {
+      assert.ok(backing.events.length > 0);
+      return 0;
+    },
+  };
+
+  return { backing, exports };
+}
+
 function makeCanvasHarness() {
   const listeners = new Map();
   const operations = [];
@@ -153,61 +313,22 @@ function makeCanvasHarness() {
   };
 }
 
-function makeIndexReader(memory, coveredRangeRef) {
-  const openCalls = [];
-  const queryCalls = [];
-  const reader = {
-    coveredRange() {
-      return coveredRangeRef.current ?? { end: 0, start: 0, valid: false };
-    },
-    open(indexName) {
-      openCalls.push(indexName);
-      reader.state = "ready";
-      return Promise.resolve(true);
-    },
-    queryRange(trackId, tsMin, tsMax, outPtr) {
-      const coveredRange = coveredRangeRef.current;
-
-      assert.equal(reader.state, "ready");
-      assert.equal(coveredRange?.valid, true);
-      assert.ok(tsMin >= coveredRange.start, "queries should stay inside covered time");
-      assert.ok(tsMax <= coveredRange.end, "queries should not reach unknown time");
-      queryCalls.push({ outPtr, trackId, tsMax, tsMin });
-
-      const view = new DataView(memory.buffer);
-      view.setUint32(outPtr, Math.max(coveredRange.start, Math.floor(tsMin) + trackId * 8), true);
-      view.setUint32(outPtr + 4, trackId === 0 ? 8 : 14, true);
-      view.setUint32(outPtr + 12, trackId, true);
-      view.setUint32(outPtr + 20, trackId === 0 ? 0x2d74da : 0x6b7280, true);
-      view.setUint32(outPtr + 24, trackId === 1 ? 1 : 0, true);
-      return 1;
-    },
-    state: "idle",
-    status() {
-      return { state: reader.state };
-    },
-    trackCount() {
-      return 2;
-    },
-  };
-
-  return { openCalls, queryCalls, reader };
-}
-
 async function flushMicrotasks() {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
 }
 
 async function checkInteractiveIngestGate() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const ingestRuntime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
   const canvasHarness = makeCanvasHarness();
   const { frames } = installBrowserHarness(canvasHarness.canvas);
-  const coveredRangeRef = { current: null };
-  const { openCalls, queryCalls, reader } = makeIndexReader(memory, coveredRangeRef);
+  const { backing: indexBacking, exports: indexExports } = makeSharedIndexBacking(memory);
+  const parserState = makeParserState();
   const sourceName = "sources/throttled-100mb.json";
   const sourceNameBytes = new TextEncoder().encode(sourceName);
   const fileSelectionCallbacks = [];
@@ -215,6 +336,7 @@ async function checkInteractiveIngestGate() {
   const ticks = [];
   const importCalls = [];
   let rendererInstance = null;
+  const hostCalls = [];
 
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
@@ -231,13 +353,88 @@ async function checkInteractiveIngestGate() {
       new Uint8Array(memory.buffer, destPtr, destLen).set(sourceNameBytes);
       return sourceNameBytes.byteLength;
     },
-    opfs_index_create() {
-      return 0;
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
+      const name = decodeString(memory, namePtr, nameLen);
+
+      assert.equal(name, sourceName);
+      hostCalls.push(["source-open", name]);
+      return Promise.resolve(12);
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
+      assert.equal(sourceId, 12);
+      return HUNDRED_MB;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
+      const name = decodeString(memory, namePtr, nameLen);
+
+      hostCalls.push(["index-create", name]);
+      indexBacking.createdNames.push(name);
+      return Promise.resolve(22);
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
+      const name = decodeString(memory, namePtr, nameLen);
+
+      hostCalls.push(["index-open", name]);
+      indexBacking.openedNames.push(name);
+      return Promise.resolve(22);
     },
     setFileSelectedCallback(callback) {
       fileSelectionCallbacks.push(callback);
     },
   };
+
+  class RunningIngestWorker extends FakeWorker {
+    constructor(url, options) {
+      super(url, options);
+      this.handler = ingestRuntime.createIngestWorkerMessageHandler({
+        hostFactory: () => host,
+        instantiateWasmModuleForThread: async (id, thread, imports) => {
+          assert.equal(thread, "worker");
+          assert.equal(imports.env.memory, memory);
+          if (id === "parser") {
+            return {
+              exports: makeParserExports(memory, parserState),
+              imports: {
+                alloc: {
+                  bump_init() {},
+                },
+                mem: {
+                  MEM_HEAP_BASE: 1024,
+                  MEM_STACK_BASE: 2048,
+                },
+                parser_state: parserState,
+              },
+            };
+          }
+          if (id === "index") {
+            return { exports: indexExports, imports: {} };
+          }
+
+          throw new Error(`unexpected worker module ${id}`);
+        },
+        memoryFactory: () => memory,
+        now: nextWorkerTime,
+        postMessage: (message) => {
+          if (message?.type === ingestRuntime.INGEST_WORKER_MESSAGE.COMPLETE) {
+            this.pendingComplete = message;
+            return;
+          }
+
+          this.emit("message", message);
+        },
+      });
+    }
+
+    postMessage(message) {
+      super.postMessage(message);
+      this.handler({ data: message }).catch((error) => {
+        this.emit("message", {
+          type: ingestRuntime.INGEST_WORKER_MESSAGE.ERROR,
+          message: error.message,
+        });
+      });
+    }
+  }
 
   const controller = runtime.runApp(memory, host, {
     document: globalThis.document,
@@ -260,7 +457,10 @@ async function checkInteractiveIngestGate() {
         },
       };
     },
-    indexReader: reader,
+    instantiateWasmModule: async (id) => {
+      assert.equal(id, "index");
+      return { exports: indexExports, imports: {} };
+    },
     instantiateWasmModuleForThread: async () => ({
       exports: {
         tracy_main() {
@@ -272,7 +472,7 @@ async function checkInteractiveIngestGate() {
       },
     }),
     worker: {
-      Worker: FakeWorker,
+      Worker: RunningIngestWorker,
       onWorkerStatus(status, message) {
         workerStatuses.push({ message, status });
       },
@@ -292,6 +492,7 @@ async function checkInteractiveIngestGate() {
     handle: 77,
   });
   await flushMicrotasks();
+  await flushMicrotasks();
 
   assert.deepEqual(controller.worker.posted, [
     {
@@ -301,26 +502,15 @@ async function checkInteractiveIngestGate() {
       type: "start",
     },
   ]);
-
-  emitProgress(controller.worker, {
-    committedPages: 1,
-    etaSeconds: null,
-    fileOffset: TEN_MB / 10,
-    indexedEvents: 2,
-    parsedEvents: 3,
-    throughputBytesPerSecond: 0,
-    totalBytes: HUNDRED_MB,
-  });
-  coveredRangeRef.current = { end: 120, start: 100, valid: true };
-  controller.worker.emit("message", {
-    type: "covered_range",
-    ...coveredRangeRef.current,
-  });
-  await flushMicrotasks();
+  assert.deepEqual(hostCalls.slice(0, 2), [
+    ["source-open", sourceName],
+    ["index-create", "indexes/throttled-100mb.json.idx"],
+  ]);
+  assert.deepEqual(indexBacking.createdNames, ["indexes/throttled-100mb.json.idx"]);
 
   await runFrame(frames, canvasHarness, 10);
   assert.equal(importCalls.length, 1);
-  assert.deepEqual(openCalls, ["indexes/throttled-100mb.json.idx"]);
+  assert.deepEqual(indexBacking.openedNames, ["indexes/throttled-100mb.json.idx"]);
 
   await flushMicrotasks();
   await runFrame(frames, canvasHarness, 16);
@@ -329,27 +519,12 @@ async function checkInteractiveIngestGate() {
       canvasHarness.firstTraceDrawAt() <= 100,
     "first indexed events should become visible within 100 ms of file pick",
   );
-  assert.equal(queryCalls.length > 0, true);
+  assert.equal(indexBacking.queryCalls.length > 0, true);
 
-  emitProgress(controller.worker, {
-    committedPages: 4,
-    etaSeconds: null,
-    fileOffset: TEN_MB,
-    indexedEvents: 10,
-    parsedEvents: 12,
-    throughputBytesPerSecond: TEN_MB,
-    totalBytes: HUNDRED_MB,
-  });
-  coveredRangeRef.current = { end: 1000, start: 100, valid: true };
-  controller.worker.emit("message", {
-    type: "covered_range",
-    ...coveredRangeRef.current,
-  });
-  await flushMicrotasks();
   await runFrame(frames, canvasHarness, 32);
 
   assert.equal(controller.status().coveredRange.end, 1000);
-  assert.equal(queryCalls.at(-1).tsMax <= 1000, true);
+  assert.equal(indexBacking.queryCalls.at(-1).tsMax <= 1000, true);
   assert.equal(rendererInstance.status().unknownRange.pending, true);
   assert.equal(
     canvasHarness.operations.some(
@@ -378,8 +553,8 @@ async function checkInteractiveIngestGate() {
   await runFrame(frames, canvasHarness, 48);
   const zoomedViewport = rendererInstance.status().viewport;
   assert.equal(rendererInstance.status().userInteracted, true);
-  assert.ok(zoomedViewport.start >= coveredRangeRef.current.start);
-  assert.ok(zoomedViewport.end <= coveredRangeRef.current.end);
+  assert.ok(zoomedViewport.start >= controller.status().coveredRange.start);
+  assert.ok(zoomedViewport.end <= controller.status().coveredRange.end);
 
   canvasHarness.listeners.get("pointerdown")({
     button: 0,
@@ -394,30 +569,22 @@ async function checkInteractiveIngestGate() {
   });
   canvasHarness.listeners.get("pointerup")({ pointerId: 1 });
   await runFrame(frames, canvasHarness, 64);
-  assert.equal(rendererInstance.status().viewport.end, coveredRangeRef.current.end);
-  assert.ok(queryCalls.at(-1).tsMax <= coveredRangeRef.current.end);
+  assert.equal(rendererInstance.status().viewport.end, controller.status().coveredRange.end);
+  assert.ok(indexBacking.queryCalls.at(-1).tsMax <= controller.status().coveredRange.end);
 
-  emitProgress(controller.worker, {
-    committedPages: 20,
-    etaSeconds: 8,
-    fileOffset: 2 * TEN_MB,
-    indexedEvents: 40,
-    parsedEvents: 44,
-    throughputBytesPerSecond: TEN_MB,
-    totalBytes: HUNDRED_MB,
-  });
   await runFrame(frames, canvasHarness, 80);
-  assert.equal(controller.status().progress.etaSeconds, 8);
+  assert.equal(controller.status().progress.fileOffset, 2 * TEN_MB);
+  const progressStatuses = workerStatuses.filter(
+    (entry) => entry.message?.type === "progress",
+  );
   assert.equal(
-    workerStatuses
-      .filter((entry) => entry.message?.type === "progress")
-      .some((entry) => entry.status.progress?.etaSeconds === null),
+    progressStatuses.some((entry) => entry.status.progress?.etaSeconds === null),
     true,
     "early ETA should stay hidden until the rate stabilizes",
   );
   assert.equal(
-    workerStatuses.at(-1).status.progress.etaSeconds,
-    8,
+    progressStatuses.some((entry) => entry.status.progress?.etaSeconds > 0),
+    true,
     "stable ETA should be surfaced once available",
   );
 
@@ -429,6 +596,14 @@ async function checkInteractiveIngestGate() {
   );
 }
 
+function nextWorkerTime() {
+  const value = nextWorkerTime.times.shift();
+
+  return value ?? 9000;
+}
+
+nextWorkerTime.times = [0, 10, 20, 34, 3034, 3035];
+
 async function runFrame(frames, canvasHarness, ts) {
   const frame = frames.shift();
 
@@ -436,14 +611,6 @@ async function runFrame(frames, canvasHarness, ts) {
   canvasHarness.setFrameAt(ts);
   frame(ts);
   await flushMicrotasks();
-}
-
-function emitProgress(worker, fields) {
-  worker.emit("message", {
-    phase: "parse",
-    type: "progress",
-    ...fields,
-  });
 }
 
 checkInteractiveIngestGate().catch((error) => {
