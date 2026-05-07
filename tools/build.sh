@@ -57,6 +57,13 @@ esbuild "${ROOT_DIR}/bootstrap.js" \
   --sourcemap \
   --outfile="${DIST_DIR}/bootstrap.bundle.js"
 
+esbuild "${ROOT_DIR}/worker.js" \
+  --bundle \
+  --format=esm \
+  --minify \
+  --sourcemap \
+  --outfile="${DIST_DIR}/worker.bundle.js"
+
 cp "${ROOT_DIR}/index.html" "${DIST_DIR}/index.html"
 cp "${ROOT_DIR}/manifest.webmanifest" "${DIST_DIR}/manifest.webmanifest"
 
