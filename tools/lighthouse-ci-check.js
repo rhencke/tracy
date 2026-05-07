@@ -29,6 +29,7 @@ function main() {
   assert.equal(settings.throttling.cpuSlowdownMultiplier, 1);
   assert.match(settings.chromeFlags, /--enable-experimental-webassembly-features/);
   assert.match(settings.chromeFlags, /WebAssemblyJSPI/);
+  assert.match(settings.chromeFlags, /--experimental-wasm-stack-switching/);
 
   assert.deepEqual(assertions["first-contentful-paint"], [
     "error",

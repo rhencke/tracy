@@ -351,7 +351,7 @@ function launchBrowser(browserPath) {
     "--disable-sync",
     "--enable-experimental-webassembly-features",
     "--enable-features=WebAssemblyJSPI",
-    "--js-flags=--experimental-wasm-jspi",
+    "--js-flags=--experimental-wasm-jspi --experimental-wasm-stack-switching",
     "--remote-debugging-port=0",
     `--user-data-dir=${userDataDir}`,
     "about:blank",
@@ -411,6 +411,7 @@ async function createPage(cdp) {
   await cdp.send("Page.enable", {}, sessionId);
   await cdp.send("Network.enable", {}, sessionId);
   await cdp.send("Performance.enable", {}, sessionId);
+  await cdp.send("Runtime.enable", {}, sessionId);
 
   return { sessionId, targetId };
 }
@@ -465,11 +466,22 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   await loaded;
   await waitUntil(async () => {
     const result = await cdp.send("Runtime.evaluate", {
-      expression: "performance.getEntriesByName('tracy.app.ready').length > 0",
+      expression: `(() => {
+        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
+        return {
+          error,
+          ready: performance.getEntriesByName("tracy.app.ready").length > 0,
+        };
+      })()`,
       returnByValue: true,
     }, page.sessionId);
+    const status = result.result?.value ?? {};
 
-    return result.result?.value === true;
+    if (status.error) {
+      throw new Error(`page reported app-load failure: ${status.error}`);
+    }
+
+    return status.ready === true;
   });
 
   const result = await cdp.send("Runtime.evaluate", {
