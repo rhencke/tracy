@@ -33,7 +33,7 @@ export function rebuildMainThreadSliceCatalog(memory, host, index, indexId) {
     return false;
   }
 
-  const pageCount = indexPageCountFromSize(sizeFn(indexId));
+  const pageCount = mainThreadSliceCatalogPageCount(host, indexId);
   if (pageCount <= 0) {
     return false;
   }
@@ -73,4 +73,13 @@ export function rebuildMainThreadSliceCatalog(memory, host, index, indexId) {
   }
 
   return true;
+}
+
+export function mainThreadSliceCatalogPageCount(host, indexId) {
+  const sizeFn = host[HOST_IMPORT_NAME.OPFS_INDEX_SIZE];
+  if (typeof sizeFn !== "function") {
+    return 0;
+  }
+
+  return indexPageCountFromSize(sizeFn(indexId));
 }

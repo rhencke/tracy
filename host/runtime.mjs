@@ -112,11 +112,13 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
   const instantiate =
     options.instantiateWasmModule ?? defaultInstantiateIndexWasm;
   const readerState = {
+    catalogPageCount: null,
     error: null,
     exports: null,
     indexId: null,
     indexName: null,
     openPromise: null,
+    rebuildSliceCatalog: null,
     state: "idle",
   };
 
@@ -145,6 +147,51 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     );
     readerState.exports = loaded.exports;
     return readerState.exports;
+  }
+
+  async function loadSliceCatalogRebuild() {
+    if (readerState.rebuildSliceCatalog !== null) {
+      return readerState.rebuildSliceCatalog;
+    }
+    if (typeof host[HOST_IMPORT_NAME.OPFS_INDEX_SIZE] !== "function") {
+      return null;
+    }
+
+    readerState.rebuildSliceCatalog = await import("./index-reader-catalog.mjs");
+    return readerState.rebuildSliceCatalog;
+  }
+
+  function refreshSliceCatalog(index, indexId, { force = false } = {}) {
+    if (readerState.rebuildSliceCatalog === null) {
+      return false;
+    }
+
+    const pageCount =
+      readerState.rebuildSliceCatalog.mainThreadSliceCatalogPageCount(
+        host,
+        indexId,
+      );
+    if (!force && readerState.catalogPageCount === pageCount) {
+      return false;
+    }
+    if (pageCount <= 0) {
+      readerState.catalogPageCount = pageCount;
+      return false;
+    }
+
+    const rebuilt =
+      readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
+        memory,
+        host,
+        index,
+        indexId,
+      );
+    readerState.catalogPageCount = pageCount;
+    if (rebuilt) {
+      index.index_reader_init(indexId);
+    }
+
+    return rebuilt;
   }
 
   async function open(indexName) {
@@ -184,14 +231,8 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
           options.readerCacheSlots ?? DEFAULT_READER_CACHE_SLOTS,
         );
         index.index_reader_init(indexId);
-        if (typeof host[HOST_IMPORT_NAME.OPFS_INDEX_SIZE] === "function") {
-          const { rebuildMainThreadSliceCatalog } = await import(
-            "./index-reader-catalog.mjs"
-          );
-          if (rebuildMainThreadSliceCatalog(memory, host, index, indexId)) {
-            index.index_reader_init(indexId);
-          }
-        }
+        await loadSliceCatalogRebuild();
+        refreshSliceCatalog(index, indexId, { force: true });
         readerState.indexId = indexId;
         readerState.state = "ready";
         return true;
@@ -224,6 +265,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         throw new Error("main-thread index reader is not ready");
       }
 
+      refreshSliceCatalog(readerState.exports, readerState.indexId);
       return readerState.exports.index_query_range(trackId, tsMin, tsMax, outPtr);
     },
     status() {
