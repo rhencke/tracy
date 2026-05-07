@@ -179,6 +179,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(frames.length, 1, "requestAnimationFrame should be scheduled");
   assert.deepEqual(worker.posted, [
     {
+      ingestId: 1,
       indexName: "indexes/trace.idx",
       sourceName: "sources/trace.json",
       type: "start",
@@ -187,6 +188,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(controller.status().state, "running");
 
   worker.emit("message", {
+    ingestId: 1,
     type: "progress",
     committedPages: 2,
     etaSeconds: null,
@@ -198,12 +200,14 @@ async function checkRuntimeOrchestratesWorker() {
     totalBytes: 64,
   });
   worker.emit("message", {
+    ingestId: 1,
     type: "covered_range",
     valid: true,
     start: 100,
     end: 132,
   });
   worker.emit("message", {
+    ingestId: 1,
     type: "complete",
     committedEvents: 7,
   });
@@ -294,6 +298,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   );
   assert.deepEqual(worker.posted, [
     {
+      ingestId: 1,
       indexName: "indexes/selected_trace.json.idx",
       sourceFile: selectedFile,
       sourceFileHandle: 9,
@@ -308,6 +313,120 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   callbacks[0]({ handle: -1 });
   await Promise.resolve();
   assert.equal(worker.posted.length, 1, "cancelled picker should not start ingest");
+}
+
+async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
+  installBrowserStubs();
+
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const indexReaderOpenCalls = [];
+  const workerStatus = [];
+  const controller = runtime.createIngestWorkerController({
+    Worker: FakeWorker,
+    indexReader: {
+      open(indexName) {
+        indexReaderOpenCalls.push(indexName);
+        return Promise.resolve(true);
+      },
+    },
+    onWorkerStatus(status, message) {
+      workerStatus.push({ message, status });
+    },
+    workerUrl: "worker.js",
+  });
+
+  assert.equal(
+    controller.start({
+      indexName: "indexes/first.idx",
+      sourceName: "sources/first.json",
+    }),
+    true,
+  );
+  const firstWorker = controller.worker;
+
+  assert.deepEqual(firstWorker.posted, [
+    {
+      ingestId: 1,
+      indexName: "indexes/first.idx",
+      sourceName: "sources/first.json",
+      type: "start",
+    },
+  ]);
+
+  assert.equal(
+    controller.start({
+      indexName: "indexes/second.idx",
+      sourceName: "sources/second.json",
+    }),
+    true,
+  );
+  const secondWorker = controller.worker;
+
+  assert.notEqual(secondWorker, firstWorker);
+  assert.equal(firstWorker.terminated, true);
+  assert.deepEqual(secondWorker.posted, [
+    {
+      ingestId: 2,
+      indexName: "indexes/second.idx",
+      sourceName: "sources/second.json",
+      type: "start",
+    },
+  ]);
+
+  firstWorker.emit("message", {
+    committedPages: 99,
+    fileOffset: 999,
+    ingestId: 1,
+    type: "progress",
+  });
+  firstWorker.emit("message", {
+    end: 999,
+    ingestId: 1,
+    start: 900,
+    type: "covered_range",
+    valid: true,
+  });
+  firstWorker.emit("message", {
+    committedEvents: 999,
+    ingestId: 1,
+    type: "complete",
+  });
+
+  assert.equal(controller.status().state, "running");
+  assert.equal(controller.status().progress, null);
+  assert.equal(controller.status().coveredRange, null);
+  assert.equal(controller.status().result, null);
+  assert.deepEqual(indexReaderOpenCalls, []);
+
+  firstWorker.events.get("error")({ message: "old worker crashed" });
+  assert.equal(controller.status().state, "running");
+  assert.equal(controller.status().error, null);
+
+  secondWorker.emit("message", {
+    committedPages: 2,
+    fileOffset: 64,
+    ingestId: 2,
+    type: "progress",
+  });
+  secondWorker.emit("message", {
+    end: 132,
+    ingestId: 2,
+    start: 100,
+    type: "covered_range",
+    valid: true,
+  });
+  secondWorker.emit("message", {
+    committedEvents: 7,
+    ingestId: 2,
+    type: "complete",
+  });
+
+  assert.equal(controller.status().state, "complete");
+  assert.equal(controller.status().progress.fileOffset, 64);
+  assert.equal(controller.status().coveredRange.end, 132);
+  assert.equal(controller.status().result.committedEvents, 7);
+  assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
+  assert.equal(workerStatus.at(-1).message.ingestId, 2);
 }
 
 async function checkFileSelectionSetupErrorsReportStatus() {
@@ -1224,6 +1343,7 @@ async function checkRuntimeLoadsProgressiveTraceRendererLazily() {
 async function main() {
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
+  await checkRuntimeIgnoresStaleIngestWorkerMessages();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();

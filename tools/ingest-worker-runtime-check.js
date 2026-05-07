@@ -178,6 +178,7 @@ async function checkWorkerRuntime() {
       coveredRangeIntervalMs: 33,
       dictEpoch: 5,
       etaStableMs: 30,
+      ingestId: 42,
       indexName: "indexes/trace.idx",
       progressWindowMs: 50,
       statePtr: 1000,
@@ -263,6 +264,11 @@ async function checkWorkerRuntime() {
     messages.at(-1).type,
     runtime.INGEST_WORKER_MESSAGE.COMPLETE,
     "complete should be the final worker message",
+  );
+  assert.equal(
+    messages.every((message) => message.ingestId === 42),
+    true,
+    "worker should echo ingest id on every response",
   );
   const progressMessages = messages.filter(
     (message) => message.type === runtime.INGEST_WORKER_MESSAGE.PROGRESS,
@@ -493,10 +499,14 @@ async function checkMessageHandler() {
   assert.equal(handled.length, 0);
   assert.equal(messages.length, 0);
 
-  await handleMessage({ data: { type: runtime.INGEST_WORKER_MESSAGE.START } });
+  await handleMessage({
+    data: { ingestId: 7, type: runtime.INGEST_WORKER_MESSAGE.START },
+  });
   assert.equal(handled.length, 1);
+  assert.equal(handled[0].ingestId, 7);
   assert.deepEqual(messages, [
     {
+      ingestId: 7,
       type: runtime.INGEST_WORKER_MESSAGE.ERROR,
       message: "kaboom",
     },

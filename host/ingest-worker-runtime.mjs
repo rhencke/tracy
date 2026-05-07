@@ -341,7 +341,13 @@ export async function runWorkerIngest(data, options = {}) {
     memory,
     now: options.now ?? (() => performance.now()),
     parserState,
-    postMessage,
+    postMessage(message) {
+      postMessage(
+        Number.isInteger(data.ingestId)
+          ? { ...message, ingestId: data.ingestId }
+          : message,
+      );
+    },
     progressSamples: [],
     progressWindowMs: data.progressWindowMs ?? DEFAULT_PROGRESS_WINDOW_MS,
     statePtr,
@@ -399,7 +405,7 @@ export async function runWorkerIngest(data, options = {}) {
   };
 
   postProgress(workerState, "complete");
-  postMessage({
+  workerState.postMessage({
     type: INGEST_WORKER_MESSAGE.COMPLETE,
     ...result,
   });
@@ -421,10 +427,16 @@ export function createIngestWorkerMessageHandler(options = {}) {
     try {
       await runIngest(data, { ...options, postMessage });
     } catch (error) {
-      postMessage({
+      const message = {
         type: INGEST_WORKER_MESSAGE.ERROR,
         message: errorMessage(error),
-      });
+      };
+
+      postMessage(
+        Number.isInteger(data.ingestId)
+          ? { ...message, ingestId: data.ingestId }
+          : message,
+      );
     }
   };
 }

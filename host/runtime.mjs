@@ -369,9 +369,19 @@ export function createIngestWorkerController(options = {}) {
   };
 
   let worker = null;
+  let activeIngestId = null;
+  let nextIngestId = 1;
+
+  function isActiveIngestMessage(message) {
+    return Number.isInteger(message?.ingestId) && message.ingestId === activeIngestId;
+  }
 
   function handleWorkerMessage(event) {
     const message = event?.data ?? event;
+
+    if (!isActiveIngestMessage(message)) {
+      return;
+    }
 
     if (message?.type === INGEST_WORKER_MESSAGE.PROGRESS) {
       status.progress = message;
@@ -399,10 +409,19 @@ export function createIngestWorkerController(options = {}) {
     notifyWorkerStatus(status, options, message);
   }
 
-  function handleWorkerError(event) {
+  function handleWorkerError(event, eventWorker = event?.target) {
+    if (eventWorker !== undefined && eventWorker !== worker) {
+      return;
+    }
+
     status.state = "error";
     status.error = event?.message ?? "ingest worker failed";
     notifyWorkerStatus(status, options, event);
+  }
+
+  function cancelActiveWorker() {
+    worker?.terminate?.();
+    worker = null;
   }
 
   function ensureWorker() {
@@ -425,13 +444,16 @@ export function createIngestWorkerController(options = {}) {
       return null;
     }
 
+    const installedWorker = worker;
     if (typeof worker.addEventListener === "function") {
       worker.addEventListener("message", handleWorkerMessage);
-      worker.addEventListener("error", handleWorkerError);
-      worker.addEventListener("messageerror", handleWorkerError);
+      worker.addEventListener("error", (event) => handleWorkerError(event, installedWorker));
+      worker.addEventListener("messageerror", (event) =>
+        handleWorkerError(event, installedWorker),
+      );
     } else {
       worker.onmessage = handleWorkerMessage;
-      worker.onerror = handleWorkerError;
+      worker.onerror = (event) => handleWorkerError(event, installedWorker);
     }
 
     return worker;
@@ -439,18 +461,28 @@ export function createIngestWorkerController(options = {}) {
 
   return {
     start(data = {}) {
+      if (status.state === "running") {
+        cancelActiveWorker();
+      }
+
       const activeWorker = ensureWorker();
       if (activeWorker === null) {
         return false;
       }
 
+      const ingestId = nextIngestId;
+      nextIngestId += 1;
+      activeIngestId = ingestId;
       status.state = "running";
       status.error = null;
-      status.ingest = data;
+      status.coveredRange = null;
+      status.ingest = { ...data, ingestId };
+      status.progress = null;
       status.result = null;
       notifyWorkerStatus(status, options, null);
       activeWorker.postMessage({
         ...data,
+        ingestId,
         type: INGEST_WORKER_MESSAGE.START,
       });
       return true;
@@ -465,7 +497,8 @@ export function createIngestWorkerController(options = {}) {
       notifyWorkerStatus(status, options, null);
     },
     terminate() {
-      worker?.terminate?.();
+      cancelActiveWorker();
+      activeIngestId = null;
       status.state = "terminated";
       notifyWorkerStatus(status, options, null);
     },

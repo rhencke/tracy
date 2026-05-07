@@ -504,6 +504,7 @@ async function checkInteractiveIngestGate() {
 
   assert.deepEqual(controller.worker.posted, [
     {
+      ingestId: 1,
       indexName: "indexes/throttled-100mb.json.idx",
       sourceFile: selectedFile,
       sourceFileHandle: 77,
