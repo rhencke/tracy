@@ -132,6 +132,11 @@ function contentType(file) {
   return MIME_TYPES[path.extname(file)] ?? "application/octet-stream";
 }
 
+function sendNotFound(response) {
+  response.writeHead(404);
+  response.end("not found");
+}
+
 function assertDistReady(distDir) {
   const missing = REQUIRED_DIST_FILES.filter((file) =>
     !fs.existsSync(path.join(distDir, file)),
@@ -186,20 +191,39 @@ async function listen(server) {
 }
 
 async function createServer(distDir) {
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     const file = resolveDistPath(distDir, request.url);
 
-    if (file === null || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-      response.writeHead(404);
-      response.end("not found");
+    if (file === null) {
+      sendNotFound(response);
       return;
     }
 
+    let stat;
+    try {
+      stat = await fs.promises.stat(file);
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") {
+        sendNotFound(response);
+        return;
+      }
+      response.destroy(error);
+      return;
+    }
+
+    if (!stat.isFile()) {
+      sendNotFound(response);
+      return;
+    }
+
+    const stream = fs.createReadStream(file);
+    stream.on("error", (error) => response.destroy(error));
     response.writeHead(200, {
       "Cache-Control": "public, max-age=31536000, immutable",
+      "Content-Length": stat.size,
       "Content-Type": contentType(file),
     });
-    fs.createReadStream(file).pipe(response);
+    stream.pipe(response);
   });
   const port = await listen(server);
 
@@ -677,6 +701,10 @@ function runSelfTest() {
     () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
     /fixture fcpMs 2.0 > 1/,
   );
+  const staticServerSource = createServer.toString();
+  assert.match(staticServerSource, /fs\.promises\.stat/);
+  assert.match(staticServerSource, /fs\.createReadStream/);
+  assert.doesNotMatch(staticServerSource, /fs\.(existsSync|statSync|readFileSync)/);
 
   const tmpDist = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-app-load-dist-"));
   try {
