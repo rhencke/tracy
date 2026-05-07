@@ -7,6 +7,16 @@ PATH := $(CURDIR)/node_modules/.bin:$(PATH)
 
 WAT_SOURCES := $(shell find wat -type f -name '*.wat' -print | sort)
 WAT_INCLUDES := $(shell find wat -type f -name '*.inc' -print | sort)
+GENERATED_WAT_FILES := \
+	wat/app.test.wat \
+	wat/app.wat \
+	wat/parser.test.wat \
+	wat/parser.wat \
+	wat/parser_state.test.wat \
+	wat/parser_state.wat \
+	wat/std/mem.test.wat \
+	wat/std/mem.wat
+GENERATOR_WAT_INPUTS := $(filter-out $(GENERATED_WAT_FILES),$(WAT_SOURCES))
 WASM_FILES := $(patsubst wat/%.wat,dist/wasm/%.wasm,$(WAT_SOURCES))
 WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
@@ -36,14 +46,7 @@ GENERATED_FILES := \
 	abi/wasm-modules.json \
 	host/abi.mjs \
 	host/wasm-modules.mjs \
-	wat/app.test.wat \
-	wat/app.wat \
-	wat/parser.test.wat \
-	wat/parser.wat \
-	wat/parser_state.test.wat \
-	wat/parser_state.wat \
-	wat/std/mem.test.wat \
-	wat/std/mem.wat
+	$(GENERATED_WAT_FILES)
 
 ifneq ($(MODULE_DOC_GENERATOR),)
 GENERATED_FILES += docs/MODULES.md
@@ -72,7 +75,7 @@ GENERATED_INPUTS := \
 	tools/layout-spec.js \
 	tools/wat-parser.js \
 	$(MODULE_DOC_GENERATOR) \
-	$(WAT_SOURCES) \
+	$(GENERATOR_WAT_INPUTS) \
 	$(WAT_INCLUDES)
 
 .PHONY: \

@@ -45,19 +45,25 @@ function assertTracked(relativePath) {
 
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
+  const makefile = readRepoFile("Makefile");
   const runtimeSource = readRepoFile("host/runtime.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
 
   assert.match(
     buildScript,
-    /esbuild "\$\{ROOT_DIR\}\/bootstrap\.js"[\s\S]+--outfile="\$\{DIST_DIR\}\/bootstrap\.bundle\.js"/,
-    "build should emit the main bootstrap bundle",
+    /exec make -C "\$\{ROOT_DIR\}" -j"\$\{jobs\}" dist/,
+    "build shim should delegate to make dist",
   );
   assert.match(
-    buildScript,
-    /esbuild "\$\{ROOT_DIR\}\/worker\.js"[\s\S]+--format=esm[\s\S]+--outfile="\$\{DIST_DIR\}\/worker\.bundle\.js"/,
-    "build should emit the module worker bundle",
+    makefile,
+    /dist\/bootstrap\.bundle\.js dist\/bootstrap\.bundle\.js\.map &:[\s\S]+esbuild bootstrap\.js[\s\S]+--outfile=dist\/bootstrap\.bundle\.js/,
+    "make should emit the main bootstrap bundle",
+  );
+  assert.match(
+    makefile,
+    /dist\/worker\.bundle\.js dist\/worker\.bundle\.js\.map &:[\s\S]+esbuild worker\.js[\s\S]+--format=esm[\s\S]+--outfile=dist\/worker\.bundle\.js/,
+    "make should emit the module worker bundle",
   );
   assert.match(runtimeSource, /const WORKER_URL = "worker\.bundle\.js"/);
   assert.match(
@@ -73,7 +79,8 @@ function main() {
     packageJson.scripts["test:worker-bundle"],
     "node tools/worker-bundle-check.js",
   );
-  assert.match(packageJson.scripts.test, /test:worker-bundle/);
+  assert.equal(packageJson.scripts.test, "make test");
+  assert.match(makefile, /node tools\/worker-bundle-check\.js/);
 
   for (const relativePath of [
     "tools/ingest-worker-runtime-check.js",
