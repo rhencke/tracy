@@ -1,8 +1,6 @@
-import { HOST_ASYNC_IMPORTS } from "./abi.mjs";
 import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
 import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
 
-const asyncHostImports = new Set(HOST_ASYNC_IMPORTS);
 const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
 const PERFORMANCE_MARKS = Object.freeze({
@@ -191,15 +189,6 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function wrapAsyncHostImports(host) {
-  return Object.fromEntries(
-    Object.entries(host).map(([name, value]) => [
-      name,
-      asyncHostImports.has(name) ? new WebAssembly.Suspending(value) : value,
-    ]),
-  );
-}
-
 async function loadApp(memory, host, options = {}) {
   if (!supportsJSPI()) {
     showError(
@@ -208,7 +197,7 @@ async function loadApp(memory, host, options = {}) {
     return;
   }
 
-  const imports = { env: { memory }, host: wrapAsyncHostImports(host) };
+  const imports = { env: { memory }, host };
   const instantiate = options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
   const { exports } = await instantiate("app", MAIN_THREAD, imports, {

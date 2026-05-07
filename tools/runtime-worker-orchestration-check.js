@@ -33,7 +33,7 @@ function installBrowserStubs() {
   };
   globalThis.WebAssembly.Suspending = class Suspending {
     constructor(fn) {
-      return fn;
+      return { fn };
     }
   };
 
@@ -76,7 +76,11 @@ async function checkRuntimeOrchestratesWorker() {
   const performanceEntries = [];
   const ticks = [];
   const memory = new WebAssembly.Memory({ initial: 1 });
-  const host = {};
+  const host = {
+    opfs_index_create() {
+      return 0;
+    },
+  };
   const workerStatus = [];
   const performance = {
     mark(name) {
@@ -93,7 +97,12 @@ async function checkRuntimeOrchestratesWorker() {
       sourceName: "sources/trace.json",
     },
     instantiateWasmModuleForThread: async (id, thread, imports) => {
-      instantiateCalls.push({ id, thread, memory: imports.env.memory });
+      instantiateCalls.push({
+        hostImport: imports.host.opfs_index_create,
+        id,
+        memory: imports.env.memory,
+        thread,
+      });
       return {
         exports: {
           tracy_main() {
@@ -123,7 +132,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(worker.url, "worker.js");
   assert.deepEqual(worker.options, { type: "module" });
   assert.deepEqual(instantiateCalls, [
-    { id: "app", thread: "main", memory },
+    { hostImport: host.opfs_index_create, id: "app", memory, thread: "main" },
   ]);
   assert.deepEqual(performanceEntries, [
     { kind: "mark", name: "tracy.wasm.instantiate.start" },
