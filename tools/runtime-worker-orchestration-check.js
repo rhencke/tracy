@@ -547,7 +547,171 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
     tsMax: 180,
     tsMin: 100,
   });
-  assert.deepEqual(renderer.status(), { error: null, rows: 2 });
+  assert.deepEqual(renderer.status(), {
+    error: null,
+    rows: 2,
+    unknownRange: { pending: true, start: 180 },
+    userInteracted: false,
+    viewport: { end: 180, start: 100, valid: true },
+  });
+}
+
+async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const listeners = new Map();
+  const operations = [];
+  const canvas = {
+    height: 160,
+    width: 320,
+    addEventListener(type, callback) {
+      listeners.set(type, callback);
+    },
+    getBoundingClientRect() {
+      return { left: 0, top: 0 };
+    },
+    getContext() {
+      return context;
+    },
+    releasePointerCapture() {},
+    setPointerCapture() {},
+  };
+  const context = {
+    beginPath() {
+      operations.push({ op: "beginPath" });
+    },
+    clearRect(x, y, width, height) {
+      operations.push({ height, op: "clearRect", width, x, y });
+    },
+    clip() {
+      operations.push({ op: "clip" });
+    },
+    fillRect(x, y, width, height) {
+      operations.push({
+        fillStyle: this.fillStyle,
+        height,
+        op: "fillRect",
+        width,
+        x,
+        y,
+      });
+    },
+    lineTo(x, y) {
+      operations.push({ op: "lineTo", x, y });
+    },
+    moveTo(x, y) {
+      operations.push({ op: "moveTo", x, y });
+    },
+    rect(x, y, width, height) {
+      operations.push({ height, op: "rect", width, x, y });
+    },
+    restore() {
+      operations.push({ op: "restore" });
+    },
+    save() {
+      operations.push({ op: "save" });
+    },
+    stroke() {
+      operations.push({ op: "stroke", strokeStyle: this.strokeStyle });
+    },
+  };
+  const coveredRange = { end: 200, start: 100, type: "covered_range", valid: true };
+  const queryCalls = [];
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr) {
+      queryCalls.push({ outPtr, trackId, tsMax, tsMin });
+      const view = new DataView(memory.buffer);
+      view.setUint32(outPtr, Math.max(100, Math.floor(tsMin)), true);
+      view.setUint32(outPtr + 4, 8, true);
+      view.setUint32(outPtr + 12, 0, true);
+      view.setUint32(outPtr + 20, 0x2d74da, true);
+      view.setUint32(outPtr + 24, 0, true);
+      return 1;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 1;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return { coveredRange, state: "running" };
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    minViewportSpan: 10,
+    queryOutPtr: 2048,
+    queryWindow: 1000,
+  });
+
+  renderer.draw(1);
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "fillRect" &&
+        operation.fillStyle === "rgba(126, 134, 146, 0.18)",
+    ),
+    true,
+    "unknown leading edge should draw as a striped affordance while ingest runs",
+  );
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "stroke" &&
+        operation.strokeStyle === "rgba(76, 85, 99, 0.38)",
+    ),
+    true,
+    "unknown leading edge should include stripes",
+  );
+
+  listeners.get("wheel")({
+    clientX: 160,
+    deltaY: -700,
+    preventDefault() {
+      operations.push({ op: "wheelPrevented" });
+    },
+  });
+  renderer.draw(2);
+  const zoomedViewport = renderer.status().viewport;
+  assert.equal(renderer.status().userInteracted, true);
+  assert.equal(zoomedViewport.start >= coveredRange.start, true);
+  assert.equal(zoomedViewport.end <= coveredRange.end, true);
+  assert.equal(zoomedViewport.end - zoomedViewport.start < 100, true);
+
+  listeners.get("pointerdown")({
+    button: 0,
+    clientX: 160,
+    pointerId: 1,
+    preventDefault() {},
+  });
+  listeners.get("pointermove")({
+    clientX: -10000,
+    pointerId: 1,
+    preventDefault() {},
+  });
+  listeners.get("pointerup")({ pointerId: 1 });
+  renderer.draw(3);
+  assert.equal(renderer.status().viewport.end, coveredRange.end);
+
+  listeners.get("pointerdown")({
+    button: 0,
+    clientX: 160,
+    pointerId: 2,
+    preventDefault() {},
+  });
+  listeners.get("pointermove")({
+    clientX: 10000,
+    pointerId: 2,
+    preventDefault() {},
+  });
+  listeners.get("pointercancel")({ pointerId: 2 });
+  renderer.draw(4);
+  assert.equal(renderer.status().viewport.start, coveredRange.start);
+  assert.equal(queryCalls.at(-1).tsMin, coveredRange.start);
 }
 
 async function checkRuntimeLoadsProgressiveTraceRendererLazily() {
@@ -617,6 +781,7 @@ async function main() {
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
+  await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimeLoadsProgressiveTraceRendererLazily();
 }
 

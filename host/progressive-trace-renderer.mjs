@@ -6,6 +6,8 @@ const INDEX_QUERY_RESULT_DUR_OFFSET = 4;
 const INDEX_QUERY_RESULT_DEPTH_OFFSET = 12;
 const INDEX_QUERY_RESULT_COLOR_OFFSET = 20;
 const INDEX_QUERY_RESULT_PARTIAL_OFFSET = 24;
+const DEFAULT_MIN_VIEWPORT_SPAN = 1;
+const DEFAULT_UNKNOWN_AFFORDANCE_WIDTH = 72;
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;
@@ -22,6 +24,19 @@ function canvasDimension(canvas, property, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+function eventCanvasX(canvas, event, fallbackWidth) {
+  const rect = canvas?.getBoundingClientRect?.();
+
+  if (rect !== undefined) {
+    return Math.min(
+      fallbackWidth,
+      Math.max(0, (event.clientX ?? 0) - (rect.left ?? 0)),
+    );
+  }
+
+  return Math.min(fallbackWidth, Math.max(0, event.offsetX ?? 0));
+}
+
 function colorForSlice(color) {
   const rgb = Number(color) >>> 0;
 
@@ -32,6 +47,46 @@ function readerQueryResultBytes(reader) {
   return Number(
     globalValue(reader?.exports?.()?.INDEX_QUERY_RESULT_BYTES ?? INDEX_QUERY_RESULT_BYTES),
   );
+}
+
+function normalizeRange(range) {
+  if (!range?.valid || !Number.isFinite(range.start) || !Number.isFinite(range.end)) {
+    return null;
+  }
+  if (range.end <= range.start) {
+    return null;
+  }
+
+  return {
+    end: Number(range.end),
+    start: Number(range.start),
+    valid: true,
+  };
+}
+
+function clampViewportToCovered(viewport, coveredRange, minSpan) {
+  const covered = normalizeRange(coveredRange);
+
+  if (covered === null) {
+    return null;
+  }
+
+  const coveredSpan = covered.end - covered.start;
+  const span = Math.min(
+    coveredSpan,
+    Math.max(minSpan, viewport === null ? coveredSpan : viewport.end - viewport.start),
+  );
+  const requestedStart = viewport === null ? covered.start : viewport.start;
+  const start = Math.min(
+    covered.end - span,
+    Math.max(covered.start, requestedStart),
+  );
+
+  return {
+    end: start + span,
+    start,
+    valid: true,
+  };
 }
 
 function readQueryRows(memory, reader, outPtr, count, trackId, options) {
@@ -80,7 +135,36 @@ function drawPartialHatch(context, x, y, width, height, spacing) {
   context.restore?.();
 }
 
-function drawTraceRows(context, canvas, rows, coveredRange, options) {
+function drawUnknownRangeAffordance(context, width, bandHeight, options) {
+  const affordanceWidth = Math.min(
+    width,
+    options.unknownAffordanceWidth ?? DEFAULT_UNKNOWN_AFFORDANCE_WIDTH,
+  );
+  const x = width - affordanceWidth;
+  const spacing = options.unknownStripeSpacing ?? 8;
+
+  context.save?.();
+  context.fillStyle = options.unknownFillStyle ?? "rgba(126, 134, 146, 0.18)";
+  context.fillRect?.(x, 0, affordanceWidth, bandHeight);
+  context.beginPath?.();
+  if (typeof context.rect === "function" && typeof context.clip === "function") {
+    context.rect(x, 0, affordanceWidth, bandHeight);
+    context.clip();
+  }
+  context.strokeStyle = options.unknownStripeStyle ?? "rgba(76, 85, 99, 0.38)";
+  context.lineWidth = 1;
+
+  for (let sx = x - bandHeight; sx < width + bandHeight; sx += spacing) {
+    context.beginPath?.();
+    context.moveTo?.(sx, bandHeight);
+    context.lineTo?.(sx + bandHeight, 0);
+    context.stroke?.();
+  }
+
+  context.restore?.();
+}
+
+function drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStatus, options) {
   const width = canvasDimension(canvas, "width", 800);
   const height = canvasDimension(canvas, "height", 400);
   const laneHeight = options.laneHeight ?? 10;
@@ -88,7 +172,7 @@ function drawTraceRows(context, canvas, rows, coveredRange, options) {
   const top = options.top ?? 18;
   const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0);
   const bandHeight = Math.min(height, top + (maxDepth + 1) * (laneHeight + laneGap) + 8);
-  const span = Math.max(1, coveredRange.end - coveredRange.start);
+  const span = Math.max(1, viewport.end - viewport.start);
 
   context.save?.();
   context.clearRect?.(0, 0, width, bandHeight);
@@ -96,9 +180,9 @@ function drawTraceRows(context, canvas, rows, coveredRange, options) {
   context.fillRect?.(0, 0, width, bandHeight);
 
   for (const row of rows) {
-    const sliceEnd = Math.min(coveredRange.end, row.start + Math.max(1, row.dur));
-    const x = Math.max(0, ((row.start - coveredRange.start) / span) * width);
-    const endX = Math.min(width, ((sliceEnd - coveredRange.start) / span) * width);
+    const sliceEnd = Math.min(viewport.end, row.start + Math.max(1, row.dur));
+    const x = Math.max(0, ((row.start - viewport.start) / span) * width);
+    const endX = Math.min(width, ((sliceEnd - viewport.start) / span) * width);
     const sliceWidth = Math.max(1, endX - x);
     const y = top + row.depth * (laneHeight + laneGap);
 
@@ -112,6 +196,14 @@ function drawTraceRows(context, canvas, rows, coveredRange, options) {
     }
   }
 
+  if (
+    coveredRange.end <= viewport.end &&
+    workerStatus?.state !== "complete" &&
+    workerStatus?.state !== "idle"
+  ) {
+    drawUnknownRangeAffordance(context, width, bandHeight, options);
+  }
+
   context.restore?.();
 }
 
@@ -121,32 +213,152 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   const context = options.context ?? canvas?.getContext?.("2d");
   const queryOutPtr = options.queryOutPtr ?? DEFAULT_TRACE_QUERY_OUT_PTR;
   const queryWindow = options.queryWindow ?? DEFAULT_TRACE_QUERY_WINDOW;
+  const minViewportSpan = options.minViewportSpan ?? DEFAULT_MIN_VIEWPORT_SPAN;
   const state = {
+    drag: null,
     error: null,
     lastRows: [],
+    unknownRange: null,
+    userInteracted: false,
+    viewport: normalizeRange(options.initialViewport),
   };
+
+  function currentCoveredRange(reader, readerStatus, workerStatus) {
+    return normalizeRange(
+      workerStatus.coveredRange ??
+        (readerStatus.state === "ready" ? reader?.coveredRange?.() : null),
+    );
+  }
+
+  function setViewport(nextViewport, coveredRange) {
+    state.viewport = clampViewportToCovered(
+      nextViewport,
+      coveredRange,
+      minViewportSpan,
+    );
+    return state.viewport;
+  }
+
+  function panByPixels(deltaX, coveredRange) {
+    state.userInteracted = true;
+    const viewport = setViewport(state.viewport, coveredRange);
+    const width = canvasDimension(canvas, "width", 800);
+    const span = viewport.end - viewport.start;
+    const timeDelta = (deltaX / Math.max(1, width)) * span;
+
+    return setViewport({
+      end: viewport.end - timeDelta,
+      start: viewport.start - timeDelta,
+      valid: true,
+    }, coveredRange);
+  }
+
+  function zoomAtPixel(pixelX, deltaY, coveredRange) {
+    state.userInteracted = true;
+    const viewport = setViewport(state.viewport, coveredRange);
+    const width = canvasDimension(canvas, "width", 800);
+    const ratio = Math.min(1, Math.max(0, pixelX / Math.max(1, width)));
+    const span = viewport.end - viewport.start;
+    const factor = Math.exp(Math.max(-500, Math.min(500, deltaY)) * 0.001);
+    const nextSpan = Math.max(minViewportSpan, span * factor);
+    const focus = viewport.start + ratio * span;
+
+    return setViewport({
+      end: focus + (1 - ratio) * nextSpan,
+      start: focus - ratio * nextSpan,
+      valid: true,
+    }, coveredRange);
+  }
+
+  function coveredRangeForInteraction() {
+    const reader = options.indexReader ?? ingestWorker?.indexReader;
+    const workerStatus = ingestWorker?.status?.() ?? {};
+    const readerStatus = reader?.status?.() ?? {};
+
+    return currentCoveredRange(reader, readerStatus, workerStatus);
+  }
+
+  function installInteractions() {
+    if (options.interactions === false || typeof canvas?.addEventListener !== "function") {
+      return;
+    }
+
+    canvas.addEventListener("pointerdown", (event) => {
+      const coveredRange = coveredRangeForInteraction();
+
+      if (coveredRange === null || event.button !== 0) {
+        return;
+      }
+
+      canvas.setPointerCapture?.(event.pointerId);
+      state.drag = {
+        lastX: event.clientX ?? 0,
+        pointerId: event.pointerId,
+      };
+      event.preventDefault?.();
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (state.drag === null || state.drag.pointerId !== event.pointerId) {
+        return;
+      }
+
+      const coveredRange = coveredRangeForInteraction();
+      const nextX = event.clientX ?? state.drag.lastX;
+
+      if (coveredRange !== null) {
+        panByPixels(nextX - state.drag.lastX, coveredRange);
+      }
+      state.drag.lastX = nextX;
+      event.preventDefault?.();
+    });
+    for (const type of ["pointerup", "pointercancel"]) {
+      canvas.addEventListener(type, (event) => {
+        if (state.drag?.pointerId === event.pointerId) {
+          canvas.releasePointerCapture?.(event.pointerId);
+          state.drag = null;
+        }
+      });
+    }
+    canvas.addEventListener("wheel", (event) => {
+      const coveredRange = coveredRangeForInteraction();
+
+      if (coveredRange === null) {
+        return;
+      }
+
+      zoomAtPixel(
+        eventCanvasX(canvas, event, canvasDimension(canvas, "width", 800)),
+        event.deltaY ?? 0,
+        coveredRange,
+      );
+      event.preventDefault?.();
+    }, { passive: false });
+  }
+
+  installInteractions();
 
   function draw() {
     const reader = options.indexReader ?? ingestWorker?.indexReader;
     const workerStatus = ingestWorker?.status?.() ?? {};
     const readerStatus = reader?.status?.() ?? {};
-    const coveredRange =
-      workerStatus.coveredRange ??
-      (readerStatus.state === "ready" ? reader?.coveredRange?.() : null);
+    const coveredRange = currentCoveredRange(reader, readerStatus, workerStatus);
 
     if (
       context === undefined ||
       context === null ||
       readerStatus.state !== "ready" ||
-      !coveredRange?.valid ||
-      coveredRange.end <= coveredRange.start
+      coveredRange === null
     ) {
       return state.lastRows;
     }
 
+    const viewport = setViewport(
+      state.userInteracted ? state.viewport : coveredRange,
+      coveredRange,
+    );
     const queryEnd = Math.min(
-      coveredRange.end,
-      coveredRange.start + Math.max(1, queryWindow),
+      viewport.end,
+      viewport.start + Math.max(1, queryWindow),
     );
     const trackCount = Math.max(
       1,
@@ -156,7 +368,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
 
     try {
       for (let trackId = 0; trackId < trackCount; trackId += 1) {
-        const count = reader.queryRange(trackId, coveredRange.start, queryEnd, queryOutPtr);
+        const count = reader.queryRange(trackId, viewport.start, queryEnd, queryOutPtr);
         rows.push(
           ...readQueryRows(memory, reader, queryOutPtr, count, trackId, options),
         );
@@ -164,9 +376,11 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
 
       state.error = null;
       state.lastRows = rows;
-      if (rows.length > 0) {
-        drawTraceRows(context, canvas, rows, coveredRange, options);
-      }
+      state.unknownRange =
+        workerStatus?.state !== "complete" && workerStatus?.state !== "idle"
+          ? { pending: true, start: coveredRange.end }
+          : null;
+      drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStatus, options);
     } catch (error) {
       state.error = errorMessage(error);
       options.onError?.(error);
@@ -177,11 +391,16 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
 
   return {
     draw,
+    panByPixels,
     status() {
       return {
         error: state.error,
         rows: state.lastRows.length,
+        unknownRange: state.unknownRange,
+        userInteracted: state.userInteracted,
+        viewport: state.viewport,
       };
     },
+    zoomAtPixel,
   };
 }
