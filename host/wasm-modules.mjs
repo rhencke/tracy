@@ -97,28 +97,27 @@ export function wasmModuleUrl(id, baseUrl = "wasm/") {
   return `${baseUrl.replace(/\/?$/, "/")}${wasmModulePath(id)}`;
 }
 
-function appendWasmModuleGraph(id, ordered, seen, active) {
+function collectWasmModuleGraph(id, collected, active) {
   if (active.has(id)) {
     throw new Error(`recursive wasm module dependency: ${id}`);
   }
-  if (seen.has(id)) {
+  if (collected.has(id)) {
     return;
   }
 
   active.add(id);
   for (const dependency of wasmModuleDependencies(id)) {
-    appendWasmModuleGraph(dependency, ordered, seen, active);
+    collectWasmModuleGraph(dependency, collected, active);
   }
   active.delete(id);
 
-  seen.add(id);
-  ordered.push(id);
+  collected.add(id);
 }
 
 export function wasmModuleGraphIds(id) {
-  const ordered = [];
-  appendWasmModuleGraph(id, ordered, new Set(), new Set());
-  return Object.freeze(ordered);
+  const graphIds = new Set();
+  collectWasmModuleGraph(id, graphIds, new Set());
+  return Object.freeze([...graphIds].sort());
 }
 
 async function defaultCompile(url) {

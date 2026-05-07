@@ -83,6 +83,7 @@ async function main() {
   await testExtractorFixtures();
 
   const parserGraphIds = wasmModuleGraphIds("parser");
+  assert.deepEqual(parserGraphIds, [...parserGraphIds].sort());
   assert.deepEqual(new Set(parserGraphIds), new Set([
     "std/mem",
     "std/alloc",
@@ -91,11 +92,6 @@ async function main() {
     "parser_state",
     "parser",
   ]));
-  assertComesBefore(parserGraphIds, "std/mem", "parser");
-  assertComesBefore(parserGraphIds, "parser_state", "parser");
-  assertComesBefore(parserGraphIds, "std/alloc", "std/hash");
-  assertComesBefore(parserGraphIds, "std/hash", "std/strtab");
-  assertComesBefore(parserGraphIds, "std/strtab", "parser");
   assert.equal(wasmModuleUrl("std/strtab", "/assets/wasm"), "/assets/wasm/std/strtab.wasm");
 
   const registryModuleIds = wasmModuleIds();
