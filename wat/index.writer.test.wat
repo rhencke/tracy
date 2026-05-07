@@ -48,6 +48,7 @@
   (import "index" "INDEX_COUNTER_COLUMN_VALUE" (global $INDEX_COUNTER_COLUMN_VALUE i32))
   (import "index" "INDEX_DECODE_HINT_COMPACT_SLICES" (global $INDEX_DECODE_HINT_COMPACT_SLICES i32))
   (import "index" "INDEX_DECODE_HINT_COUNTERS" (global $INDEX_DECODE_HINT_COUNTERS i32))
+  (import "index" "INDEX_DECODE_HINT_PARTIAL" (global $INDEX_DECODE_HINT_PARTIAL i32))
   (import "index" "INDEX_PAGE_CATALOG_ENTRY_BYTES" (global $INDEX_PAGE_CATALOG_ENTRY_BYTES i32))
   (import "index" "INDEX_PAGE_CATALOG_CAPACITY" (global $INDEX_PAGE_CATALOG_CAPACITY i32))
   (import "index" "INDEX_QUERY_RESULT_BYTES" (global $INDEX_QUERY_RESULT_BYTES i32))
@@ -154,6 +155,12 @@
     (func $index_writer_committed_events (result i32)))
   (import "index" "index_writer_next_page_id"
     (func $index_writer_next_page_id (result i32)))
+  (import "index" "index_writer_covered_range_valid"
+    (func $index_writer_covered_range_valid (result i32)))
+  (import "index" "index_writer_covered_range_start"
+    (func $index_writer_covered_range_start (result i32)))
+  (import "index" "index_writer_covered_range_end"
+    (func $index_writer_covered_range_end (result i32)))
   (import "index" "index_reader_init"
     (func $index_reader_init (param i32)))
   (import "index" "read_page"
@@ -1087,6 +1094,125 @@
     i32.load
     i32.const 0
     i32.const 72
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_partial_hint_preserves_page_kind_bits")
+    call $zero_page
+    call $write_directory
+
+    global.get $PAGE
+    i32.const 0
+    i64.const 100
+    i64.const 200
+    i32.const 1
+    global.get $PAYLOAD_LEN
+    global.get $INDEX_DECODE_HINT_PARTIAL
+    i32.const 7
+    i32.const 8
+    i32.shl
+    i32.or
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.or
+    i32.const 1
+    i64.const 42
+    call $index_write_header
+
+    call $commit_footer
+
+    global.get $PAGE
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_PARTIAL
+    i32.and
+    global.get $INDEX_DECODE_HINT_PARTIAL
+    i32.const 430
+    call $assert_eq_i32
+
+    global.get $PAGE
+    i32.const 36
+    i32.add
+    i32.load
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.and
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.const 431
+    call $assert_eq_i32
+
+    global.get $PAGE
+    i32.const 36
+    i32.add
+    i32.load
+    i32.const 8
+    i32.shr_u
+    i32.const 7
+    i32.const 432
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_writer_tracks_committed_covered_range")
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 23
+    call $index_writer_init
+
+    call $index_writer_covered_range_valid
+    i32.const 0
+    i32.const 433
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 101
+    f64.const 10
+    f64.const 5
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 434
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_valid
+    i32.const 0
+    i32.const 435
+    call $assert_eq_i32
+
+    i32.const 88
+    i32.const 102
+    f64.const 30
+    f64.const 7
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 436
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_OK
+    i32.const 437
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_valid
+    i32.const 1
+    i32.const 438
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_start
+    i32.const 10
+    i32.const 439
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_end
+    i32.const 37
+    i32.const 440
     call $assert_eq_i32
   )
 

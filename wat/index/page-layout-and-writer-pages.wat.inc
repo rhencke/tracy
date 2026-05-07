@@ -691,6 +691,10 @@
       return
     end
 
+    global.get $index_writer_bucket_start
+    global.get $index_writer_bucket_end
+    call $index_covered_range_add
+
     global.get $index_writer_mode
     i32.const 1
     i32.eq

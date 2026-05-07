@@ -57,6 +57,7 @@
   (global $INDEX_COUNTER_COLUMN_VALUE (export "INDEX_COUNTER_COLUMN_VALUE") i32 (i32.const 3))
   (global $INDEX_DECODE_HINT_COMPACT_SLICES (export "INDEX_DECODE_HINT_COMPACT_SLICES") i32 (i32.const 1))
   (global $INDEX_DECODE_HINT_COUNTERS (export "INDEX_DECODE_HINT_COUNTERS") i32 (i32.const 2))
+  (global $INDEX_DECODE_HINT_PARTIAL (export "INDEX_DECODE_HINT_PARTIAL") i32 (i32.const 4))
 
   (global $INDEX_ENCODING_ABSENT (export "INDEX_ENCODING_ABSENT") i32 (i32.const 0))
   (global $INDEX_ENCODING_UVARINT (export "INDEX_ENCODING_UVARINT") i32 (i32.const 1))
@@ -146,6 +147,9 @@
   (global $index_reader_cache_hits (mut i32) (i32.const 0))
   (global $index_reader_cache_misses (mut i32) (i32.const 0))
   (global $index_reader_cache_evictions (mut i32) (i32.const 0))
+  (global $index_covered_range_valid (mut i32) (i32.const 0))
+  (global $index_covered_range_start (mut i32) (i32.const 0))
+  (global $index_covered_range_end (mut i32) (i32.const 0))
   (global $index_track_count (mut i32) (i32.const 0))
   (global $index_slice_page_count (mut i32) (i32.const 0))
 

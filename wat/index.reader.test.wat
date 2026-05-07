@@ -180,6 +180,12 @@
     (func $index_page_catalog_reset))
   (import "index" "index_page_catalog_add_slice_page"
     (func $index_page_catalog_add_slice_page (param i32 i32 i32 i32 i32)))
+  (import "index" "index_reader_covered_range_valid"
+    (func $index_reader_covered_range_valid (result i32)))
+  (import "index" "index_reader_covered_range_start"
+    (func $index_reader_covered_range_start (result i32)))
+  (import "index" "index_reader_covered_range_end"
+    (func $index_reader_covered_range_end (result i32)))
   (import "index" "index_query_range"
     (func $index_query_range (param i32 i32 i32 i32) (result i32)))
   (import "index" "index_reader_configure_cache"
@@ -1312,6 +1318,54 @@
     call $index_reader_cache_hit
     i32.const 0
     i32.const 116
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_reader_catalog_tracks_covered_range")
+    call $index_page_catalog_reset
+
+    call $index_reader_covered_range_valid
+    i32.const 0
+    i32.const 425
+    call $assert_eq_i32
+
+    i32.const 3
+    i32.const 10
+    i32.const 40
+    i32.const 50
+    i32.const 2
+    call $index_page_catalog_add_slice_page
+
+    call $index_reader_covered_range_valid
+    i32.const 1
+    i32.const 426
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_start
+    i32.const 40
+    i32.const 427
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 50
+    i32.const 428
+    call $assert_eq_i32
+
+    i32.const 3
+    i32.const 11
+    i32.const 20
+    i32.const 90
+    i32.const 3
+    call $index_page_catalog_add_slice_page
+
+    call $index_reader_covered_range_start
+    i32.const 20
+    i32.const 429
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 90
+    i32.const 430
     call $assert_eq_i32
   )
 )

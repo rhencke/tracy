@@ -66,9 +66,10 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `COLD_RELOAD_TARGET_BUDGET_MS` | `30000` | Maximum cold-reload time budget for the v0.1 mobile target trace size. |
 | `COLD_RELOAD_MIN_BUDGET_MS` | `250` | Minimum cold-reload check budget for small local fixtures where process startup noise dominates. |
 | `INDEX_TARGET_ENCODED_BYTES_PER_EVENT` | `12` | Maximum average compact index payload bytes per event. |
-| `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
 | `INDEX_COLUMN_ENTRY_BYTES` | `16` | Byte length of one compact index column directory entry. |
 | `INDEX_QUERY_RESULT_FIELD_BYTES` | `4` | Byte length of one u32 field in an index query result row. |
+| `INDEX_DECODE_HINT_PARTIAL` | `4` | Decode-hints bit marking an unfinished page or LOD bucket. |
+| `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
 | `INDEX_PAGE_HEADER_BUCKET_START_OFFSET` | `12` | Index page header byte offset of the inclusive page timestamp start. |
 | `INDEX_PAGE_HEADER_BUCKET_END_OFFSET` | `20` | Index page header byte offset of the inclusive page timestamp end. |
 | `INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET` | `28` | Index page header byte offset of the encoded record count. |

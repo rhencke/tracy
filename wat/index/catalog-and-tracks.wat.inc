@@ -36,6 +36,42 @@
     call $index_page_catalog_ensure_memory
     i32.const 0
     global.set $index_slice_page_count
+    i32.const 0
+    global.set $index_covered_range_valid
+    i32.const 0
+    global.set $index_covered_range_start
+    i32.const 0
+    global.set $index_covered_range_end
+  )
+
+  (func $index_covered_range_add (param $ts_min i32) (param $ts_max i32)
+    global.get $index_covered_range_valid
+    i32.eqz
+    if
+      i32.const 1
+      global.set $index_covered_range_valid
+      local.get $ts_min
+      global.set $index_covered_range_start
+      local.get $ts_max
+      global.set $index_covered_range_end
+      return
+    end
+
+    local.get $ts_min
+    global.get $index_covered_range_start
+    i32.lt_u
+    if
+      local.get $ts_min
+      global.set $index_covered_range_start
+    end
+
+    local.get $ts_max
+    global.get $index_covered_range_end
+    i32.gt_u
+    if
+      local.get $ts_max
+      global.set $index_covered_range_end
+    end
   )
 
   (func $index_page_catalog_add_slice_page (export "index_page_catalog_add_slice_page")
@@ -89,6 +125,46 @@
     i32.const 1
     i32.add
     global.set $index_slice_page_count
+
+    local.get $ts_min
+    local.get $ts_max
+    call $index_covered_range_add
+  )
+
+  (func (export "index_covered_range_valid") (result i32)
+    global.get $index_covered_range_valid
+  )
+
+  (func (export "index_covered_range_start") (result i32)
+    global.get $index_covered_range_start
+  )
+
+  (func (export "index_covered_range_end") (result i32)
+    global.get $index_covered_range_end
+  )
+
+  (func (export "index_writer_covered_range_valid") (result i32)
+    global.get $index_covered_range_valid
+  )
+
+  (func (export "index_writer_covered_range_start") (result i32)
+    global.get $index_covered_range_start
+  )
+
+  (func (export "index_writer_covered_range_end") (result i32)
+    global.get $index_covered_range_end
+  )
+
+  (func (export "index_reader_covered_range_valid") (result i32)
+    global.get $index_covered_range_valid
+  )
+
+  (func (export "index_reader_covered_range_start") (result i32)
+    global.get $index_covered_range_start
+  )
+
+  (func (export "index_reader_covered_range_end") (result i32)
+    global.get $index_covered_range_end
   )
 
   (func $index_track_entry_ptr (param $track_id i32) (result i32)

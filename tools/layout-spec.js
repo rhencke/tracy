@@ -184,6 +184,10 @@ module.exports = {
     "decodeHints",
     "INDEX_DECODE_HINT_TRACK_ID_SHIFT",
   ),
+  INDEX_DECODE_HINT_PARTIAL: indexConstantValue(
+    "decodeHints",
+    "INDEX_DECODE_HINT_PARTIAL",
+  ),
   INDEX_DIRECTORY_BYTES_OFFSET: indexFieldValue("directory", "INDEX_DIRECTORY_BYTES_OFFSET"),
   INDEX_DIRECTORY_COLUMN_COUNT_OFFSET: indexFieldValue(
     "directory",

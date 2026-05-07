@@ -171,10 +171,13 @@ function renderMemoryLayoutSection() {
 
   lines.push(
     `| \`INDEX_TARGET_ENCODED_BYTES_PER_EVENT\` | \`${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.value}\` | ${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.description} |`,
-    `| \`INDEX_DECODE_HINT_TRACK_ID_SHIFT\` | \`${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.value}\` | ${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.description} |`,
     `| \`INDEX_COLUMN_ENTRY_BYTES\` | \`${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.value}\` | ${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.description} |`,
     `| \`INDEX_QUERY_RESULT_FIELD_BYTES\` | \`${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value}\` | ${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.description} |`,
   );
+
+  for (const [name, entry] of Object.entries(spec.index.decodeHints)) {
+    lines.push(`| \`${name}\` | \`${formatValue(entry)}\` | ${entry.description} |`);
+  }
 
   for (const section of [spec.index.pageHeader, spec.index.directory, spec.index.queryResult]) {
     for (const entry of section.fields) {
