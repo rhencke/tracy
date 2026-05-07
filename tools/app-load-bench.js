@@ -19,22 +19,22 @@ const FAST_3G = Object.freeze({
 });
 const BUDGETS = Object.freeze({
   cold: Object.freeze({
-    fcpMs: 1000,
-    transferBytes: 200000,
-    ttiMs: 1500,
-    wasmInstantiateMs: 300,
+    fcpMs: 950,
+    transferBytes: 65000,
+    ttiMs: 250,
+    wasmInstantiateMs: 200,
   }),
   warmHttp: Object.freeze({
-    fcpMs: 200,
-    transferBytes: 0,
-    ttiMs: 300,
-    wasmInstantiateMs: 80,
-  }),
-  warmSw: Object.freeze({
     fcpMs: 50,
     transferBytes: 0,
-    ttiMs: 100,
-    wasmInstantiateMs: 30,
+    ttiMs: 25,
+    wasmInstantiateMs: 25,
+  }),
+  warmSw: Object.freeze({
+    fcpMs: 20,
+    transferBytes: 0,
+    ttiMs: 15,
+    wasmInstantiateMs: 15,
   }),
 });
 const MIME_TYPES = Object.freeze({
@@ -554,6 +554,26 @@ async function runBench(options) {
 }
 
 function runSelfTest() {
+  assert.deepEqual(BUDGETS, {
+    cold: {
+      fcpMs: 950,
+      transferBytes: 65000,
+      ttiMs: 250,
+      wasmInstantiateMs: 200,
+    },
+    warmHttp: {
+      fcpMs: 50,
+      transferBytes: 0,
+      ttiMs: 25,
+      wasmInstantiateMs: 25,
+    },
+    warmSw: {
+      fcpMs: 20,
+      transferBytes: 0,
+      ttiMs: 15,
+      wasmInstantiateMs: 15,
+    },
+  });
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
       fcpMs: 1,

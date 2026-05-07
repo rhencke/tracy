@@ -33,15 +33,15 @@ function main() {
 
   assert.deepEqual(assertions["first-contentful-paint"], [
     "error",
-    { maxNumericValue: 1000 },
+    { maxNumericValue: 950 },
   ]);
   assert.deepEqual(assertions.interactive, [
     "error",
-    { maxNumericValue: 1500 },
+    { maxNumericValue: 1000 },
   ]);
   assert.deepEqual(assertions["total-byte-weight"], [
     "error",
-    { maxNumericValue: 200000 },
+    { maxNumericValue: 65000 },
   ]);
   assert.deepEqual(assertions["categories:pwa"], [
     "error",

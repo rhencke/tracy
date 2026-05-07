@@ -29,11 +29,11 @@ module.exports = {
     assert: {
       assertions: {
         "categories:pwa": ["error", { minScore: 0.9 }],
-        "first-contentful-paint": ["error", { maxNumericValue: 1000 }],
+        "first-contentful-paint": ["error", { maxNumericValue: 950 }],
         "installable-manifest": "error",
-        interactive: ["error", { maxNumericValue: 1500 }],
+        interactive: ["error", { maxNumericValue: 1000 }],
         "service-worker": "error",
-        "total-byte-weight": ["error", { maxNumericValue: 200000 }],
+        "total-byte-weight": ["error", { maxNumericValue: 65000 }],
       },
     },
     upload: {
