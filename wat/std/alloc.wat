@@ -1,4 +1,5 @@
 (module
+  ;; @thread shared
   (import "env" "memory" (memory $memory 1 32768))
 
   (global $WASM_PAGE_SIZE i32 (i32.const 0x00010000))

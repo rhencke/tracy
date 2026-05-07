@@ -1,4 +1,5 @@
 (module
+  ;; @thread shared
   (import "env" "memory" (memory $memory 1 32768))
   (import "alloc" "alloc" (func $alloc (param i32) (result i32)))
   (import "hash" "hash_new" (func $hash_new (param i32) (result i32)))

@@ -1,4 +1,5 @@
 (module
+  ;; @thread worker
   (import "env" "memory" (memory $memory 1 32768))
 
   ;; @generated parser-state-globals:start

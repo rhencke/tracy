@@ -1,4 +1,5 @@
 (module
+  ;; @thread shared
   (import "env" "memory" (memory $memory 1))
   (import "watwat" "fail" (func $fail (param i32)))
 

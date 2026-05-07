@@ -10,6 +10,7 @@ const {
   extractWasmModules,
   resolveDependencies,
   scanImportNames,
+  scanThreadMarker,
 } = require("./extract-wasm-modules.js");
 
 async function withFixtureWat(source, callback) {
@@ -30,6 +31,22 @@ async function testExtractorFixtures() {
 
   await withFixtureWat("(module)\n", async (fixturePath) => {
     assert.deepEqual(await scanImportNames(fixturePath), []);
+  });
+
+  await withFixtureWat(";; @thread worker\n(module)\n", async (fixturePath) => {
+    assert.equal(await scanThreadMarker(fixturePath), "worker");
+  });
+
+  await withFixtureWat(";; @thread main\n;; @thread worker\n(module)\n", async (fixturePath) => {
+    await assert.rejects(scanThreadMarker(fixturePath), /duplicate @thread marker/);
+  });
+
+  await withFixtureWat(";; @thread render\n(module)\n", async (fixturePath) => {
+    await assert.rejects(scanThreadMarker(fixturePath), /invalid @thread marker render/);
+  });
+
+  await withFixtureWat("(module)\n", async (fixturePath) => {
+    await assert.rejects(scanThreadMarker(fixturePath), /missing @thread marker/);
   });
 
   await withFixtureWat(
@@ -59,6 +76,10 @@ async function testExtractorFixtures() {
   );
 
   const manifest = await extractWasmModules();
+  assert.equal(manifest.modules.app.thread, "main");
+  assert.equal(manifest.modules.index.thread, "worker");
+  assert.equal(manifest.modules.parser.thread, "worker");
+  assert.equal(manifest.modules["std/mem"].thread, "shared");
   assert.deepEqual(manifest.modules.app.dependencies, []);
   assert.deepEqual(manifest.modules.index.dependencies, ["std/mem"]);
   assert.deepEqual(manifest.modules.parser.dependencies, ["std/mem", "std/strtab", "parser_state"]);

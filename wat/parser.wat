@@ -1,4 +1,5 @@
 (module
+  ;; @thread worker
   (import "env" "memory" (memory $memory 1 32768))
   ;; @generated host-imports parser:start
   (import "host" "opfs_source_read" (func $opfs_source_read (param i32 i64 i32 i32) (result i32)))
