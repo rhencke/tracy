@@ -703,10 +703,6 @@
       return
     end
 
-    global.get $index_writer_bucket_start
-    global.get $index_writer_bucket_end
-    call $index_covered_range_add
-
     global.get $index_writer_mode
     i32.const 1
     i32.eq
@@ -717,6 +713,11 @@
       global.get $index_writer_bucket_end
       global.get $index_writer_count
       call $index_page_catalog_add_slice_page
+      drop
+    else
+      global.get $index_writer_bucket_start
+      global.get $index_writer_bucket_end
+      call $index_covered_range_add
     end
 
     global.get $index_writer_next_page_id

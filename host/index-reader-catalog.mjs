@@ -84,16 +84,23 @@ export function rebuildMainThreadSliceCatalog(
       continue;
     }
 
-    index.index_page_catalog_add_slice_page(
+    const added = index.index_page_catalog_add_slice_page(
       hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
       pageId,
       view.getUint32(page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET, true),
       view.getUint32(page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET, true),
       view.getUint32(page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET, true),
     );
+    if (added === 0) {
+      return {
+        catalogFull: true,
+        pageCount: probeUntilMissing ? pageId : pageCount,
+        rebuilt,
+      };
+    }
   }
 
-  return { pageCount: nextPageId, rebuilt };
+  return { catalogFull: false, pageCount: nextPageId, rebuilt };
 }
 
 export function mainThreadSliceCatalogPageCount(host, indexId) {

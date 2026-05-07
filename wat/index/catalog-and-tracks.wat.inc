@@ -182,12 +182,14 @@
     (param $ts_min i32)
     (param $ts_max i32)
     (param $event_count i32)
+    (result i32)
     (local $entry i32)
 
     global.get $index_slice_page_count
     global.get $INDEX_PAGE_CATALOG_CAPACITY
     i32.ge_u
     if
+      i32.const 0
       return
     end
 
@@ -232,6 +234,7 @@
     local.get $ts_max
     call $index_covered_range_add
     call $index_covered_range_recompute_from_catalog
+    i32.const 1
   )
 
   (func (export "index_covered_range_valid") (result i32)

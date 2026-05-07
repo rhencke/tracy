@@ -611,6 +611,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
               recordCount,
               trackId,
             });
+            return 1;
           },
           index_page_catalog_reset() {
             pageCatalog.length = 0;
@@ -810,6 +811,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
             recordCount,
             trackId,
           });
+          return 1;
         },
         index_page_catalog_reset() {
           pageCatalog.length = 0;
@@ -884,6 +886,76 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
     "stale-size hosts should not reset below already discovered pages",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
+}
+
+async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
+  const catalog = await import(moduleUrl("host/index-reader-catalog.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const pagePtr = 32768;
+  const addedPages = [];
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
+      assert.equal(indexId, 70);
+      return BigInt(2 * OPFS_PAGE_SIZE);
+    },
+  };
+  const index = {
+    INDEX_STATUS_OK: 0,
+    index_page_catalog_add_slice_page(
+      trackId,
+      pageId,
+      bucketStart,
+      bucketEnd,
+      recordCount,
+    ) {
+      if (pageId === 1) {
+        return 0;
+      }
+      addedPages.push({
+        bucketEnd,
+        bucketStart,
+        pageId,
+        recordCount,
+        trackId,
+      });
+      return 1;
+    },
+    index_page_catalog_reset() {
+      addedPages.length = 0;
+    },
+    index_validate_page(ptr, len) {
+      assert.equal(ptr, pagePtr);
+      assert.equal(len, OPFS_PAGE_SIZE);
+      return 0;
+    },
+    read_page(level, pageId) {
+      assert.equal(level, 0);
+      view.setUint32(pagePtr + INDEX_PAGE_HEADER_BUCKET_START_OFFSET, pageId * 40, true);
+      view.setUint32(pagePtr + INDEX_PAGE_HEADER_BUCKET_END_OFFSET, pageId * 40 + 40, true);
+      view.setUint32(pagePtr + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET, 2, true);
+      view.setUint32(
+        pagePtr + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+        INDEX_DECODE_HINT_COMPACT_SLICES | (4 << INDEX_DECODE_HINT_TRACK_ID_SHIFT),
+        true,
+      );
+      return pagePtr;
+    },
+  };
+
+  const result = catalog.rebuildMainThreadSliceCatalog(memory, host, index, 70);
+
+  assert.deepEqual(result, { catalogFull: true, pageCount: 2, rebuilt: true });
+  assert.deepEqual(addedPages, [
+    {
+      bucketEnd: 40,
+      bucketStart: 0,
+      pageId: 0,
+      recordCount: 2,
+      trackId: 4,
+    },
+  ]);
 }
 
 async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
@@ -1411,6 +1483,7 @@ async function main() {
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
+  await checkMainThreadSliceCatalogReportsCapacityOverflow();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererTilesFullVisibleViewport();

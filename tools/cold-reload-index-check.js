@@ -411,12 +411,16 @@ function rebuildSliceCatalog(index, view, pages) {
       continue;
     }
 
-    index.index_page_catalog_add_slice_page(
-      hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
-      pageId,
-      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET),
-      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET),
-      readU32(view, page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET),
+    expectEq(
+      index.index_page_catalog_add_slice_page(
+        hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
+        pageId,
+        readU32(view, page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET),
+        readU32(view, page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET),
+        readU32(view, page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET),
+      ),
+      1,
+      `catalog page ${pageId} added`,
     );
   }
 }
