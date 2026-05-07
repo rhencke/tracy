@@ -6,6 +6,8 @@ const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
 const DEFAULT_INGEST_NAME_PTR = 4096;
 const DEFAULT_INGEST_NAME_MAX_BYTES = 4096;
+const DEFAULT_READER_NAME_PTR = 8192;
+const DEFAULT_READER_CACHE_SLOTS = 4;
 const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
   bootstrapStart: "tracy.bootstrap.start",
@@ -38,6 +40,7 @@ function cloneWorkerStatus(status) {
   return {
     coveredRange: status.coveredRange,
     error: status.error,
+    ingest: status.ingest,
     progress: status.progress,
     result: status.result,
     state: status.state,
@@ -51,11 +54,162 @@ function notifyWorkerStatus(status, options, message) {
   return snapshot;
 }
 
+function globalValue(value) {
+  return value instanceof WebAssembly.Global ? value.value : value;
+}
+
+function readCoveredRange(index) {
+  const valid =
+    globalValue(index?.index_reader_covered_range_valid?.() ?? 0) !== 0;
+
+  return {
+    valid,
+    start: valid
+      ? globalValue(index.index_reader_covered_range_start?.() ?? 0)
+      : 0,
+    end: valid
+      ? globalValue(index.index_reader_covered_range_end?.() ?? 0)
+      : 0,
+  };
+}
+
+function writeHostString(memory, ptr, value, label) {
+  const encoded = new TextEncoder().encode(value);
+  const bytes = new Uint8Array(memory.buffer);
+  const end = ptr + encoded.byteLength;
+
+  if (end > bytes.byteLength) {
+    throw new Error(`${label} does not fit in memory at ${ptr}`);
+  }
+
+  bytes.set(encoded, ptr);
+  return encoded.byteLength;
+}
+
+export function createMainThreadIndexReaderController(memory, host, options = {}) {
+  const instantiate =
+    options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
+  const readerState = {
+    error: null,
+    exports: null,
+    indexId: null,
+    indexName: null,
+    openPromise: null,
+    state: "idle",
+  };
+
+  function cloneReaderStatus() {
+    return {
+      error: readerState.error,
+      indexId: readerState.indexId,
+      indexName: readerState.indexName,
+      state: readerState.state,
+    };
+  }
+
+  async function loadIndexExports() {
+    if (readerState.exports !== null) {
+      return readerState.exports;
+    }
+
+    const loaded = await instantiate(
+      "index",
+      MAIN_THREAD,
+      { env: { memory }, host },
+      {
+        baseUrl: options.baseUrl ?? "wasm/",
+        compile: options.compile,
+        instantiate: options.instantiate,
+      },
+    );
+    readerState.exports = loaded.exports;
+    return readerState.exports;
+  }
+
+  async function open(indexName) {
+    if (typeof indexName !== "string" || indexName.length === 0) {
+      return false;
+    }
+    if (readerState.state === "ready" && readerState.indexName === indexName) {
+      return true;
+    }
+    if (
+      readerState.state === "opening" &&
+      readerState.indexName === indexName &&
+      readerState.openPromise !== null
+    ) {
+      return readerState.openPromise;
+    }
+
+    readerState.error = null;
+    readerState.indexName = indexName;
+    readerState.state = "opening";
+    readerState.openPromise = (async () => {
+      try {
+        const index = await loadIndexExports();
+        const namePtr = options.readerNamePtr ?? DEFAULT_READER_NAME_PTR;
+        const nameLen = writeHostString(
+          memory,
+          namePtr,
+          indexName,
+          "main-thread index name",
+        );
+        const indexId = await host[HOST_IMPORT_NAME.OPFS_INDEX_OPEN](
+          namePtr,
+          nameLen,
+        );
+
+        index.index_reader_configure_cache?.(
+          options.readerCacheSlots ?? DEFAULT_READER_CACHE_SLOTS,
+        );
+        index.index_reader_init(indexId);
+        readerState.indexId = indexId;
+        readerState.state = "ready";
+        return true;
+      } catch (error) {
+        readerState.error = errorMessage(error);
+        readerState.state = "error";
+        throw error;
+      } finally {
+        readerState.openPromise = null;
+      }
+    })();
+
+    return readerState.openPromise;
+  }
+
+  return {
+    coveredRange() {
+      return readerState.exports === null
+        ? { valid: false, start: 0, end: 0 }
+        : readCoveredRange(readerState.exports);
+    },
+    exports() {
+      return readerState.exports;
+    },
+    async open(indexName) {
+      return open(indexName);
+    },
+    queryRange(trackId, tsMin, tsMax, outPtr) {
+      if (readerState.state !== "ready" || readerState.exports === null) {
+        throw new Error("main-thread index reader is not ready");
+      }
+
+      return readerState.exports.index_query_range(trackId, tsMin, tsMax, outPtr);
+    },
+    status() {
+      return cloneReaderStatus();
+    },
+  };
+}
+
 export function createIngestWorkerController(options = {}) {
   const WorkerCtor = options.Worker ?? globalThis.Worker;
+  const indexReader = options.indexReader ?? null;
   const status = {
     coveredRange: null,
     error: null,
+    ingest: null,
     progress: null,
     result: null,
     state: "idle",
@@ -74,6 +228,7 @@ export function createIngestWorkerController(options = {}) {
       status() {
         return cloneWorkerStatus(status);
       },
+      indexReader: null,
       terminate() {},
       worker: null,
     };
@@ -95,6 +250,7 @@ export function createIngestWorkerController(options = {}) {
       status() {
         return cloneWorkerStatus(status);
       },
+      indexReader: null,
       terminate() {},
       worker: null,
     };
@@ -109,6 +265,13 @@ export function createIngestWorkerController(options = {}) {
     } else if (message?.type === INGEST_WORKER_MESSAGE.COVERED_RANGE) {
       status.coveredRange = message;
       status.state = "running";
+      if (message.valid && typeof status.ingest?.indexName === "string") {
+        indexReader?.open(status.ingest.indexName)?.catch((error) => {
+          status.error = errorMessage(error);
+          status.state = "error";
+          notifyWorkerStatus(status, options, null);
+        });
+      }
     } else if (message?.type === INGEST_WORKER_MESSAGE.COMPLETE) {
       status.result = message;
       status.state = "complete";
@@ -141,6 +304,7 @@ export function createIngestWorkerController(options = {}) {
     start(data = {}) {
       status.state = "running";
       status.error = null;
+      status.ingest = data;
       status.result = null;
       notifyWorkerStatus(status, options, null);
       worker.postMessage({
@@ -152,6 +316,7 @@ export function createIngestWorkerController(options = {}) {
     status() {
       return cloneWorkerStatus(status);
     },
+    indexReader,
     fail(error) {
       status.error = errorMessage(error);
       status.state = "error";
@@ -339,8 +504,23 @@ async function loadApp(memory, host, options = {}) {
 }
 
 export function runApp(memory, host, options = {}) {
+  const indexReader =
+    options.indexReader === false
+      ? null
+      : options.indexReader ??
+        createMainThreadIndexReaderController(memory, host, {
+          ...options.indexReaderOptions,
+          baseUrl: options.baseUrl,
+          compile: options.compile,
+          instantiate: options.instantiate,
+          instantiateWasmModuleForThread: options.instantiateWasmModuleForThread,
+        });
   const ingestWorker =
-    options.ingestWorker ?? createIngestWorkerController(options.worker ?? {});
+    options.ingestWorker ??
+    createIngestWorkerController({
+      ...(options.worker ?? {}),
+      indexReader,
+    });
 
   installFileSelectionIngest(memory, host, ingestWorker, options);
 

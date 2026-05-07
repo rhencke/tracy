@@ -76,6 +76,7 @@ async function checkRuntimeOrchestratesWorker() {
   const performanceEntries = [];
   const ticks = [];
   const memory = new WebAssembly.Memory({ initial: 1 });
+  const indexReaderOpenCalls = [];
   const host = {
     opfs_index_create() {
       return 0;
@@ -95,6 +96,12 @@ async function checkRuntimeOrchestratesWorker() {
     ingest: {
       indexName: "indexes/trace.idx",
       sourceName: "sources/trace.json",
+    },
+    indexReader: {
+      open(indexName) {
+        indexReaderOpenCalls.push(indexName);
+        return Promise.resolve(true);
+      },
     },
     instantiateWasmModuleForThread: async (id, thread, imports) => {
       instantiateCalls.push({
@@ -198,6 +205,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(controller.status().progress.committedPages, 2);
   assert.equal(controller.status().coveredRange.start, 100);
   assert.equal(controller.status().coveredRange.end, 132);
+  assert.deepEqual(indexReaderOpenCalls, ["indexes/trace.idx"]);
   assert.equal(controller.status().result.committedEvents, 7);
   assert.equal(workerStatus.at(-1).status.state, "complete");
 
@@ -249,6 +257,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   };
 
   const controller = runtime.runApp(memory, host, {
+    indexReader: false,
     instantiateWasmModuleForThread: async () => ({
       exports: {
         tracy_main() {},
@@ -312,6 +321,7 @@ async function checkFileSelectionSetupErrorsReportStatus() {
   };
 
   const controller = runtime.runApp(memory, host, {
+    indexReader: false,
     instantiateWasmModuleForThread: async () => ({
       exports: {
         tracy_main() {},
@@ -339,10 +349,91 @@ async function checkFileSelectionSetupErrorsReportStatus() {
   assert.equal(workerStatus.at(-1).status.state, "error");
 }
 
+async function checkMainThreadIndexReaderQueriesCommittedPages() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const openedNames = [];
+  const calls = [];
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
+      openedNames.push(
+        new TextDecoder().decode(new Uint8Array(memory.buffer, namePtr, nameLen)),
+      );
+      return 70;
+    },
+  };
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async (id, thread, imports, options) => {
+      calls.push({
+        id,
+        thread,
+        hasMemory: imports.env.memory === memory,
+        baseUrl: options.baseUrl,
+      });
+      return {
+        exports: {
+          index_query_range(trackId, tsMin, tsMax, outPtr) {
+            assert.equal(trackId, 4);
+            assert.equal(tsMin, 100);
+            assert.equal(tsMax, 140);
+            assert.equal(outPtr, 4096);
+            return 3;
+          },
+          index_reader_configure_cache(slotCount) {
+            assert.equal(slotCount, 2);
+            return slotCount;
+          },
+          index_reader_covered_range_end() {
+            return 140;
+          },
+          index_reader_covered_range_start() {
+            return 100;
+          },
+          index_reader_covered_range_valid() {
+            return 1;
+          },
+          index_reader_init(indexId) {
+            assert.equal(indexId, 70);
+          },
+        },
+      };
+    },
+    readerCacheSlots: 2,
+  });
+
+  assert.deepEqual(reader.status(), {
+    error: null,
+    indexId: null,
+    indexName: null,
+    state: "idle",
+  });
+  assert.deepEqual(reader.coveredRange(), { valid: false, start: 0, end: 0 });
+
+  await reader.open("indexes/trace.idx");
+
+  assert.deepEqual(openedNames, ["indexes/trace.idx"]);
+  assert.deepEqual(calls, [
+    { id: "index", thread: "main", hasMemory: true, baseUrl: "wasm/" },
+  ]);
+  assert.deepEqual(reader.status(), {
+    error: null,
+    indexId: 70,
+    indexName: "indexes/trace.idx",
+    state: "ready",
+  });
+  assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
+  assert.equal(reader.queryRange(4, 100, 140, 4096), 3);
+
+  await reader.open("indexes/trace.idx");
+  assert.deepEqual(openedNames, ["indexes/trace.idx"]);
+}
+
 async function main() {
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
   await checkFileSelectionSetupErrorsReportStatus();
+  await checkMainThreadIndexReaderQueriesCommittedPages();
 }
 
 main().catch((error) => {

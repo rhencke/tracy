@@ -77,7 +77,7 @@ async function testExtractorFixtures() {
 
   const manifest = await extractWasmModules();
   assert.equal(manifest.modules.app.thread, "main");
-  assert.equal(manifest.modules.index.thread, "worker");
+  assert.equal(manifest.modules.index.thread, "shared");
   assert.equal(manifest.modules.parser.thread, "worker");
   assert.equal(manifest.modules["std/mem"].thread, "shared");
   assert.deepEqual(manifest.modules.app.dependencies, []);
@@ -128,6 +128,7 @@ async function main() {
   assert.equal(wasmModuleRunsOnThread("std/mem", "worker"), true);
   assert.deepEqual(new Set(wasmModuleIdsForThread("main")), new Set([
     "app",
+    "index",
     "std/alloc",
     "std/array",
     "std/assert",
