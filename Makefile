@@ -12,6 +12,21 @@ WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
 COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
 COV_MANIFEST_FILES :=
+HOST_JS := $(shell find host -type f -name '*.mjs' -print | sort)
+STATIC_FILES := $(shell find static -type f -print | sort)
+STATIC_DIST_FILES := $(patsubst static/%,dist/%,$(STATIC_FILES))
+APP_SHELL_FILES := dist/index.html dist/manifest.webmanifest
+BUNDLE_FILES := \
+	dist/bootstrap.bundle.js \
+	dist/bootstrap.bundle.js.map \
+	dist/worker.bundle.js \
+	dist/worker.bundle.js.map
+DIST_FILES := \
+	$(WASM_FILES) \
+	$(BUNDLE_FILES) \
+	$(APP_SHELL_FILES) \
+	$(STATIC_DIST_FILES) \
+	dist/build-info.js
 
 MODULE_DOC_GENERATOR := $(wildcard tools/generate-wasm-modules-docs.js)
 
@@ -50,9 +65,9 @@ GENERATED_INPUTS := \
 	$(WAT_SOURCES) \
 	$(WAT_INCLUDES)
 
-.PHONY: all generated wasm wasm-cov check-generated
+.PHONY: all generated wasm wasm-cov bundle dist check-generated
 
-all: generated wasm
+all: dist
 
 generated: $(GENERATED_FILES)
 
@@ -116,6 +131,50 @@ endef
 $(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_COV_RULE,$(wat))))
 
 wasm-cov: $(COV_WAT_FILES) $(COV_MANIFEST_FILES) $(COV_WASM_FILES)
+
+dist/bootstrap.bundle.js dist/bootstrap.bundle.js.map &: bootstrap.js $(HOST_JS) $(GENERATED_FILES) package-lock.json
+	mkdir -p $(dir $@)
+	esbuild bootstrap.js \
+		--bundle \
+		--minify \
+		--sourcemap \
+		--outfile=dist/bootstrap.bundle.js
+
+dist/worker.bundle.js dist/worker.bundle.js.map &: worker.js $(HOST_JS) $(GENERATED_FILES) package-lock.json
+	mkdir -p $(dir $@)
+	esbuild worker.js \
+		--bundle \
+		--format=esm \
+		--minify \
+		--sourcemap \
+		--outfile=dist/worker.bundle.js
+
+bundle: $(BUNDLE_FILES)
+
+dist/index.html: index.html
+	mkdir -p $(dir $@)
+	cp $< $@
+
+dist/manifest.webmanifest: manifest.webmanifest
+	mkdir -p $(dir $@)
+	cp $< $@
+
+dist/%: static/%
+	mkdir -p $(dir $@)
+	cp $< $@
+
+dist/build-info.js: $(filter-out dist/build-info.js,$(DIST_FILES))
+	build_hash="$$( \
+		cd dist && \
+		find . -type f ! -name 'build-info.js' ! -path './.wat-compat/*' -print0 \
+			| sort -z \
+			| xargs -0 sha256sum \
+			| sha256sum \
+			| awk '{ print $$1 }' \
+	)"; \
+	printf 'export const TRACY_BUILD_HASH = "%s";\n' "$$build_hash" > $@
+
+dist: $(DIST_FILES)
 
 check-generated: generated
 	git diff --exit-code -- $(GENERATED_FILES)
