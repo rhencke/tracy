@@ -1164,6 +1164,43 @@
     call $assert_eq_i32
   )
 
+  (func (export "test_extractor_resumes_after_need_more_value")
+    (local $event_ptr i32)
+
+    i32.const 183
+    i32.const 2725
+    i32.const 2
+    call $emit_recovery_prefix
+
+    i32.const 55296
+    i32.const 57344
+    call $parser_emit_need_more_token
+    drop
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    i32.const -1
+    i32.const 401
+    call $assert_eq_i32
+
+    call $emit_recovery_valid_tail
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 402
+    call $assert_true
+
+    local.get $event_ptr
+    i32.load8_u
+    i32.const 88
+    i32.const 403
+    call $assert_eq_i32
+  )
+
   (func (export "test_extractor_recovers_from_invalid_value_token")
     (local $event_ptr i32)
 
