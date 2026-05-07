@@ -752,6 +752,7 @@ function runSelfTest() {
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
+  const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
   const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf('performance?.mark?.("tracy.bootstrap.start")');
@@ -778,6 +779,10 @@ function runSelfTest() {
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
   assert.ok(runtimeCoreReadyOffset < appReadyOffset);
+  assert.match(
+    indexHtml,
+    /<link rel="modulepreload" href="host\/wasm-modules\.mjs">/,
+  );
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
   assert.match(
     makefile,
