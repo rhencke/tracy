@@ -223,6 +223,8 @@ async function checkRuntimeOrchestratesWorker() {
       workerMessages.push({ status, message });
     },
   });
+  assert.equal(controllerWithError.worker, null);
+  controllerWithError.start();
   const errorWorker = FakeWorker.instances.at(-1);
 
   errorWorker.events.get("error")({ message: "worker crashed" });
@@ -284,14 +286,14 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   await Promise.resolve();
   await Promise.resolve();
 
-  const worker = controller.worker;
   assert.equal(callbacks.length, 1);
-  assert.deepEqual(worker.posted, []);
+  assert.equal(controller.worker, null);
 
   callbacks[0]({ file: { size: 1234 }, handle: 9 });
   await Promise.resolve();
   await Promise.resolve();
 
+  const worker = controller.worker;
   assert.deepEqual(worker.posted, [
     {
       indexName: "indexes/selected_trace.json.idx",

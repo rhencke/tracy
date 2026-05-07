@@ -1,12 +1,14 @@
-import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
 import { HOST_IMPORT_NAME } from "./abi.mjs";
-import {
-  instantiateWasmModule,
-  instantiateWasmModuleForThread,
-} from "./wasm-modules.mjs";
 
 const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
+const INGEST_WORKER_MESSAGE = Object.freeze({
+  COMPLETE: "complete",
+  COVERED_RANGE: "covered_range",
+  ERROR: "error",
+  PROGRESS: "progress",
+  START: "start",
+});
 const DEFAULT_INGEST_NAME_PTR = 4096;
 const DEFAULT_INGEST_NAME_MAX_BYTES = 4096;
 const DEFAULT_READER_NAME_PTR = 8192;
@@ -77,6 +79,16 @@ function readCoveredRange(index) {
   };
 }
 
+async function defaultCompileWasm(url) {
+  return WebAssembly.compileStreaming(fetch(url));
+}
+
+async function defaultInstantiateWasm(module, imports) {
+  const instance = await WebAssembly.instantiate(module, imports);
+
+  return instance.exports;
+}
+
 function writeHostString(memory, ptr, value, label) {
   const encoded = new TextEncoder().encode(value);
   const bytes = new Uint8Array(memory.buffer);
@@ -91,7 +103,14 @@ function writeHostString(memory, ptr, value, label) {
 }
 
 export function createMainThreadIndexReaderController(memory, host, options = {}) {
-  const instantiate = options.instantiateWasmModule ?? instantiateWasmModule;
+  async function defaultInstantiateIndexWasm(...args) {
+    const { instantiateWasmModule } = await import("./wasm-modules.mjs");
+
+    return instantiateWasmModule(...args);
+  }
+
+  const instantiate =
+    options.instantiateWasmModule ?? defaultInstantiateIndexWasm;
   const readerState = {
     error: null,
     exports: null,
@@ -230,46 +249,7 @@ export function createIngestWorkerController(options = {}) {
     state: "idle",
   };
 
-  if (typeof WorkerCtor !== "function") {
-    status.state = "unavailable";
-    status.error = "module workers are unavailable";
-    notifyWorkerStatus(status, options, null);
-
-    return {
-      start() {
-        notifyWorkerStatus(status, options, null);
-        return false;
-      },
-      status() {
-        return cloneWorkerStatus(status);
-      },
-      indexReader: null,
-      terminate() {},
-      worker: null,
-    };
-  }
-
-  let worker;
-  try {
-    worker = new WorkerCtor(options.workerUrl ?? WORKER_URL, { type: "module" });
-  } catch (error) {
-    status.state = "error";
-    status.error = error instanceof Error ? error.message : String(error);
-    notifyWorkerStatus(status, options, null);
-
-    return {
-      start() {
-        notifyWorkerStatus(status, options, null);
-        return false;
-      },
-      status() {
-        return cloneWorkerStatus(status);
-      },
-      indexReader: null,
-      terminate() {},
-      worker: null,
-    };
-  }
+  let worker = null;
 
   function handleWorkerMessage(event) {
     const message = event?.data ?? event;
@@ -306,23 +286,51 @@ export function createIngestWorkerController(options = {}) {
     notifyWorkerStatus(status, options, event);
   }
 
-  if (typeof worker.addEventListener === "function") {
-    worker.addEventListener("message", handleWorkerMessage);
-    worker.addEventListener("error", handleWorkerError);
-    worker.addEventListener("messageerror", handleWorkerError);
-  } else {
-    worker.onmessage = handleWorkerMessage;
-    worker.onerror = handleWorkerError;
+  function ensureWorker() {
+    if (worker !== null) {
+      return worker;
+    }
+    if (typeof WorkerCtor !== "function") {
+      status.state = "unavailable";
+      status.error = "module workers are unavailable";
+      notifyWorkerStatus(status, options, null);
+      return null;
+    }
+
+    try {
+      worker = new WorkerCtor(options.workerUrl ?? WORKER_URL, { type: "module" });
+    } catch (error) {
+      status.state = "error";
+      status.error = errorMessage(error);
+      notifyWorkerStatus(status, options, null);
+      return null;
+    }
+
+    if (typeof worker.addEventListener === "function") {
+      worker.addEventListener("message", handleWorkerMessage);
+      worker.addEventListener("error", handleWorkerError);
+      worker.addEventListener("messageerror", handleWorkerError);
+    } else {
+      worker.onmessage = handleWorkerMessage;
+      worker.onerror = handleWorkerError;
+    }
+
+    return worker;
   }
 
   return {
     start(data = {}) {
+      const activeWorker = ensureWorker();
+      if (activeWorker === null) {
+        return false;
+      }
+
       status.state = "running";
       status.error = null;
       status.ingest = data;
       status.result = null;
       notifyWorkerStatus(status, options, null);
-      worker.postMessage({
+      activeWorker.postMessage({
         ...data,
         type: INGEST_WORKER_MESSAGE.START,
       });
@@ -338,11 +346,13 @@ export function createIngestWorkerController(options = {}) {
       notifyWorkerStatus(status, options, null);
     },
     terminate() {
-      worker.terminate?.();
+      worker?.terminate?.();
       status.state = "terminated";
       notifyWorkerStatus(status, options, null);
     },
-    worker,
+    get worker() {
+      return worker;
+    },
   };
 }
 
@@ -481,7 +491,35 @@ async function loadApp(memory, host, options = {}) {
   }
 
   const imports = { env: { memory }, host };
-  const instantiate = options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
+  async function defaultInstantiateMainWasm(id, thread, baseImports, {
+    baseUrl = "wasm/",
+    compile = defaultCompileWasm,
+    instantiate = defaultInstantiateWasm,
+  } = {}) {
+    if (id !== "app" || thread !== MAIN_THREAD) {
+      const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
+
+      return instantiateWasmModuleForThread(id, thread, baseImports, {
+        baseUrl,
+        compile,
+        instantiate,
+      });
+    }
+
+    const url = `${baseUrl.replace(/\/?$/, "/")}app.wasm`;
+    return {
+      exports: await instantiate(
+        await compile(url, id),
+        baseImports,
+        id,
+        url,
+      ),
+      imports: baseImports,
+    };
+  }
+
+  const instantiate =
+    options.instantiateWasmModuleForThread ?? defaultInstantiateMainWasm;
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
   const { exports } = await instantiate("app", MAIN_THREAD, imports, {
     baseUrl: options.baseUrl ?? "wasm/",
