@@ -7,6 +7,8 @@ PATH := $(CURDIR)/node_modules/.bin:$(PATH)
 
 WAT_SOURCES := $(shell find wat -type f -name '*.wat' -print | sort)
 WAT_INCLUDES := $(shell find wat -type f -name '*.inc' -print | sort)
+WASM_FILES := $(patsubst wat/%.wat,dist/wasm/%.wasm,$(WAT_SOURCES))
+WAT_COMPAT_FILES :=
 
 MODULE_DOC_GENERATOR := $(wildcard tools/generate-wasm-modules-docs.js)
 
@@ -45,9 +47,9 @@ GENERATED_INPUTS := \
 	$(WAT_SOURCES) \
 	$(WAT_INCLUDES)
 
-.PHONY: all generated check-generated
+.PHONY: all generated wasm check-generated
 
-all: generated
+all: generated wasm
 
 generated: $(GENERATED_FILES)
 
@@ -60,6 +62,30 @@ $(GENERATED_FILES) &: $(GENERATED_INPUTS)
 ifneq ($(MODULE_DOC_GENERATOR),)
 	node tools/generate-wasm-modules-docs.js
 endif
+
+define WAT_WASM_RULE
+$(eval _wat_inputs := $(shell node tools/assemble-wat.js --inputs $(1) --relative-to $(CURDIR)))
+$(eval _rel_wat := $(patsubst wat/%,%,$(1)))
+$(eval _compat_wat := dist/.wat-compat/$(_rel_wat))
+$(eval _compat_inputs := dist/.wat-compat/$(_rel_wat).inputs)
+$(eval _wasm := dist/wasm/$(patsubst %.wat,%.wasm,$(_rel_wat)))
+$(eval WAT_COMPAT_FILES += $(_compat_wat) $(_compat_inputs))
+$(_compat_wat): $(_wat_inputs) tools/assemble-wat.js
+	mkdir -p $$(dir $$@)
+	node tools/assemble-wat.js $(1) $$@
+
+$(_compat_inputs): $(_wat_inputs) tools/assemble-wat.js
+	mkdir -p $$(dir $$@)
+	node tools/assemble-wat.js --inputs $(1) --relative-to $$(CURDIR) > $$@
+
+$(_wasm): $(_compat_wat) $(_compat_inputs)
+	mkdir -p $$(dir $$@)
+	wat2wasm $$< -o $$@
+endef
+
+$(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_WASM_RULE,$(wat))))
+
+wasm: $(WASM_FILES)
 
 check-generated: generated
 	git diff --exit-code -- $(GENERATED_FILES)
