@@ -2,6 +2,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -euo pipefail -c
 
 PATH := $(CURDIR)/node_modules/.bin:$(PATH)
+DIST_COMPRESSED_BUDGET_BYTES ?= 200000
 
 .DELETE_ON_ERROR:
 
@@ -90,6 +91,7 @@ GENERATED_INPUTS := \
 	coverage-report \
 	coverage-strict \
 	dist \
+	dist-size-budget \
 	generated \
 	js \
 	test \
@@ -205,7 +207,10 @@ dist/build-info.js: $(filter-out dist/build-info.js $(SERVICE_WORKER_FILES),$(DI
 	)"; \
 	printf 'export const TRACY_BUILD_HASH = "%s";\n' "$$build_hash" > $@
 
-dist: $(DIST_FILES)
+dist-size-budget: $(DIST_FILES) tools/dist-budget-check.js
+	node tools/dist-budget-check.js --budget $(DIST_COMPRESSED_BUDGET_BYTES) $(DIST_FILES)
+
+dist: $(DIST_FILES) dist-size-budget
 
 check-generated: generated
 	git diff --exit-code -- $(GENERATED_FILES)
@@ -218,6 +223,7 @@ test: dist check-generated
 	node tools/runtime-worker-orchestration-check.js
 	node tools/direct-esm-check.js
 	node tools/service-worker-check.js
+	node tools/dist-budget-check.js --self-test
 	node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 	node tools/watwat.js --expect-failure probe_assert_eq_i32_failure "deliberate i32 failure" dist/wasm/watwat.test.wasm
 	bash tools/test-assert-probes.sh
