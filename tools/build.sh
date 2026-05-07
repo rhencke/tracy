@@ -2,85 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DIST_DIR="${ROOT_DIR}/dist"
-WAT_DIR="${ROOT_DIR}/wat"
-STATIC_DIR="${ROOT_DIR}/static"
 
-PATH="${ROOT_DIR}/node_modules/.bin:${PATH}"
-
-require_command() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    printf 'error: %s is required on PATH\n' "$1" >&2
-    exit 1
+jobs="${MAKE_J:-}"
+if [ -z "${jobs}" ]; then
+  if command -v nproc >/dev/null 2>&1; then
+    jobs="$(nproc)"
+  else
+    jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')"
   fi
-}
-
-require_command wat2wasm
-require_command node
-require_command esbuild
-require_command sha256sum
-
-node "${ROOT_DIR}/tools/generate-layout.js" --check
-node "${ROOT_DIR}/tools/generate-host-abi.js" --check
-node "${ROOT_DIR}/tools/generate-parser-state-abi.js" --check
-node "${ROOT_DIR}/tools/extract-wasm-modules.js" --check
-node "${ROOT_DIR}/tools/generate-wasm-modules-abi.js" --check
-
-rm -rf "${DIST_DIR}"
-mkdir -p "${DIST_DIR}/wasm"
-WAT_COMPAT_DIR="${DIST_DIR}/.wat-compat"
-
-if [ -d "${WAT_DIR}" ]; then
-  while IFS= read -r -d '' wat_file; do
-    rel_path="${wat_file#"${WAT_DIR}/"}"
-    wasm_path="${DIST_DIR}/wasm/${rel_path%.wat}.wasm"
-    compiler_input="${wat_file}"
-    mapfile -t wat_inputs < <(node "${ROOT_DIR}/tools/assemble-wat.js" --inputs "${wat_file}" --relative-to "${ROOT_DIR}")
-    mkdir -p "$(dirname "${wasm_path}")"
-
-    if [ "${#wat_inputs[@]}" -gt 1 ]; then
-      assembled_wat_path="${WAT_COMPAT_DIR}/${rel_path}"
-      inputs_manifest_path="${assembled_wat_path}.inputs"
-      mkdir -p "$(dirname "${assembled_wat_path}")"
-      node "${ROOT_DIR}/tools/assemble-wat.js" "${wat_file}" "${assembled_wat_path}"
-      printf '%s\n' "${wat_inputs[@]}" > "${inputs_manifest_path}"
-      compiler_input="${assembled_wat_path}"
-    fi
-
-    wat2wasm "${compiler_input}" -o "${wasm_path}"
-  done < <(find "${WAT_DIR}" -type f -name '*.wat' -print0 | sort -z)
 fi
 
-esbuild "${ROOT_DIR}/bootstrap.js" \
-  --bundle \
-  --minify \
-  --sourcemap \
-  --outfile="${DIST_DIR}/bootstrap.bundle.js"
-
-esbuild "${ROOT_DIR}/worker.js" \
-  --bundle \
-  --format=esm \
-  --minify \
-  --sourcemap \
-  --outfile="${DIST_DIR}/worker.bundle.js"
-
-cp "${ROOT_DIR}/index.html" "${DIST_DIR}/index.html"
-cp "${ROOT_DIR}/manifest.webmanifest" "${DIST_DIR}/manifest.webmanifest"
-
-if [ -d "${STATIC_DIR}/icons" ]; then
-  mkdir -p "${DIST_DIR}/icons"
-  cp -R "${STATIC_DIR}/icons/." "${DIST_DIR}/icons/"
-fi
-
-build_hash="$(
-  cd "${DIST_DIR}"
-  find . -type f ! -name 'build-info.js' ! -path './.wat-compat/*' -print0 \
-    | sort -z \
-    | xargs -0 sha256sum \
-    | sha256sum \
-    | awk '{ print $1 }'
-)"
-
-cat > "${DIST_DIR}/build-info.js" <<EOF
-export const TRACY_BUILD_HASH = "${build_hash}";
-EOF
+exec make -C "${ROOT_DIR}" -j"${jobs}" dist

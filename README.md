@@ -31,7 +31,7 @@ then [v1.0 — release](https://github.com/rhencke/tracy/issues/35).
 | Design language | Material 3 (everywhere) |
 | Hosting | Client-side only.  GitHub Pages at <https://rhencke.github.io/tracy/>. |
 | Implementation | Core app logic in WAT.  JavaScript is used for the bootstrap, host/browser boundary, build tooling, and browser-boundary checks. |
-| Build | `wat2wasm` (wabt) + `esbuild` for the bootstrap bundle, with Node-based tooling for generated ABI/test artifacts.  Driven by GitHub Actions. |
+| Build | `make` drives the artifact DAG: `wat2wasm` (wabt), `esbuild`, generated ABI/test artifacts, coverage wasm, and the deployable `dist/` tree.  Driven by GitHub Actions. |
 | Tests | `watwat` — agnostic wasm test runner for WAT modules, TAP output, plus Node/browser-boundary checks where the host surface needs JavaScript. |
 
 ## Why this way
@@ -64,13 +64,19 @@ brew install wabt   # or: apt install wabt
 npm ci
 
 # build
-bash tools/build.sh
+make dist
+
+# or opt into parallelism
+make -j4 dist
 
 # produced app shell
 ls dist/index.html dist/bootstrap.bundle.js dist/wasm/app.wasm
 
-# run WAT module tests through watwat
-node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
+# run the local test gate
+make test
+
+# run the coverage gate
+make coverage
 
 # serve dist/ locally
 python3 -m http.server -d dist 8000
@@ -78,9 +84,9 @@ python3 -m http.server -d dist 8000
 
 ## Browser smoke checks
 
-The host shim smoke fixture is built to `dist/wasm/host_smoke.wasm` by
-`bash tools/build.sh`.  It uses the same host imports as the app and is meant
-for a manual run in a JSPI-capable browser.
+Build `dist/` with `make dist` before running the browser smoke checks.
+The smoke fixture uses the same host imports as the app and is meant for a
+manual run in a JSPI-capable browser.
 
 1. Serve the repository root after building:
 

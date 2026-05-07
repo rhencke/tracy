@@ -49,6 +49,16 @@ ifneq ($(MODULE_DOC_GENERATOR),)
 GENERATED_FILES += docs/MODULES.md
 endif
 
+CLEAN_GENERATED_FILES := \
+	HOST_ABI.md \
+	abi/wasm-modules.json \
+	host/abi.mjs \
+	host/wasm-modules.mjs
+
+ifneq ($(MODULE_DOC_GENERATOR),)
+CLEAN_GENERATED_FILES += docs/MODULES.md
+endif
+
 GENERATED_INPUTS := \
 	abi/host.json \
 	abi/layout.json \
@@ -65,7 +75,19 @@ GENERATED_INPUTS := \
 	$(WAT_SOURCES) \
 	$(WAT_INCLUDES)
 
-.PHONY: all generated wasm wasm-cov bundle dist check-generated
+.PHONY: \
+	all \
+	bundle \
+	check-generated \
+	clean \
+	coverage \
+	coverage-report \
+	coverage-strict \
+	dist \
+	generated \
+	test \
+	wasm \
+	wasm-cov
 
 all: dist
 
@@ -178,3 +200,27 @@ dist: $(DIST_FILES)
 
 check-generated: generated
 	git diff --exit-code -- $(GENERATED_FILES)
+
+test: dist check-generated
+	bash tools/check-bootstrap-lines.sh
+	node tools/wasm-modules-check.js
+	node tools/host-shim-check.js
+	node tools/ingest-worker-runtime-check.js
+	node tools/runtime-worker-orchestration-check.js
+	node tools/worker-bundle-check.js
+	node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
+	node tools/watwat.js --expect-failure probe_assert_eq_i32_failure "deliberate i32 failure" dist/wasm/watwat.test.wasm
+	bash tools/test-assert-probes.sh
+	node tools/coverage-selftest.js
+	node tools/cold-reload-index-check.js
+
+coverage: wasm-cov
+	node tools/coverage-run.js --check dist/wasm-cov
+
+coverage-strict: coverage
+
+coverage-report: wasm-cov
+	node tools/coverage-run.js dist/wasm-cov
+
+clean:
+	rm -rf dist $(CLEAN_GENERATED_FILES)
