@@ -1,71 +1,56 @@
-// Generated from abi/wasm-modules.json by tools/generate-wasm-modules-abi.js.
-// Do not edit host/wasm-modules.mjs by hand.
+#!/usr/bin/env node
 
-export const WASM_MODULES = Object.freeze({
-  "app": Object.freeze({
-    wasmPath: "app.wasm",
-    aliases: Object.freeze(["app"]),
-    dependencies: Object.freeze([]),
-  }),
-  "index": Object.freeze({
-    wasmPath: "index.wasm",
-    aliases: Object.freeze(["index"]),
-    dependencies: Object.freeze(["std/mem"]),
-  }),
-  "parser": Object.freeze({
-    wasmPath: "parser.wasm",
-    aliases: Object.freeze(["parser"]),
-    dependencies: Object.freeze(["std/mem", "std/strtab", "parser_state"]),
-  }),
-  "parser_state": Object.freeze({
-    wasmPath: "parser_state.wasm",
-    aliases: Object.freeze(["parser_state"]),
-    dependencies: Object.freeze([]),
-  }),
-  "std/alloc": Object.freeze({
-    wasmPath: "std/alloc.wasm",
-    aliases: Object.freeze(["alloc", "std/alloc", "wat/std/alloc"]),
-    dependencies: Object.freeze([]),
-  }),
-  "std/array": Object.freeze({
-    wasmPath: "std/array.wasm",
-    aliases: Object.freeze(["array", "std/array", "wat/std/array"]),
-    dependencies: Object.freeze(["std/alloc"]),
-  }),
-  "std/assert": Object.freeze({
-    wasmPath: "std/assert.wasm",
-    aliases: Object.freeze(["assert", "std/assert", "wat/std/assert"]),
-    dependencies: Object.freeze([]),
-  }),
-  "std/hash": Object.freeze({
-    wasmPath: "std/hash.wasm",
-    aliases: Object.freeze(["hash", "std/hash", "wat/std/hash"]),
-    dependencies: Object.freeze(["std/alloc"]),
-  }),
-  "std/mem": Object.freeze({
-    wasmPath: "std/mem.wasm",
-    aliases: Object.freeze(["mem", "std/mem", "wat/std/mem"]),
-    dependencies: Object.freeze([]),
-  }),
-  "std/pool": Object.freeze({
-    wasmPath: "std/pool.wasm",
-    aliases: Object.freeze(["pool", "std/pool", "wat/std/pool"]),
-    dependencies: Object.freeze(["std/alloc"]),
-  }),
-  "std/ring": Object.freeze({
-    wasmPath: "std/ring.wasm",
-    aliases: Object.freeze(["ring", "std/ring", "wat/std/ring"]),
-    dependencies: Object.freeze(["std/alloc"]),
-  }),
-  "std/strtab": Object.freeze({
-    wasmPath: "std/strtab.wasm",
-    aliases: Object.freeze(["strtab", "std/strtab", "wat/std/strtab"]),
-    dependencies: Object.freeze(["std/alloc", "std/hash"]),
-  }),
-});
+const { readFileSync, writeFileSync } = require("node:fs");
+const { dirname, join } = require("node:path");
 
-function normalizePath(value) {
-  return String(value).replace(/\\/g, "/").replace(/^\.?\//, "");
+const root = dirname(__dirname);
+const checkOnly = process.argv.includes("--check");
+const sourcePath = join(root, "abi/wasm-modules.json");
+const source = JSON.parse(readFileSync(sourcePath, "utf8"));
+const modules = source.modules;
+
+function generatedHeader(kind) {
+  return [
+    "// Generated from abi/wasm-modules.json by tools/generate-wasm-modules-abi.js.",
+    `// Do not edit ${kind} by hand.`,
+  ].join("\n");
+}
+
+function readonlyArray(values) {
+  return `Object.freeze([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
+}
+
+function renderModuleEntry(id, module) {
+  return [
+    `  ${JSON.stringify(id)}: Object.freeze({`,
+    `    wasmPath: ${JSON.stringify(module.wasmPath)},`,
+    `    aliases: ${readonlyArray(module.aliases)},`,
+    `    dependencies: ${readonlyArray(module.dependencies)},`,
+    "  }),",
+  ].join("\n");
+}
+
+function renderWasmModulesObject() {
+  const lines = [
+    "export const WASM_MODULES = Object.freeze({",
+  ];
+
+  for (const [id, module] of Object.entries(modules)) {
+    lines.push(renderModuleEntry(id, module));
+  }
+
+  lines.push("});");
+  return lines.join("\n");
+}
+
+function renderWasmModulesModule() {
+  return `${[
+    generatedHeader("host/wasm-modules.mjs"),
+    "",
+    renderWasmModulesObject(),
+    "",
+    `function normalizePath(value) {
+  return String(value).replace(/\\\\/g, "/").replace(/^\\.?\\//, "");
 }
 
 export function wasmModuleIds() {
@@ -75,7 +60,7 @@ export function wasmModuleIds() {
 export function wasmModule(id) {
   const module = WASM_MODULES[id];
   if (module === undefined) {
-    throw new Error(`unknown wasm module ${id}`);
+    throw new Error(\`unknown wasm module \${id}\`);
   }
 
   return module;
@@ -94,12 +79,12 @@ export function wasmModulePath(id) {
 }
 
 export function wasmModuleUrl(id, baseUrl = "wasm/") {
-  return `${baseUrl.replace(/\/?$/, "/")}${wasmModulePath(id)}`;
+  return \`\${baseUrl.replace(/\\/?$/, "/")}\${wasmModulePath(id)}\`;
 }
 
 function collectWasmModuleGraph(id, collected, active) {
   if (active.has(id)) {
-    throw new Error(`recursive wasm module dependency: ${id}`);
+    throw new Error(\`recursive wasm module dependency: \${id}\`);
   }
   if (collected.has(id)) {
     return;
@@ -239,4 +224,41 @@ export function wasmModuleIdForPath(value) {
   }
 
   return null;
+}`,
+  ].join("\n")}\n`;
 }
+
+function writeIfChanged(path, content) {
+  const absolute = join(root, path);
+  let previous = null;
+
+  try {
+    previous = readFileSync(absolute, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  if (previous === content) {
+    return true;
+  }
+
+  if (checkOnly) {
+    console.error(`${path} is out of date; run node tools/generate-wasm-modules-abi.js`);
+    return false;
+  }
+
+  writeFileSync(absolute, content);
+  return true;
+}
+
+const ok = writeIfChanged("host/wasm-modules.mjs", renderWasmModulesModule());
+
+if (!ok) {
+  process.exitCode = 1;
+}
+
+module.exports = {
+  renderWasmModulesModule,
+};
