@@ -1,7 +1,13 @@
 import { HOST_IMPORT_NAME } from "./abi.mjs";
 import { u64ToNumber } from "./memory.mjs";
 
-export function makeOpfsSourceHost(memoryView, files) {
+function makeUnsupportedHostImport(name, reason) {
+  return () => {
+    throw new Error(`${name}: ${reason}`);
+  };
+}
+
+export function makeOpfsSourceHost(memoryView, files = new Map()) {
   const sources = new Map();
   const indexes = new Map();
   let nextSourceId = 1;
@@ -336,13 +342,7 @@ export function makeOpfsSourceHost(memoryView, files) {
     }
   }
 
-  return {
-    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE]: opfsIndexCreate,
-    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH]: opfsIndexFlush,
-    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsIndexOpen,
-    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsIndexRead,
-    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsIndexSize,
-    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE]: opfsIndexWrite,
+  const sourceHost = {
     [HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]: opfsSourceFromFile,
     [HOST_IMPORT_NAME.OPFS_READ_CHUNK]: opfsSourceRead,
     [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]: opfsSourceFromFile,
@@ -351,5 +351,68 @@ export function makeOpfsSourceHost(memoryView, files) {
     [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN]: opfsSourceOpen,
     [HOST_IMPORT_NAME.OPFS_SOURCE_READ]: opfsSourceRead,
     [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE]: opfsSourceSize,
+  };
+
+  const indexReaderHost = {
+    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsIndexOpen,
+    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsIndexRead,
+    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsIndexSize,
+  };
+
+  const indexWriterHost = {
+    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE]: opfsIndexCreate,
+    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH]: opfsIndexFlush,
+    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE]: opfsIndexWrite,
+  };
+
+  return {
+    ...sourceHost,
+    ...indexReaderHost,
+    ...indexWriterHost,
+  };
+}
+
+export function makeOpfsMainHost(memoryView, files = new Map()) {
+  const opfsHost = makeOpfsSourceHost(memoryView, files);
+
+  return {
+    [HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]: opfsHost[HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE],
+    [HOST_IMPORT_NAME.OPFS_READ_CHUNK]: opfsHost[HOST_IMPORT_NAME.OPFS_READ_CHUNK],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_NAME],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_OPEN],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_READ]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_READ],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_SIZE],
+    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_OPEN],
+    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_READ],
+    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_SIZE],
+  };
+}
+
+export function makeOpfsWorkerHost(memoryView) {
+  const opfsHost = makeOpfsSourceHost(memoryView);
+
+  return {
+    [HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]: makeUnsupportedHostImport(
+      HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE,
+      "file handles are owned by the main thread",
+    ),
+    [HOST_IMPORT_NAME.OPFS_READ_CHUNK]: opfsHost[HOST_IMPORT_NAME.OPFS_READ_CHUNK],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]: makeUnsupportedHostImport(
+      HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE,
+      "file handles are owned by the main thread",
+    ),
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_NAME],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_OPEN],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_READ]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_READ],
+    [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE]: opfsHost[HOST_IMPORT_NAME.OPFS_SOURCE_SIZE],
+    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_CREATE],
+    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_FLUSH],
+    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_OPEN],
+    [HOST_IMPORT_NAME.OPFS_INDEX_READ]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_READ],
+    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_SIZE],
+    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE]: opfsHost[HOST_IMPORT_NAME.OPFS_INDEX_WRITE],
   };
 }
