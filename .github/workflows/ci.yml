@@ -54,7 +54,7 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: make -j"$(nproc)" dist
+        run: make -j dist
 
       - name: Test WAT
         run: make test
@@ -133,7 +133,7 @@ jobs:
         run: npm ci
 
       - name: Build
-        run: make -j"$(nproc)" dist
+        run: make -j dist
 
       - name: Derive generated trace seed
         shell: bash
