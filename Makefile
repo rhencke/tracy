@@ -85,6 +85,7 @@ GENERATED_INPUTS := \
 
 .PHONY: \
 	all \
+	app-load-bench \
 	check-generated \
 	clean \
 	coverage \
@@ -99,6 +100,9 @@ GENERATED_INPUTS := \
 	wasm-cov
 
 all: dist
+
+app-load-bench: dist tools/app-load-bench.js
+	node tools/app-load-bench.js
 
 generated: $(GENERATED_FILES)
 
@@ -224,6 +228,7 @@ test: dist check-generated
 	node tools/direct-esm-check.js
 	node tools/service-worker-check.js
 	node tools/dist-budget-check.js --self-test
+	node tools/app-load-bench.js --self-test
 	node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
 	node tools/watwat.js --expect-failure probe_assert_eq_i32_failure "deliberate i32 failure" dist/wasm/watwat.test.wasm
 	bash tools/test-assert-probes.sh
