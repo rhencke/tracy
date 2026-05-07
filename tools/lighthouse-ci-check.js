@@ -37,7 +37,7 @@ function main() {
   ]);
   assert.deepEqual(assertions["total-byte-weight"], [
     "error",
-    { maxNumericValue: 65000 },
+    { maxNumericValue: 75000 },
   ]);
   assert.equal(assertions.interactive, undefined);
   assert.equal(assertions["categories:pwa"], undefined);

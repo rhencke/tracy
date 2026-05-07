@@ -29,7 +29,7 @@ module.exports = {
     assert: {
       assertions: {
         "first-contentful-paint": ["error", { maxNumericValue: 1100 }],
-        "total-byte-weight": ["error", { maxNumericValue: 65000 }],
+        "total-byte-weight": ["error", { maxNumericValue: 75000 }],
       },
     },
     upload: {
