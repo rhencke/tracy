@@ -171,13 +171,20 @@ async function checkRuntimeOrchestratesWorker() {
 
   worker.emit("message", {
     type: "progress",
+    committedPages: 2,
+    etaSeconds: null,
     phase: "parse",
     fileOffset: 32,
+    indexedEvents: 4,
+    parsedEvents: 5,
+    throughputBytesPerSecond: 8000,
+    totalBytes: 64,
   });
   worker.emit("message", {
     type: "covered_range",
-    start: 0,
-    end: 32,
+    valid: true,
+    start: 100,
+    end: 132,
   });
   worker.emit("message", {
     type: "complete",
@@ -187,6 +194,10 @@ async function checkRuntimeOrchestratesWorker() {
   frames[0](123);
   assert.deepEqual(ticks, ["main", 123]);
   assert.equal(controller.status().state, "complete");
+  assert.equal(controller.status().progress.fileOffset, 32);
+  assert.equal(controller.status().progress.committedPages, 2);
+  assert.equal(controller.status().coveredRange.start, 100);
+  assert.equal(controller.status().coveredRange.end, 132);
   assert.equal(controller.status().result.committedEvents, 7);
   assert.equal(workerStatus.at(-1).status.state, "complete");
 

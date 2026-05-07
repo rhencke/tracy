@@ -63,6 +63,14 @@ function makeParserExports(memory, parserState) {
 function makeIndexExports() {
   const events = [];
   const partialPublishes = [];
+  let coveredRange = null;
+
+  function commitCoveredRange() {
+    coveredRange = {
+      start: 100,
+      end: 100 + events.length * 10,
+    };
+  }
 
   return {
     INDEX_INGEST_STATUS_OK: 0,
@@ -77,8 +85,18 @@ function makeIndexExports() {
     index_writer_committed_pages() {
       return events.length === 0 ? 0 : 1;
     },
+    index_writer_covered_range_end() {
+      return coveredRange?.end ?? 0;
+    },
+    index_writer_covered_range_start() {
+      return coveredRange?.start ?? 0;
+    },
+    index_writer_covered_range_valid() {
+      return coveredRange === null ? 0 : 1;
+    },
     index_writer_flush() {
       assert.equal(events.length, 3);
+      commitCoveredRange();
       return 0;
     },
     index_writer_init(indexId, writerPagePtr, dictEpoch) {
@@ -88,6 +106,7 @@ function makeIndexExports() {
     },
     index_writer_publish_partial() {
       partialPublishes.push(events.length);
+      commitCoveredRange();
       return 0;
     },
     partialPublishes,
@@ -116,6 +135,10 @@ async function checkWorkerRuntime() {
       hostCalls.push(["source", decodeString(memory, namePtr, nameLen)]);
       return 11;
     },
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
+      assert.equal(sourceId, 11);
+      return 64n;
+    },
     [abi.HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
       hostCalls.push(["index", decodeString(memory, namePtr, nameLen)]);
       return 22;
@@ -129,7 +152,9 @@ async function checkWorkerRuntime() {
       byteBudget: 9,
       coveredRangeIntervalMs: 33,
       dictEpoch: 5,
+      etaStableMs: 30,
       indexName: "indexes/trace.idx",
+      progressWindowMs: 50,
       statePtr: 1000,
       sourceName: "sources/trace.json",
       tokenOutputPtr: 7000,
@@ -187,20 +212,77 @@ async function checkWorkerRuntime() {
     (message) => message.type === runtime.INGEST_WORKER_MESSAGE.COVERED_RANGE,
   );
   assert.deepEqual(
-    coveredRangeMessages.map((message) => message.end),
-    [16, 48],
+    coveredRangeMessages.map((message) => ({
+      end: message.end,
+      start: message.start,
+      valid: message.valid,
+    })),
+    [
+      { end: 110, start: 100, valid: true },
+      { end: 130, start: 100, valid: true },
+    ],
   );
   assert.equal(
     messages.at(-1).type,
     runtime.INGEST_WORKER_MESSAGE.COMPLETE,
     "complete should be the final worker message",
   );
-  assert.deepEqual(
-    messages
-      .filter((message) => message.type === runtime.INGEST_WORKER_MESSAGE.PROGRESS)
-      .map((message) => message.phase),
-    ["parse", "index", "complete"],
+  const progressMessages = messages.filter(
+    (message) => message.type === runtime.INGEST_WORKER_MESSAGE.PROGRESS,
   );
+  assert.deepEqual(
+    progressMessages.map((message) => message.phase),
+    ["parse", "parse", "parse", "index", "complete"],
+  );
+  assert.deepEqual(
+    progressMessages.map((message) => ({
+      committedPages: message.committedPages,
+      fileOffset: message.fileOffset,
+      indexedEvents: message.indexedEvents,
+      parsedEvents: message.parsedEvents,
+      totalBytes: message.totalBytes,
+    })),
+    [
+      {
+        committedPages: 0,
+        fileOffset: 0,
+        indexedEvents: 0,
+        parsedEvents: 0,
+        totalBytes: 64,
+      },
+      {
+        committedPages: 1,
+        fileOffset: 16,
+        indexedEvents: 1,
+        parsedEvents: 1,
+        totalBytes: 64,
+      },
+      {
+        committedPages: 1,
+        fileOffset: 32,
+        indexedEvents: 2,
+        parsedEvents: 2,
+        totalBytes: 64,
+      },
+      {
+        committedPages: 1,
+        fileOffset: 48,
+        indexedEvents: 3,
+        parsedEvents: 3,
+        totalBytes: 64,
+      },
+      {
+        committedPages: 1,
+        fileOffset: 48,
+        indexedEvents: 3,
+        parsedEvents: 3,
+        totalBytes: 64,
+      },
+    ],
+  );
+  assert.equal(progressMessages[1].etaSeconds, null);
+  assert.ok(progressMessages[2].throughputBytesPerSecond > 0);
+  assert.ok(progressMessages[2].etaSeconds > 0);
 }
 
 async function checkMessageHandler() {
