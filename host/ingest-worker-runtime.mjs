@@ -22,6 +22,7 @@ const DEFAULT_NAME_PTR = 2048;
 const DEFAULT_COVERED_RANGE_INTERVAL_MS = 33;
 const DEFAULT_PROGRESS_WINDOW_MS = 5000;
 const DEFAULT_ETA_STABLE_MS = 3000;
+const DEFAULT_PARSE_OUTPUT_RECORDS = 4096;
 const TOKEN_OUTPUT_BASE = 5 * 1024 * 1024;
 
 function globalValue(value) {
@@ -198,6 +199,18 @@ function drainExtractedEvents({ index, parser }) {
   }
 }
 
+function releaseParserOutput({ parser, statePtr }) {
+  const resetStatus = parser.parser_token_output_reset?.(
+    statePtr,
+    DEFAULT_PARSE_OUTPUT_RECORDS,
+  );
+  if (resetStatus !== undefined && resetStatus !== 1) {
+    throw new Error("parser token output reset failed");
+  }
+
+  parser.extractor_reset_cursor?.();
+}
+
 async function instantiateIngestModules(options, memory, host) {
   const instantiate =
     options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
@@ -333,6 +346,8 @@ export async function runWorkerIngest(data, options = {}) {
     if (status !== globalValue(parserState.PARSER_STATUS_YIELDED)) {
       throw new Error(`parser failed with status ${status}`);
     }
+
+    releaseParserOutput({ parser, statePtr });
 
     const publishStatus = index.index_writer_publish_partial?.();
     if (publishStatus !== globalValue(index.INDEX_WRITER_STATUS_OK)) {

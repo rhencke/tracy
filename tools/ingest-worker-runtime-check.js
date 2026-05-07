@@ -15,9 +15,13 @@ function decodeString(memory, ptr, len) {
 function makeParserExports(memory, parserState) {
   const parseOffsets = [16, 32, 48];
   const parseEventCounts = [1, 2, 3];
+  const eventsByParse = [[8001], [8002], [8003]];
+  let currentEvents = [];
   let parseCalls = 0;
   let nextEvent = 0;
   let extractorInits = 0;
+  const outputResets = [];
+  let cursorResets = 0;
 
   function writeParserState(statePtr, index) {
     const view = new DataView(memory.buffer);
@@ -41,21 +45,39 @@ function makeParserExports(memory, parserState) {
     },
     extractor_next() {
       assert.equal(extractorInits, 1);
-      if (nextEvent >= parseCalls) {
+      if (nextEvent >= currentEvents.length) {
         return -1;
       }
 
+      const eventPtr = currentEvents[nextEvent];
       nextEvent += 1;
-      return 8000 + nextEvent;
+      return eventPtr;
+    },
+    extractor_reset_cursor() {
+      cursorResets += 1;
+      currentEvents = [];
+      nextEvent = 0;
     },
     parser_parse_with_budget(statePtr, chunkBytes, byteBudget) {
       assert.equal(chunkBytes, 0);
       assert.equal(byteBudget, 9);
       writeParserState(statePtr, parseCalls);
+      currentEvents = eventsByParse[parseCalls];
+      nextEvent = 0;
       parseCalls += 1;
       return parseCalls < parseOffsets.length
         ? parserState.PARSER_STATUS_YIELDED
         : parserState.PARSER_STATUS_DONE;
+    },
+    parser_token_output_reset(statePtr, recordCap) {
+      assert.equal(statePtr, 1000);
+      assert.equal(recordCap, 4096);
+      outputResets.push({ recordCap, statePtr });
+      return 1;
+    },
+    outputResets,
+    get cursorResets() {
+      return cursorResets;
     },
   };
 }
@@ -130,6 +152,7 @@ async function checkWorkerRuntime() {
   const instantiated = [];
   const hostCalls = [];
   let indexExports;
+  let parserExports;
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
       hostCalls.push(["source", decodeString(memory, namePtr, nameLen)]);
@@ -166,8 +189,9 @@ async function checkWorkerRuntime() {
       instantiateWasmModuleForThread: async (id, thread, imports) => {
         instantiated.push({ id, thread, hasMemory: imports.env.memory === memory });
         if (id === "parser") {
+          parserExports = makeParserExports(memory, parserState);
           return {
-            exports: makeParserExports(memory, parserState),
+            exports: parserExports,
             imports: {
               alloc: {
                 bump_init() {},
@@ -207,6 +231,11 @@ async function checkWorkerRuntime() {
   assert.equal(result.committedEvents, 3);
   assert.equal(result.extractedEvents, 3);
   assert.deepEqual(indexExports.partialPublishes, [1, 2]);
+  assert.deepEqual(parserExports.outputResets, [
+    { recordCap: 4096, statePtr: 1000 },
+    { recordCap: 4096, statePtr: 1000 },
+  ]);
+  assert.equal(parserExports.cursorResets, 2);
 
   const coveredRangeMessages = messages.filter(
     (message) => message.type === runtime.INGEST_WORKER_MESSAGE.COVERED_RANGE,
@@ -285,6 +314,161 @@ async function checkWorkerRuntime() {
   assert.ok(progressMessages[2].etaSeconds > 0);
 }
 
+async function checkWorkerRuntimeReleasesFullParserTokenBuffer() {
+  const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 2 });
+  const parserState = {
+    PARSER_STATE_EVENT_COUNT_OFFSET: 8,
+    PARSER_STATE_FILE_OFFSET_OFFSET: 0,
+    PARSER_STATUS_DONE: 2,
+    PARSER_STATUS_YIELDED: 1,
+    parser_state_init(statePtr, sourceId) {
+      assert.equal(statePtr, 1000);
+      assert.equal(sourceId, 11);
+    },
+  };
+  const eventBatches = [
+    Array.from({ length: 4096 }, (_, index) => 9000 + index),
+    [14096],
+  ];
+  const parserExports = {
+    currentEvents: [],
+    cursor: 0,
+    parseCalls: 0,
+    released: true,
+    extractor_init(ptr) {
+      assert.equal(ptr, 7000);
+    },
+    extractor_next() {
+      if (this.cursor >= this.currentEvents.length) {
+        return -1;
+      }
+
+      const eventPtr = this.currentEvents[this.cursor];
+      this.cursor += 1;
+      return eventPtr;
+    },
+    extractor_reset_cursor() {
+      this.currentEvents = [];
+      this.cursor = 0;
+      this.released = true;
+    },
+    parser_parse_with_budget(statePtr) {
+      assert.equal(statePtr, 1000);
+      assert.equal(this.released, true, "parse resumed without released token output");
+      const view = new DataView(memory.buffer);
+      view.setBigUint64(
+        statePtr + parserState.PARSER_STATE_FILE_OFFSET_OFFSET,
+        BigInt((this.parseCalls + 1) * 4096),
+        true,
+      );
+      view.setInt32(
+        statePtr + parserState.PARSER_STATE_EVENT_COUNT_OFFSET,
+        this.parseCalls === 0 ? 4096 : 4097,
+        true,
+      );
+      this.currentEvents = eventBatches[this.parseCalls];
+      this.cursor = 0;
+      this.released = false;
+      this.parseCalls += 1;
+      return this.parseCalls === 1
+        ? parserState.PARSER_STATUS_YIELDED
+        : parserState.PARSER_STATUS_DONE;
+    },
+    parser_token_output_reset(statePtr, recordCap) {
+      assert.equal(statePtr, 1000);
+      assert.equal(recordCap, 4096);
+      return 1;
+    },
+  };
+  const indexedEvents = [];
+  const indexExports = {
+    INDEX_INGEST_STATUS_OK: 0,
+    INDEX_WRITER_STATUS_OK: 0,
+    index_add_event(eventPtr) {
+      indexedEvents.push(eventPtr);
+      return 0;
+    },
+    index_writer_committed_events() {
+      return indexedEvents.length;
+    },
+    index_writer_committed_pages() {
+      return indexedEvents.length === 0 ? 0 : 1;
+    },
+    index_writer_covered_range_end() {
+      return indexedEvents.length;
+    },
+    index_writer_covered_range_start() {
+      return 0;
+    },
+    index_writer_covered_range_valid() {
+      return indexedEvents.length === 0 ? 0 : 1;
+    },
+    index_writer_flush() {
+      assert.equal(indexedEvents.length, 4097);
+      return 0;
+    },
+    index_writer_init() {},
+    index_writer_publish_partial() {
+      assert.equal(indexedEvents.length, 4096);
+      return 0;
+    },
+  };
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_OPEN]() {
+      return 11;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_CREATE]() {
+      return 22;
+    },
+  };
+
+  const result = await runtime.runWorkerIngest(
+    {
+      byteBudget: 9,
+      indexName: "indexes/trace.idx",
+      sourceName: "sources/trace.json",
+      statePtr: 1000,
+      tokenOutputPtr: 7000,
+      type: runtime.INGEST_WORKER_MESSAGE.START,
+    },
+    {
+      hostFactory: () => host,
+      instantiateWasmModuleForThread: async (id) => {
+        if (id === "parser") {
+          return {
+            exports: parserExports,
+            imports: {
+              alloc: {
+                bump_init() {},
+              },
+              mem: {
+                MEM_HEAP_BASE: 1024,
+                MEM_STACK_BASE: 2048,
+              },
+              parser_state: parserState,
+            },
+          };
+        }
+        if (id === "index") {
+          return { exports: indexExports, imports: {} };
+        }
+
+        throw new Error(`unexpected module ${id}`);
+      },
+      memoryFactory: () => memory,
+      now: () => 0,
+      postMessage() {},
+    },
+  );
+
+  assert.equal(result.extractedEvents, 4097);
+  assert.equal(result.committedEvents, 4097);
+  assert.equal(indexedEvents.at(4095), 13095);
+  assert.equal(indexedEvents.at(4096), 14096);
+}
+
 async function checkMessageHandler() {
   const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
   const messages = [];
@@ -313,6 +497,7 @@ async function checkMessageHandler() {
 
 async function main() {
   await checkWorkerRuntime();
+  await checkWorkerRuntimeReleasesFullParserTokenBuffer();
   await checkMessageHandler();
 }
 

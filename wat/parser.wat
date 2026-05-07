@@ -1188,6 +1188,11 @@
     global.set $extractor_discard_event
   )
 
+  (func (export "extractor_reset_cursor")
+    i32.const 0
+    global.set $extractor_cursor
+  )
+
   (func (export "extractor_next") (result i32)
     (local $count i32)
     (local $kind i32)
