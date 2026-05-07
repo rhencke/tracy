@@ -493,6 +493,18 @@
     global.get $index_slice_page_count
   )
 
+  (func (export "index_query_range_capped") (result i32)
+    global.get $index_query_last_capped
+  )
+
+  (func (export "index_query_range_matched_rows") (result i32)
+    global.get $index_query_last_matched
+  )
+
+  (func (export "index_query_range_written_rows") (result i32)
+    global.get $index_query_last_written
+  )
+
   (func $index_query_result_ptr (param $out_buf i32) (param $row i32) (result i32)
     local.get $out_buf
     local.get $row
@@ -506,6 +518,7 @@
     (param $ts_min i32)
     (param $ts_max i32)
     (param $out_buf i32)
+    (param $row_cap i32)
     (result i32)
     (local $catalog_i i32)
     (local $entry i32)
@@ -534,6 +547,14 @@
     (local $color i32)
     (local $result i32)
     (local $page_hints i32)
+    (local $matched i32)
+
+    i32.const 0
+    global.set $index_query_last_capped
+    i32.const 0
+    global.set $index_query_last_matched
+    i32.const 0
+    global.set $index_query_last_written
 
     global.get $index_reader_file
     i32.eqz
@@ -762,72 +783,85 @@
               i32.ge_u
               i32.and
               if
-                local.get $out_buf
-                local.get $count
-                call $index_query_result_ptr
-                local.set $result
-
-                local.get $result
-                local.get $start_ts
-                i32.store
-
-                local.get $result
-                i32.const 4
-                i32.add
-                local.get $dur
-                i32.store
-
-                local.get $result
-                i32.const 8
-                i32.add
-                local.get $name_ptr
-                local.get $row
-                i32.const 2
-                i32.mul
-                i32.add
-                i32.load16_u
-                i32.store
-
-                local.get $result
-                i32.const 12
-                i32.add
-                local.get $depth_ptr
-                local.get $row
-                i32.add
-                i32.load8_u
-                i32.store
-
-                local.get $result
-                i32.const 16
-                i32.add
-                local.get $cat_ptr
-                local.get $row
-                i32.const 2
-                i32.mul
-                i32.add
-                i32.load16_u
-                i32.store
-
-                local.get $result
-                i32.const 20
-                i32.add
-                local.get $color
-                i32.store
-
-                local.get $result
-                i32.const 24
-                i32.add
-                local.get $page_hints
-                global.get $INDEX_DECODE_HINT_PARTIAL
-                i32.and
-                i32.eqz
-                i32.eqz
-                i32.store
-
-                local.get $count
+                local.get $matched
                 i32.const 1
                 i32.add
-                local.set $count
+                local.set $matched
+
+                local.get $count
+                local.get $row_cap
+                i32.lt_u
+                if
+                  local.get $out_buf
+                  local.get $count
+                  call $index_query_result_ptr
+                  local.set $result
+
+                  local.get $result
+                  local.get $start_ts
+                  i32.store
+
+                  local.get $result
+                  i32.const 4
+                  i32.add
+                  local.get $dur
+                  i32.store
+
+                  local.get $result
+                  i32.const 8
+                  i32.add
+                  local.get $name_ptr
+                  local.get $row
+                  i32.const 2
+                  i32.mul
+                  i32.add
+                  i32.load16_u
+                  i32.store
+
+                  local.get $result
+                  i32.const 12
+                  i32.add
+                  local.get $depth_ptr
+                  local.get $row
+                  i32.add
+                  i32.load8_u
+                  i32.store
+
+                  local.get $result
+                  i32.const 16
+                  i32.add
+                  local.get $cat_ptr
+                  local.get $row
+                  i32.const 2
+                  i32.mul
+                  i32.add
+                  i32.load16_u
+                  i32.store
+
+                  local.get $result
+                  i32.const 20
+                  i32.add
+                  local.get $color
+                  i32.store
+
+                  local.get $result
+                  i32.const 24
+                  i32.add
+                  local.get $page_hints
+                  global.get $INDEX_DECODE_HINT_PARTIAL
+                  i32.and
+                  i32.eqz
+                  i32.eqz
+                  i32.store
+
+                  local.get $count
+                  i32.const 1
+                  i32.add
+                  local.set $count
+                else
+                  i32.const 1
+                  global.set $index_query_last_capped
+                end
               end
 
               local.get $row
@@ -849,6 +883,10 @@
 
     global.get $INDEX_READER_STATUS_OK
     global.set $index_reader_last_status
+    local.get $matched
+    global.set $index_query_last_matched
+    local.get $count
+    global.set $index_query_last_written
     local.get $count
   )
 

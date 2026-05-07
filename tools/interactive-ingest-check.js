@@ -164,7 +164,7 @@ function makeSharedIndexBacking(memory) {
       backing.events.push(eventPtr);
       return 0;
     },
-    index_query_range(trackId, tsMin, tsMax, outPtr) {
+    index_query_range(trackId, tsMin, tsMax, outPtr, maxRows) {
       const range = coveredRange();
 
       assert.notEqual(backing.readerIndexId, null, "main reader should be opened before queries");
@@ -172,7 +172,7 @@ function makeSharedIndexBacking(memory) {
       assert.ok(range !== null, "query should wait for an indexed covered range");
       assert.ok(tsMin >= range.start, "queries should stay inside covered time");
       assert.ok(tsMax <= range.end, "queries should not reach unknown time");
-      backing.queryCalls.push({ outPtr, trackId, tsMax, tsMin });
+      backing.queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
       writeQueryRow(outPtr, trackId, tsMin);
       return 1;
     },

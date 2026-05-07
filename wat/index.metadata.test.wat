@@ -181,7 +181,7 @@
   (import "index" "index_page_catalog_add_slice_page"
     (func $index_page_catalog_add_slice_page (param i32 i32 i32 i32 i32)))
   (import "index" "index_query_range"
-    (func $index_query_range (param i32 i32 i32 i32) (result i32)))
+    (func $index_query_range (param i32 i32 i32 i32 i32) (result i32)))
   (import "index" "index_reader_configure_cache"
     (func $index_reader_configure_cache (param i32) (result i32)))
   (import "index" "index_reader_evict_cold_pages"

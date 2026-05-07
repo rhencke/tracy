@@ -1,5 +1,6 @@
 const DEFAULT_TRACE_QUERY_OUT_PTR = 12288;
 const DEFAULT_TRACE_QUERY_WINDOW = 1000;
+const DEFAULT_TRACE_QUERY_ROW_CAP = 1024;
 const INDEX_QUERY_RESULT_BYTES = 28;
 const INDEX_QUERY_RESULT_START_TS_OFFSET = 0;
 const INDEX_QUERY_RESULT_DUR_OFFSET = 4;
@@ -115,6 +116,32 @@ function readQueryRows(memory, reader, outPtr, count, trackId, options) {
   return rows;
 }
 
+function normalizeQueryResult(result) {
+  if (typeof result === "number") {
+    return {
+      capped: false,
+      count: result,
+      matchedRows: result,
+      writtenRows: result,
+    };
+  }
+
+  return {
+    capped: result?.capped === true,
+    count: Number(result?.count ?? result?.writtenRows ?? 0),
+    matchedRows: Number(result?.matchedRows ?? result?.count ?? 0),
+    writtenRows: Number(result?.writtenRows ?? result?.count ?? 0),
+  };
+}
+
+function normalizedRowCap(value, fallback) {
+  const numeric = Number(value);
+
+  return Number.isFinite(numeric) && numeric >= 0
+    ? Math.floor(numeric)
+    : fallback;
+}
+
 function drawPartialHatch(context, x, y, width, height, spacing) {
   context.save?.();
   context.beginPath?.();
@@ -215,8 +242,13 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   const context = options.context ?? canvas?.getContext?.("2d");
   const queryOutPtr = options.queryOutPtr ?? DEFAULT_TRACE_QUERY_OUT_PTR;
   const queryWindow = options.queryWindow ?? DEFAULT_TRACE_QUERY_WINDOW;
+  const queryRowCap = normalizedRowCap(
+    options.queryRowCap,
+    DEFAULT_TRACE_QUERY_ROW_CAP,
+  );
   const minViewportSpan = options.minViewportSpan ?? DEFAULT_MIN_VIEWPORT_SPAN;
   const state = {
+    cappedQueries: [],
     drag: null,
     error: null,
     lastRows: [],
@@ -366,17 +398,35 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       1,
       Number(options.trackCount ?? reader.trackCount?.() ?? 0),
     );
+    const cappedQueries = [];
     const rows = [];
 
     try {
       for (let trackId = 0; trackId < trackCount; trackId += 1) {
-        const count = reader.queryRange(trackId, viewport.start, queryEnd, queryOutPtr);
-        rows.push(
-          ...readQueryRows(memory, reader, queryOutPtr, count, trackId, options),
+        const result = normalizeQueryResult(
+          reader.queryRange(
+            trackId,
+            viewport.start,
+            queryEnd,
+            queryOutPtr,
+            queryRowCap,
+          ),
         );
+
+        rows.push(
+          ...readQueryRows(memory, reader, queryOutPtr, result.count, trackId, options),
+        );
+        if (result.capped || result.matchedRows > result.writtenRows) {
+          cappedQueries.push({
+            matchedRows: result.matchedRows,
+            trackId,
+            writtenRows: result.writtenRows,
+          });
+        }
       }
 
       state.error = null;
+      state.cappedQueries = cappedQueries;
       state.lastRows = rows;
       state.unknownRange = isIngestActive(workerStatus)
         ? { pending: true, start: coveredRange.end }
@@ -395,6 +445,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     panByPixels,
     status() {
       return {
+        cappedQueries: state.cappedQueries,
         error: state.error,
         rows: state.lastRows.length,
         unknownRange: state.unknownRange,

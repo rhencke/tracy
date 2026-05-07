@@ -413,10 +413,11 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
       });
       return {
         exports: {
-          index_query_range(trackId, tsMin, tsMax, outPtr) {
+          index_query_range(trackId, tsMin, tsMax, outPtr, maxRows) {
             assert.equal(trackId, 4);
             assert.equal(tsMin, 100);
             assert.equal(outPtr, 4096);
+            assert.equal(maxRows, 1024);
             if (tsMax === 140) {
               assert.deepEqual(pageCatalog, [
                 {
@@ -574,12 +575,12 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.deepEqual(readerInitIds, [70, 70]);
   assert.deepEqual(readPages, [0]);
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
-  assert.equal(reader.queryRange(4, 100, 140, 4096), 3);
+  assert.equal(reader.queryRange(4, 100, 140, 4096).count, 3);
   assert.deepEqual(readPages, [0], "unchanged catalog should not rebuild per query");
 
   visiblePageCount = 2;
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 180 });
-  assert.equal(reader.queryRange(4, 100, 180, 4096), 5);
+  assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
   assert.deepEqual(
     readPages,
     [0, 1],
@@ -589,7 +590,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
 
   visiblePageCount = 3;
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 220 });
-  assert.equal(reader.queryRange(4, 100, 220, 4096), 9);
+  assert.equal(reader.queryRange(4, 100, 220, 4096).count, 9);
   assert.deepEqual(
     readPages,
     [0, 1, 2],
@@ -638,10 +639,11 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   const reader = runtime.createMainThreadIndexReaderController(memory, host, {
     instantiateWasmModuleForThread: async () => ({
       exports: {
-        index_query_range(trackId, tsMin, tsMax, outPtr) {
+        index_query_range(trackId, tsMin, tsMax, outPtr, maxRows) {
           assert.equal(trackId, 4);
           assert.equal(tsMin, 100);
           assert.equal(outPtr, 4096);
+          assert.equal(maxRows, 1024);
           if (tsMax === 140) {
             assert.deepEqual(pageCatalog, [
               {
@@ -739,7 +741,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
 
   await reader.open("indexes/trace.idx");
   assert.deepEqual(readPages, [0]);
-  assert.equal(reader.queryRange(4, 100, 140, 4096), 3);
+  assert.equal(reader.queryRange(4, 100, 140, 4096).count, 3);
   assert.deepEqual(
     readPages,
     [0, 1],
@@ -748,7 +750,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   assert.deepEqual(readerInitIds, [70, 70]);
 
   readablePageCount = 2;
-  assert.equal(reader.queryRange(4, 100, 180, 4096), 5);
+  assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
   assert.deepEqual(
     readPages,
     [0, 1, 1, 2],
@@ -756,7 +758,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
 
-  assert.equal(reader.queryRange(4, 100, 180, 4096), 5);
+  assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
   assert.deepEqual(
     readPages,
     [0, 1, 1, 2, 2],
@@ -818,8 +820,8 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   let coveredRange = { end: 140, start: 100, type: "covered_range", valid: true };
   const queryCalls = [];
   const reader = {
-    queryRange(trackId, tsMin, tsMax, outPtr) {
-      queryCalls.push({ outPtr, trackId, tsMax, tsMin });
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
       const view = new DataView(memory.buffer);
       view.setUint32(outPtr, trackId === 0 ? 104 : 120, true);
       view.setUint32(outPtr + 4, trackId === 0 ? 8 : 12, true);
@@ -853,8 +855,8 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   assert.deepEqual(
     queryCalls,
     [
-      { outPtr: 2048, trackId: 0, tsMax: 140, tsMin: 100 },
-      { outPtr: 2048, trackId: 1, tsMax: 140, tsMin: 100 },
+      { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 140, tsMin: 100 },
+      { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 140, tsMin: 100 },
     ],
   );
   assert.equal(
@@ -880,12 +882,14 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   coveredRange = { end: 180, start: 100, type: "covered_range", valid: true };
   renderer.draw(124);
   assert.deepEqual(queryCalls.at(-1), {
+    maxRows: 1024,
     outPtr: 2048,
     trackId: 1,
     tsMax: 180,
     tsMin: 100,
   });
   assert.deepEqual(renderer.status(), {
+    cappedQueries: [],
     error: null,
     rows: 2,
     unknownRange: { pending: true, start: 180 },
@@ -916,12 +920,86 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
     "completed ingest should draw formerly partial rows with their resolved color",
   );
   assert.deepEqual(renderer.status(), {
+    cappedQueries: [],
     error: null,
     rows: 2,
     unknownRange: null,
     userInteracted: false,
     viewport: { end: 180, start: 100, valid: true },
   });
+}
+
+async function checkProgressiveTraceRendererSurfacesCappedQueries() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const queryCalls = [];
+  const decoded = [];
+  const canvas = {
+    height: 120,
+    width: 240,
+    getContext() {
+      return {
+        clearRect() {},
+        fillRect() {},
+        restore() {},
+        save() {},
+      };
+    },
+  };
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
+      const view = new DataView(memory.buffer);
+
+      view.setUint32(outPtr, 110, true);
+      view.setUint32(outPtr + 4, 8, true);
+      view.setUint32(outPtr + 12, 0, true);
+      view.setUint32(outPtr + 20, 0x2d74da, true);
+      view.setUint32(outPtr + 24, 0, true);
+      return {
+        capped: true,
+        count: 1,
+        matchedRows: 4096,
+        writtenRows: 1,
+      };
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 1;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return {
+        coveredRange: { end: 200, start: 100, type: "covered_range", valid: true },
+        state: "running",
+      };
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    decodeQueryRows({ count, outPtr, trackId }) {
+      decoded.push({ count, outPtr, trackId });
+      return [{ dur: 8, start: 110, trackId }];
+    },
+    queryOutPtr: 2048,
+    queryRowCap: 1,
+    queryWindow: 100,
+  });
+
+  const rows = renderer.draw(123);
+
+  assert.equal(rows.length, 1);
+  assert.deepEqual(queryCalls, [
+    { maxRows: 1, outPtr: 2048, trackId: 0, tsMax: 200, tsMin: 100 },
+  ]);
+  assert.deepEqual(decoded, [{ count: 1, outPtr: 2048, trackId: 0 }]);
+  assert.deepEqual(renderer.status().cappedQueries, [
+    { matchedRows: 4096, trackId: 0, writtenRows: 1 },
+  ]);
 }
 
 async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
@@ -986,8 +1064,8 @@ async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() 
   const coveredRange = { end: 200, start: 100, type: "covered_range", valid: true };
   const queryCalls = [];
   const reader = {
-    queryRange(trackId, tsMin, tsMax, outPtr) {
-      queryCalls.push({ outPtr, trackId, tsMax, tsMin });
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
       const view = new DataView(memory.buffer);
       view.setUint32(outPtr, Math.max(100, Math.floor(tsMin)), true);
       view.setUint32(outPtr + 4, 8, true);
@@ -1150,6 +1228,7 @@ async function main() {
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
+  await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimeLoadsProgressiveTraceRendererLazily();
 }

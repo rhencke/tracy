@@ -13,6 +13,7 @@ const DEFAULT_INGEST_NAME_PTR = 4096;
 const DEFAULT_INGEST_NAME_MAX_BYTES = 4096;
 const DEFAULT_READER_NAME_PTR = 8192;
 const DEFAULT_READER_CACHE_SLOTS = 4;
+const DEFAULT_READER_QUERY_ROW_CAP = 1024;
 const PROGRESSIVE_TRACE_RENDERER_URL = "./progressive-trace-renderer.mjs";
 const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
@@ -64,6 +65,14 @@ function notifyWorkerStatus(status, options, message) {
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;
+}
+
+function normalizedRowCap(value, fallback) {
+  const numeric = Number(value);
+
+  return Number.isFinite(numeric) && numeric >= 0
+    ? Math.floor(numeric)
+    : fallback;
 }
 
 function readCoveredRange(index) {
@@ -299,13 +308,42 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     async open(indexName) {
       return open(indexName);
     },
-    queryRange(trackId, tsMin, tsMax, outPtr) {
+    queryRange(
+      trackId,
+      tsMin,
+      tsMax,
+      outPtr,
+      maxRows = options.queryRowCap ?? DEFAULT_READER_QUERY_ROW_CAP,
+    ) {
       if (readerState.state !== "ready" || readerState.exports === null) {
         throw new Error("main-thread index reader is not ready");
       }
 
       refreshSliceCatalog(readerState.exports, readerState.indexId);
-      return readerState.exports.index_query_range(trackId, tsMin, tsMax, outPtr);
+      const rowCap = normalizedRowCap(maxRows, DEFAULT_READER_QUERY_ROW_CAP);
+      const count = readerState.exports.index_query_range(
+        trackId,
+        tsMin,
+        tsMax,
+        outPtr,
+        rowCap,
+      );
+
+      return {
+        capped:
+          globalValue(readerState.exports.index_query_range_capped?.() ?? 0) !== 0,
+        count,
+        matchedRows: Number(
+          globalValue(
+            readerState.exports.index_query_range_matched_rows?.() ?? count,
+          ),
+        ),
+        writtenRows: Number(
+          globalValue(
+            readerState.exports.index_query_range_written_rows?.() ?? count,
+          ),
+        ),
+      };
     },
     status() {
       return cloneReaderStatus();

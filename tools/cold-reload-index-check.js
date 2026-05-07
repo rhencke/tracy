@@ -372,7 +372,7 @@ function expectJsonEq(actual, expected, label) {
 }
 
 function queryRows(index, view, trackId, tsMin, tsMax) {
-  const count = index.index_query_range(trackId, tsMin, tsMax, queryOutPtr);
+  const count = index.index_query_range(trackId, tsMin, tsMax, queryOutPtr, 1024);
   expectEq(
     index.index_reader_status(),
     globalValue(index.INDEX_READER_STATUS_OK),

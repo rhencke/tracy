@@ -193,7 +193,13 @@
   (import "index" "index_reader_covered_range_end"
     (func $index_reader_covered_range_end (result i32)))
   (import "index" "index_query_range"
-    (func $index_query_range (param i32 i32 i32 i32) (result i32)))
+    (func $index_query_range (param i32 i32 i32 i32 i32) (result i32)))
+  (import "index" "index_query_range_capped"
+    (func $index_query_range_capped (result i32)))
+  (import "index" "index_query_range_matched_rows"
+    (func $index_query_range_matched_rows (result i32)))
+  (import "index" "index_query_range_written_rows"
+    (func $index_query_range_written_rows (result i32)))
   (import "index" "index_reader_configure_cache"
     (func $index_reader_configure_cache (param i32) (result i32)))
   (import "index" "index_reader_evict_cold_pages"
@@ -680,6 +686,7 @@
     i32.const 12
     i32.const 31
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 2
     i32.const 398
@@ -688,6 +695,46 @@
     call $index_reader_status
     global.get $INDEX_READER_STATUS_OK
     i32.const 399
+    call $assert_eq_i32
+
+    call $index_query_range_capped
+    i32.const 0
+    i32.const 1001
+    call $assert_eq_i32
+
+    call $index_query_range_matched_rows
+    i32.const 2
+    i32.const 1002
+    call $assert_eq_i32
+
+    call $index_query_range_written_rows
+    i32.const 2
+    i32.const 1003
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 12
+    i32.const 31
+    global.get $QUERY_OUT
+    i32.const 1
+    call $index_query_range
+    i32.const 1
+    i32.const 1004
+    call $assert_eq_i32
+
+    call $index_query_range_capped
+    i32.const 1
+    i32.const 1005
+    call $assert_eq_i32
+
+    call $index_query_range_matched_rows
+    i32.const 2
+    i32.const 1006
+    call $assert_eq_i32
+
+    call $index_query_range_written_rows
+    i32.const 1
+    i32.const 1007
     call $assert_eq_i32
 
     call $index_reader_cache_misses
@@ -739,6 +786,7 @@
     i32.const 0
     i32.const 20
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 1
     i32.const 406
@@ -766,13 +814,14 @@
     i32.const 0
     i32.const 20
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 1
     i32.const 410
     call $assert_eq_i32
 
     call $index_reader_cache_hits
-    i32.const 1
+    i32.const 2
     i32.const 411
     call $assert_eq_i32
   )
@@ -867,6 +916,7 @@
     i32.const 0
     i32.const 10
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 0
     i32.const 413
@@ -884,6 +934,7 @@
     i32.const 0
     i32.const 10
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 0
     i32.const 415
@@ -919,6 +970,7 @@
     i32.const 0
     i32.const 2000
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 0
     i32.const 417
@@ -949,6 +1001,7 @@
     i32.const 0
     i32.const 20
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 0
     i32.const 419
@@ -979,6 +1032,7 @@
     i32.const 0
     i32.const 20
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 0
     i32.const 421
@@ -1009,6 +1063,7 @@
     i32.const 0
     i32.const 20
     global.get $QUERY_OUT
+    i32.const 1024
     call $index_query_range
     i32.const 0
     i32.const 423
