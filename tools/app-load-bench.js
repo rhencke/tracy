@@ -19,21 +19,24 @@ const FAST_3G = Object.freeze({
 });
 const BUDGETS = Object.freeze({
   cold: Object.freeze({
+    coreTtiMs: 250,
     fcpMs: 1100,
+    fullLoadMs: 1000,
     transferBytes: 75000,
-    ttiMs: 1000,
     wasmInstantiateMs: 200,
   }),
   warmHttp: Object.freeze({
+    coreTtiMs: 25,
     fcpMs: 50,
+    fullLoadMs: 25,
     transferBytes: 0,
-    ttiMs: 25,
     wasmInstantiateMs: 25,
   }),
   warmSw: Object.freeze({
+    coreTtiMs: 25,
     fcpMs: 45,
+    fullLoadMs: 25,
     transferBytes: 0,
-    ttiMs: 25,
     wasmInstantiateMs: 15,
   }),
 });
@@ -598,9 +601,15 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? 0;
+      const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
-      return { fcpMs: fcp, ttiMs: appLoad, wasmInstantiateMs: wasm };
+      return {
+        coreTtiMs: coreReady,
+        fcpMs: fcp,
+        fullLoadMs: appLoad,
+        wasmInstantiateMs: wasm,
+      };
     })()`,
     returnByValue: true,
   }, page.sessionId);
@@ -666,34 +675,39 @@ async function runBench(options) {
 function runSelfTest() {
   assert.deepEqual(BUDGETS, {
     cold: {
+      coreTtiMs: 250,
       fcpMs: 1100,
+      fullLoadMs: 1000,
       transferBytes: 75000,
-      ttiMs: 1000,
       wasmInstantiateMs: 200,
     },
     warmHttp: {
+      coreTtiMs: 25,
       fcpMs: 50,
+      fullLoadMs: 25,
       transferBytes: 0,
-      ttiMs: 25,
       wasmInstantiateMs: 25,
     },
     warmSw: {
+      coreTtiMs: 25,
       fcpMs: 45,
+      fullLoadMs: 25,
       transferBytes: 0,
-      ttiMs: 25,
       wasmInstantiateMs: 15,
     },
   });
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
+      coreTtiMs: 1,
       fcpMs: 1,
+      fullLoadMs: 2,
       transferBytes: 0,
-      ttiMs: 2,
       wasmInstantiateMs: 3,
     }, {
+      coreTtiMs: 1,
       fcpMs: 1,
+      fullLoadMs: 2,
       transferBytes: 0,
-      ttiMs: 2,
       wasmInstantiateMs: 3,
     }),
   );
@@ -737,9 +751,13 @@ function runSelfTest() {
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
+  const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
+  const coreReadyOffset = bootstrap.indexOf('performance?.mark?.("tracy.core.ready")');
 
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
+  assert.notEqual(coreReadyOffset, -1);
+  assert.ok(coreReadyOffset < bootstrap.indexOf('import("./host/runtime.mjs")'));
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
   assert.match(
     makefile,
