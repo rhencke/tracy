@@ -56,6 +56,24 @@ jobs:
       - name: Build
         run: make -j dist
 
+      - name: Install Chrome
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          if ! command -v google-chrome >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable
+          fi
+          google-chrome --version
+
+      - name: Run app-load bench
+        if: github.event_name == 'pull_request'
+        run: make app-load-bench
+
+      - name: Run Lighthouse CI cold-load gate
+        if: github.event_name == 'pull_request'
+        run: make lighthouse-ci
+
       - name: Test WAT
         run: make test
 
