@@ -468,7 +468,9 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     const result = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
         const error = document.querySelector('[role="alert"]')?.textContent ?? "";
+        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
         return {
+          detail,
           error,
           ready: performance.getEntriesByName("tracy.app.ready").length > 0,
         };
@@ -478,7 +480,8 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     const status = result.result?.value ?? {};
 
     if (status.error) {
-      throw new Error(`page reported app-load failure: ${status.error}`);
+      const detail = status.detail ? ` (${status.detail})` : "";
+      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
     }
 
     return status.ready === true;

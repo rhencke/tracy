@@ -187,6 +187,10 @@ function showError(message) {
   document.body.appendChild(error);
 }
 
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function wrapAsyncHostImports(host) {
   return Object.fromEntries(
     Object.entries(host).map(([name, value]) => [
@@ -258,6 +262,7 @@ export function runApp(memory, host, options = {}) {
 
   loadApp(memory, host, { ...options, ingestWorker }).catch((error) => {
     console.error(error);
+    globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
     showError("tracy failed to load the WebAssembly viewer.");
   });
 
