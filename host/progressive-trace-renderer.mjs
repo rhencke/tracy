@@ -390,10 +390,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       state.userInteracted ? state.viewport : coveredRange,
       coveredRange,
     );
-    const queryEnd = Math.min(
-      viewport.end,
-      viewport.start + Math.max(1, queryWindow),
-    );
+    const queryTileSpan = Math.max(1, queryWindow);
     const trackCount = Math.max(
       1,
       Number(options.trackCount ?? reader.trackCount?.() ?? 0),
@@ -403,25 +400,32 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
 
     try {
       for (let trackId = 0; trackId < trackCount; trackId += 1) {
-        const result = normalizeQueryResult(
-          reader.queryRange(
-            trackId,
-            viewport.start,
-            queryEnd,
-            queryOutPtr,
-            queryRowCap,
-          ),
-        );
+        for (
+          let queryStart = viewport.start;
+          queryStart < viewport.end;
+          queryStart = Math.min(viewport.end, queryStart + queryTileSpan)
+        ) {
+          const queryEnd = Math.min(viewport.end, queryStart + queryTileSpan);
+          const result = normalizeQueryResult(
+            reader.queryRange(
+              trackId,
+              queryStart,
+              queryEnd,
+              queryOutPtr,
+              queryRowCap,
+            ),
+          );
 
-        rows.push(
-          ...readQueryRows(memory, reader, queryOutPtr, result.count, trackId, options),
-        );
-        if (result.capped || result.matchedRows > result.writtenRows) {
-          cappedQueries.push({
-            matchedRows: result.matchedRows,
-            trackId,
-            writtenRows: result.writtenRows,
-          });
+          rows.push(
+            ...readQueryRows(memory, reader, queryOutPtr, result.count, trackId, options),
+          );
+          if (result.capped || result.matchedRows > result.writtenRows) {
+            cappedQueries.push({
+              matchedRows: result.matchedRows,
+              trackId,
+              writtenRows: result.writtenRows,
+            });
+          }
         }
       }
 

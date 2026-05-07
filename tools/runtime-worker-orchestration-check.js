@@ -1121,6 +1121,70 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   ]);
 }
 
+async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const queryCalls = [];
+  const canvas = {
+    height: 120,
+    width: 240,
+    getContext() {
+      return {
+        clearRect() {},
+        fillRect() {},
+        restore() {},
+        save() {},
+      };
+    },
+  };
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
+      const view = new DataView(memory.buffer);
+
+      view.setUint32(outPtr, tsMin >= 2000 ? 2200 : tsMin + 10, true);
+      view.setUint32(outPtr + 4, 8, true);
+      view.setUint32(outPtr + 12, 0, true);
+      view.setUint32(outPtr + 20, 0x2d74da, true);
+      view.setUint32(outPtr + 24, 0, true);
+      return 1;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 1;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return {
+        coveredRange: { end: 2500, start: 0, type: "covered_range", valid: true },
+        state: "running",
+      };
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    queryOutPtr: 2048,
+  });
+
+  const rows = renderer.draw(123);
+
+  assert.deepEqual(queryCalls, [
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 1000, tsMin: 0 },
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2000, tsMin: 1000 },
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2500, tsMin: 2000 },
+  ]);
+  assert.equal(rows.length, 3);
+  assert.equal(
+    rows.some((row) => row.start === 2200),
+    true,
+    "later visible rows should still render when the viewport exceeds the default query window",
+  );
+}
+
 async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -1349,6 +1413,7 @@ async function main() {
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererSurfacesCappedQueries();
+  await checkProgressiveTraceRendererTilesFullVisibleViewport();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimeLoadsProgressiveTraceRendererLazily();
 }
