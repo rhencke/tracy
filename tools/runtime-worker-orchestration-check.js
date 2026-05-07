@@ -381,6 +381,12 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
       recordCount: 2,
       trackId: 4,
     },
+    {
+      bucketEnd: 220,
+      bucketStart: 180,
+      recordCount: 4,
+      trackId: 4,
+    },
   ];
   let visiblePageCount = 1;
   const openedNames = [];
@@ -425,7 +431,27 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
               return 3;
             }
 
-            assert.equal(tsMax, 180);
+            if (tsMax === 180) {
+              assert.deepEqual(pageCatalog, [
+                {
+                  bucketEnd: 140,
+                  bucketStart: 100,
+                  pageId: 0,
+                  recordCount: 3,
+                  trackId: 4,
+                },
+                {
+                  bucketEnd: 180,
+                  bucketStart: 140,
+                  pageId: 1,
+                  recordCount: 2,
+                  trackId: 4,
+                },
+              ]);
+              return 5;
+            }
+
+            assert.equal(tsMax, 220);
             assert.deepEqual(pageCatalog, [
               {
                 bucketEnd: 140,
@@ -441,8 +467,15 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
                 recordCount: 2,
                 trackId: 4,
               },
+              {
+                bucketEnd: 220,
+                bucketStart: 180,
+                pageId: 2,
+                recordCount: 4,
+                trackId: 4,
+              },
             ]);
-            return 5;
+            return 9;
           },
           INDEX_STATUS_OK: 0,
           index_page_catalog_add_slice_page(
@@ -468,7 +501,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
             return slotCount;
           },
           index_reader_covered_range_end() {
-            return visiblePageCount === 1 ? 140 : 180;
+            return 100 + visiblePageCount * 40;
           },
           index_reader_covered_range_start() {
             return 100;
@@ -550,10 +583,20 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.equal(reader.queryRange(4, 100, 180, 4096), 5);
   assert.deepEqual(
     readPages,
-    [0, 0, 1],
-    "query after worker append should refresh newly published pages",
+    [0, 1],
+    "query after worker append should refresh only newly published pages",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
+
+  visiblePageCount = 3;
+  assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 220 });
+  assert.equal(reader.queryRange(4, 100, 220, 4096), 9);
+  assert.deepEqual(
+    readPages,
+    [0, 1, 2],
+    "later render-time queries should not rescan page 0 through the current page count",
+  );
+  assert.deepEqual(readerInitIds, [70, 70, 70, 70]);
 
   await reader.open("indexes/trace.idx");
   assert.deepEqual(openedNames, ["indexes/trace.idx"]);

@@ -27,14 +27,22 @@ function hasCatalogRebuildExports(index) {
   );
 }
 
-export function rebuildMainThreadSliceCatalog(memory, host, index, indexId) {
+export function rebuildMainThreadSliceCatalog(
+  memory,
+  host,
+  index,
+  indexId,
+  options = {},
+) {
   const sizeFn = host[HOST_IMPORT_NAME.OPFS_INDEX_SIZE];
   if (typeof sizeFn !== "function") {
     return false;
   }
 
-  const pageCount = mainThreadSliceCatalogPageCount(host, indexId);
-  if (pageCount <= 0) {
+  const pageCount =
+    options.pageCount ?? mainThreadSliceCatalogPageCount(host, indexId);
+  const startPage = Math.max(0, options.startPage ?? 0);
+  if (pageCount <= 0 || startPage >= pageCount) {
     return false;
   }
 
@@ -42,9 +50,11 @@ export function rebuildMainThreadSliceCatalog(memory, host, index, indexId) {
     throw new Error("main-thread index reader cannot rebuild slice catalog");
   }
 
-  index.index_page_catalog_reset();
+  if (options.reset !== false) {
+    index.index_page_catalog_reset();
+  }
   const view = new DataView(memory.buffer);
-  for (let pageId = 0; pageId < pageCount; pageId += 1) {
+  for (let pageId = startPage; pageId < pageCount; pageId += 1) {
     const page = index.read_page(0, pageId);
     if (page === 0) {
       throw new Error(`main-thread index reader failed to read page ${pageId}`);

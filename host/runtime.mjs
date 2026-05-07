@@ -173,7 +173,8 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         host,
         indexId,
       );
-    if (!force && readerState.catalogPageCount === pageCount) {
+    const previousPageCount = readerState.catalogPageCount;
+    if (!force && previousPageCount === pageCount) {
       return false;
     }
     if (pageCount <= 0) {
@@ -181,12 +182,20 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       return false;
     }
 
+    const resetCatalog =
+      force || previousPageCount === null || pageCount < previousPageCount;
+    const startPage = resetCatalog ? 0 : previousPageCount;
     const rebuilt =
       readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
         memory,
         host,
         index,
         indexId,
+        {
+          pageCount,
+          reset: resetCatalog,
+          startPage,
+        },
       );
     readerState.catalogPageCount = pageCount;
     if (rebuilt) {
