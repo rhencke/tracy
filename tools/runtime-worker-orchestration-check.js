@@ -406,7 +406,8 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
     },
   };
   const reader = runtime.createMainThreadIndexReaderController(memory, host, {
-    instantiateWasmModule: async (id, imports, options) => {
+    instantiateWasmModuleForThread: async (id, thread, imports, options) => {
+      assert.equal(thread, "main");
       calls.push({
         id,
         hasMemory: imports.env.memory === memory,

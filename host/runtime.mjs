@@ -106,13 +106,13 @@ function writeHostString(memory, ptr, value, label) {
 
 export function createMainThreadIndexReaderController(memory, host, options = {}) {
   async function defaultInstantiateIndexWasm(...args) {
-    const { instantiateWasmModule } = await import("./wasm-modules.mjs");
+    const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
 
-    return instantiateWasmModule(...args);
+    return instantiateWasmModuleForThread(...args);
   }
 
   const instantiate =
-    options.instantiateWasmModule ?? defaultInstantiateIndexWasm;
+    options.instantiateWasmModuleForThread ?? defaultInstantiateIndexWasm;
   const readerState = {
     catalogPageCount: null,
     error: null,
@@ -140,6 +140,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
     const loaded = await instantiate(
       "index",
+      MAIN_THREAD,
       { env: { memory }, host },
       {
         baseUrl: options.baseUrl ?? "wasm/",
@@ -551,26 +552,13 @@ async function loadApp(memory, host, options = {}) {
     compile = defaultCompileWasm,
     instantiate = defaultInstantiateWasm,
   } = {}) {
-    if (id !== "app" || thread !== MAIN_THREAD) {
-      const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
+    const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
 
-      return instantiateWasmModuleForThread(id, thread, baseImports, {
-        baseUrl,
-        compile,
-        instantiate,
-      });
-    }
-
-    const url = `${baseUrl.replace(/\/?$/, "/")}app.wasm`;
-    return {
-      exports: await instantiate(
-        await compile(url, id),
-        baseImports,
-        id,
-        url,
-      ),
-      imports: baseImports,
-    };
+    return instantiateWasmModuleForThread(id, thread, baseImports, {
+      baseUrl,
+      compile,
+      instantiate,
+    });
   }
 
   const instantiate =
@@ -663,7 +651,7 @@ export function runApp(memory, host, options = {}) {
           baseUrl: options.baseUrl,
           compile: options.compile,
           instantiate: options.instantiate,
-          instantiateWasmModule: options.instantiateWasmModule,
+          instantiateWasmModuleForThread: options.instantiateWasmModuleForThread,
         });
   const ingestWorker =
     options.ingestWorker ??

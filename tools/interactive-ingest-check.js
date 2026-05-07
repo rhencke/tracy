@@ -457,20 +457,25 @@ async function checkInteractiveIngestGate() {
         },
       };
     },
-    instantiateWasmModule: async (id) => {
-      assert.equal(id, "index");
-      return { exports: indexExports, imports: {} };
+    instantiateWasmModuleForThread: async (id, thread) => {
+      if (id === "index") {
+        assert.equal(thread, "main");
+        return { exports: indexExports, imports: {} };
+      }
+
+      assert.equal(id, "app");
+      assert.equal(thread, "main");
+      return {
+        exports: {
+          tracy_main() {
+            ticks.push("main");
+          },
+          tracy_tick(ts) {
+            ticks.push(ts);
+          },
+        },
+      };
     },
-    instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {
-          ticks.push("main");
-        },
-        tracy_tick(ts) {
-          ticks.push(ts);
-        },
-      },
-    }),
     worker: {
       Worker: RunningIngestWorker,
       onWorkerStatus(status, message) {
