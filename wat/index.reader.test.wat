@@ -180,6 +180,12 @@
     (func $index_page_catalog_reset))
   (import "index" "index_page_catalog_add_slice_page"
     (func $index_page_catalog_add_slice_page (param i32 i32 i32 i32 i32)))
+  (import "index" "index_covered_range_valid"
+    (func $index_covered_range_valid (result i32)))
+  (import "index" "index_covered_range_start"
+    (func $index_covered_range_start (result i32)))
+  (import "index" "index_covered_range_end"
+    (func $index_covered_range_end (result i32)))
   (import "index" "index_reader_covered_range_valid"
     (func $index_reader_covered_range_valid (result i32)))
   (import "index" "index_reader_covered_range_start"
@@ -1366,6 +1372,21 @@
     call $index_reader_covered_range_end
     i32.const 90
     i32.const 430
+    call $assert_eq_i32
+
+    call $index_covered_range_valid
+    i32.const 1
+    i32.const 431
+    call $assert_eq_i32
+
+    call $index_covered_range_start
+    i32.const 20
+    i32.const 432
+    call $assert_eq_i32
+
+    call $index_covered_range_end
+    i32.const 90
+    i32.const 433
     call $assert_eq_i32
   )
 )
