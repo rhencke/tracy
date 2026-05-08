@@ -45,6 +45,7 @@
     (param $query_range_budget i32)
     (param $track_count i32)
     (result i32)
+    (local $ranges i32)
     local.get $track_count
     i32.eqz
     if (result i32)
@@ -53,8 +54,13 @@
       local.get $query_range_budget
       local.get $track_count
       i32.div_u
-      i32.const 1
-      i32.max
+      local.tee $ranges
+      i32.eqz
+      if (result i32)
+        i32.const 1
+      else
+        local.get $ranges
+      end
     end)
 
   (func $trace_render_query_tile_span (export "trace_render_query_tile_span")
