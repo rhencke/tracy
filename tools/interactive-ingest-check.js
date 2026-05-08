@@ -628,10 +628,26 @@ async function checkInteractiveIngestGate() {
   assert.equal(importCalls.length, 1);
   await waitForAsyncCondition(
     () =>
-      host.calls.some(
+      (
+        host.calls.some(
+          (call) => call[0] === "index-open" &&
+            call[1] === "indexes/throttled-100mb.json.idx",
+        ) &&
+        controller.indexReader.status().state === "ready"
+      ) || controller.status().state === "error",
+    "main-thread reader should be ready for the worker-written OPFS index",
+  );
+  await waitForAsyncCondition(
+    () =>
+      controller.indexReader.coveredRange().valid ||
+      controller.status().state === "error",
+    "main-thread reader should expose queryable covered slices",
+  );
+  assert.ok(
+    host.calls.some(
         (call) => call[0] === "index-open" &&
           call[1] === "indexes/throttled-100mb.json.idx",
-      ) || controller.status().state === "error",
+    ),
     "main-thread reader should open the worker-written OPFS index",
   );
   assert.notEqual(controller.status().state, "error", controller.status().error);
