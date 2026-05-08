@@ -122,6 +122,14 @@
     "DEFAULT_READER_QUERY_ROW_CAP": {
       "value": 1024,
       "description": "Default row cap for main-thread index reader queries."
+    },
+    "DEFAULT_INGEST_PROGRESS_WINDOW_MS": {
+      "value": 5000,
+      "description": "Default worker ingest throughput sample window used for progress and ETA calculation."
+    },
+    "DEFAULT_INGEST_ETA_STABLE_MS": {
+      "value": 3000,
+      "description": "Minimum worker ingest progress sample age before ETA is surfaced to avoid first-ramp flicker."
     }
   },
   "performanceMarks": {

@@ -1,5 +1,6 @@
 import { makeWorkerThreadHost } from "./shim.mjs";
 import { HOST_IMPORT_NAME } from "./abi.mjs";
+import { RUNTIME_DEFAULTS } from "./startup-spec.mjs";
 import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
 
 export const INGEST_WORKER_MESSAGE = Object.freeze({
@@ -20,8 +21,10 @@ const DEFAULT_CHUNK_BYTES = 0;
 const DEFAULT_BYTE_BUDGET = 8192;
 const DEFAULT_NAME_PTR = 2048;
 const DEFAULT_COVERED_RANGE_INTERVAL_MS = 33;
-const DEFAULT_PROGRESS_WINDOW_MS = 5000;
-const DEFAULT_ETA_STABLE_MS = 3000;
+const {
+  DEFAULT_INGEST_ETA_STABLE_MS,
+  DEFAULT_INGEST_PROGRESS_WINDOW_MS,
+} = RUNTIME_DEFAULTS;
 const DEFAULT_PARSE_OUTPUT_RECORDS = 4096;
 const TOKEN_OUTPUT_BASE = 5 * 1024 * 1024;
 
@@ -347,7 +350,7 @@ export async function runWorkerIngest(data, options = {}) {
   const workerState = {
     coveredRangeIntervalMs:
       data.coveredRangeIntervalMs ?? DEFAULT_COVERED_RANGE_INTERVAL_MS,
-    etaStableMs: data.etaStableMs ?? DEFAULT_ETA_STABLE_MS,
+    etaStableMs: data.etaStableMs ?? DEFAULT_INGEST_ETA_STABLE_MS,
     index,
     lastCoveredRangeAt: Number.NEGATIVE_INFINITY,
     memory,
@@ -361,7 +364,8 @@ export async function runWorkerIngest(data, options = {}) {
       );
     },
     progressSamples: [],
-    progressWindowMs: data.progressWindowMs ?? DEFAULT_PROGRESS_WINDOW_MS,
+    progressWindowMs:
+      data.progressWindowMs ?? DEFAULT_INGEST_PROGRESS_WINDOW_MS,
     statePtr,
     totalBytes,
   };

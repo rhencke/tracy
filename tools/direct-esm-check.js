@@ -126,6 +126,57 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
   );
 }
 
+function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
+  const source = readRepoFile("host/ingest-worker-runtime.mjs");
+  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
+
+  assert.match(
+    source,
+    /from "\.\/startup-spec\.mjs"/,
+    "ingest worker runtime should import generated runtime defaults",
+  );
+  assert.match(
+    source,
+    /DEFAULT_INGEST_PROGRESS_WINDOW_MS/,
+    "ingest progress window should use the generated runtime default",
+  );
+  assert.match(
+    source,
+    /DEFAULT_INGEST_ETA_STABLE_MS/,
+    "ingest ETA stability delay should use the generated runtime default",
+  );
+  assert.match(
+    startupSpecSource,
+    /DEFAULT_INGEST_PROGRESS_WINDOW_MS: 5000/,
+    "generated runtime spec should expose the ingest progress window",
+  );
+  assert.match(
+    startupSpecSource,
+    /DEFAULT_INGEST_ETA_STABLE_MS: 3000/,
+    "generated runtime spec should expose the ingest ETA stability delay",
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+DEFAULT_PROGRESS_WINDOW_MS\s*=/,
+    "ingest progress window should not drift back into host literals",
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+DEFAULT_ETA_STABLE_MS\s*=/,
+    "ingest ETA stability delay should not drift back into host literals",
+  );
+  assert.doesNotMatch(
+    source,
+    /\b5000\b/,
+    "ingest progress window should be generated, not an anonymous host literal",
+  );
+  assert.doesNotMatch(
+    source,
+    /\b3000\b/,
+    "ingest ETA stability delay should be generated, not an anonymous host literal",
+  );
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -143,6 +194,8 @@ function main() {
   const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
   const bootstrapLineCheckSource = readRepoFile("tools/check-bootstrap-lines.sh");
   const serviceWorkerCheckSource = readRepoFile("tools/service-worker-check.js");
+
+  assertIngestWorkerProgressPolicyUsesGeneratedSpec();
 
   assert.match(
     buildScript,
