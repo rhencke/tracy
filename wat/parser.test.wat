@@ -76,6 +76,7 @@
   (import "parser_state" "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET" (global $PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET i32))
   (import "parser_state" "PARSER_DEFAULT_YIELD_BUDGET_MS" (global $PARSER_DEFAULT_YIELD_BUDGET_MS i32))
   (import "parser_state" "PARSER_TOKEN_RECORD_BYTES" (global $PARSER_TOKEN_RECORD_BYTES i32))
+  (import "parser_state" "PARSER_DEFAULT_OUTPUT_RECORD_CAP" (global $PARSER_DEFAULT_OUTPUT_RECORD_CAP i32))
   (import "parser_state" "PARSER_STATUS_DONE" (global $PARSER_STATUS_DONE i32))
   (import "parser_state" "PARSER_STATUS_YIELDED" (global $PARSER_STATUS_YIELDED i32))
   (import "parser_state" "PARSER_STATUS_MALFORMED" (global $PARSER_STATUS_MALFORMED i32))

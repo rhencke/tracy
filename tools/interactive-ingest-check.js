@@ -73,6 +73,7 @@ function decodeString(memory, ptr, len) {
 
 function makeParserState() {
   return {
+    PARSER_DEFAULT_OUTPUT_RECORD_CAP: 4096,
     PARSER_STATE_EVENT_COUNT_OFFSET: 8,
     PARSER_STATE_FILE_OFFSET_OFFSET: 0,
     PARSER_STATUS_DONE: 2,

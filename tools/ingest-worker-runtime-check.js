@@ -71,7 +71,7 @@ function makeParserExports(memory, parserState) {
     },
     parser_token_output_reset(statePtr, recordCap) {
       assert.equal(statePtr, 1000);
-      assert.equal(recordCap, 4096);
+      assert.equal(recordCap, parserState.PARSER_DEFAULT_OUTPUT_RECORD_CAP);
       outputResets.push({ recordCap, statePtr });
       return 1;
     },
@@ -140,6 +140,7 @@ async function checkWorkerRuntime() {
   const abi = await import(moduleUrl("host/abi.mjs"));
   const memory = new WebAssembly.Memory({ initial: 2 });
   const parserState = {
+    PARSER_DEFAULT_OUTPUT_RECORD_CAP: 8192,
     PARSER_STATE_EVENT_COUNT_OFFSET: 8,
     PARSER_STATE_FILE_OFFSET_OFFSET: 0,
     PARSER_STATUS_DONE: 2,
@@ -241,8 +242,8 @@ async function checkWorkerRuntime() {
   assert.equal(result.extractedEvents, 3);
   assert.deepEqual(indexExports.partialPublishes, [1, 2]);
   assert.deepEqual(parserExports.outputResets, [
-    { recordCap: 4096, statePtr: 1000 },
-    { recordCap: 4096, statePtr: 1000 },
+    { recordCap: 8192, statePtr: 1000 },
+    { recordCap: 8192, statePtr: 1000 },
   ]);
   assert.equal(parserExports.cursorResets, 2);
 
@@ -333,6 +334,7 @@ async function checkWorkerRuntimeReleasesFullParserTokenBuffer() {
   const abi = await import(moduleUrl("host/abi.mjs"));
   const memory = new WebAssembly.Memory({ initial: 2 });
   const parserState = {
+    PARSER_DEFAULT_OUTPUT_RECORD_CAP: 4096,
     PARSER_STATE_EVENT_COUNT_OFFSET: 8,
     PARSER_STATE_FILE_OFFSET_OFFSET: 0,
     PARSER_STATUS_DONE: 2,
@@ -392,7 +394,7 @@ async function checkWorkerRuntimeReleasesFullParserTokenBuffer() {
     },
     parser_token_output_reset(statePtr, recordCap) {
       assert.equal(statePtr, 1000);
-      assert.equal(recordCap, 4096);
+      assert.equal(recordCap, parserState.PARSER_DEFAULT_OUTPUT_RECORD_CAP);
       return 1;
     },
   };
@@ -487,6 +489,7 @@ async function checkWorkerRuntimeRequiresParserResetAbi() {
   const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
   const memory = new WebAssembly.Memory({ initial: 2 });
   const parserState = {
+    PARSER_DEFAULT_OUTPUT_RECORD_CAP: 4096,
     PARSER_STATE_EVENT_COUNT_OFFSET: 8,
     PARSER_STATE_FILE_OFFSET_OFFSET: 0,
     PARSER_STATUS_DONE: 2,

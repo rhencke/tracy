@@ -604,6 +604,9 @@ byte records: token kind, payload pointer, and payload length.  The resume
 record stores output cursors as offsets, record counts, and capacities; it
 never stores the caller's output buffer pointer, so crash recovery does not
 depend on a stale borrowed pointer.
+The default streaming turn capacity is `PARSER_DEFAULT_OUTPUT_RECORD_CAP = 4096`;
+hosts should use that parser ABI value when releasing output after a yield
+instead of copying the cap into JavaScript policy.
 
 ### Parser status and field enums
 

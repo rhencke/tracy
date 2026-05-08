@@ -35,6 +35,11 @@
       "name": "PARSER_TOKEN_RECORD_BYTES",
       "value": 12,
       "description": "Fixed tokenizer output record size: kind, payload pointer, payload length."
+    },
+    {
+      "name": "PARSER_DEFAULT_OUTPUT_RECORD_CAP",
+      "value": 4096,
+      "description": "Default tokenizer output record capacity used by parser-owned streaming turns."
     }
   ],
   "fields": [
@@ -497,6 +502,7 @@
       "PARSER_STACK_CAP",
       "PARSER_PARTIAL_TOKEN_CAP",
       "PARSER_TOKEN_RECORD_BYTES",
+      "PARSER_DEFAULT_OUTPUT_RECORD_CAP",
       "PARSER_STATE_STATUS_OFFSET",
       "PARSER_STATE_YIELD_BUDGET_MS_OFFSET",
       "PARSER_STATE_SOURCE_ID_OFFSET",
@@ -601,6 +607,7 @@
       "PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET",
       "PARSER_DEFAULT_YIELD_BUDGET_MS",
       "PARSER_TOKEN_RECORD_BYTES",
+      "PARSER_DEFAULT_OUTPUT_RECORD_CAP",
       "PARSER_STATUS_DONE",
       "PARSER_STATUS_YIELDED",
       "PARSER_STATUS_MALFORMED",
@@ -635,6 +642,7 @@
       "PARSER_PARTIAL_TOKEN_CAP",
       "PARSER_DEFAULT_YIELD_BUDGET_MS",
       "PARSER_TOKEN_RECORD_BYTES",
+      "PARSER_DEFAULT_OUTPUT_RECORD_CAP",
       "PARSER_STATE_MAGIC_OFFSET",
       "PARSER_STATE_VERSION_OFFSET",
       "PARSER_STATE_STATUS_OFFSET",

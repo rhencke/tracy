@@ -129,6 +129,7 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
   const source = readRepoFile("host/ingest-worker-runtime.mjs");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
+  const parserStateAbiSource = readRepoFile("abi/parser-state.json");
 
   assert.match(
     source,
@@ -174,6 +175,21 @@ function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
     source,
     /\b3000\b/,
     "ingest ETA stability delay should be generated, not an anonymous host literal",
+  );
+  assert.match(
+    source,
+    /PARSER_DEFAULT_OUTPUT_RECORD_CAP/,
+    "parse output record capacity should come from the parser state ABI",
+  );
+  assert.match(
+    parserStateAbiSource,
+    /"name": "PARSER_DEFAULT_OUTPUT_RECORD_CAP"[\s\S]+"value": 4096/,
+    "parser state ABI should define the parser output record capacity",
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+DEFAULT_PARSE_OUTPUT_RECORDS\s*=/,
+    "parse output record capacity should not live in host ingest runtime",
   );
 }
 

@@ -25,7 +25,6 @@ const {
   DEFAULT_INGEST_ETA_STABLE_MS,
   DEFAULT_INGEST_PROGRESS_WINDOW_MS,
 } = RUNTIME_DEFAULTS;
-const DEFAULT_PARSE_OUTPUT_RECORDS = 4096;
 const TOKEN_OUTPUT_BASE = 5 * 1024 * 1024;
 
 function globalValue(value) {
@@ -102,6 +101,18 @@ function parserFileOffset(memory, parserState, statePtr) {
 function parserEventCount(memory, parserState, statePtr) {
   const offset = globalValue(parserState.PARSER_STATE_EVENT_COUNT_OFFSET);
   return new DataView(memory.buffer).getInt32(statePtr + offset, true);
+}
+
+function parserDefaultOutputRecordCap(parserState) {
+  const recordCap = Number(
+    globalValue(parserState?.PARSER_DEFAULT_OUTPUT_RECORD_CAP),
+  );
+
+  if (!Number.isInteger(recordCap) || recordCap <= 0) {
+    throw new Error("parser state ABI missing default output record capacity");
+  }
+
+  return recordCap;
 }
 
 function numericSize(size) {
@@ -213,10 +224,10 @@ function drainExtractedEvents({ index, parser }) {
   }
 }
 
-function releaseParserOutput({ parser, statePtr }) {
+function releaseParserOutput({ parser, parserState, statePtr }) {
   const resetStatus = parser.parser_token_output_reset(
     statePtr,
-    DEFAULT_PARSE_OUTPUT_RECORDS,
+    parserDefaultOutputRecordCap(parserState),
   );
   if (resetStatus !== 1) {
     throw new Error("parser token output reset failed");
@@ -392,7 +403,7 @@ export async function runWorkerIngest(data, options = {}) {
       throw new Error(`parser failed with status ${status}`);
     }
 
-    releaseParserOutput({ parser, statePtr });
+    releaseParserOutput({ parser, parserState, statePtr });
 
     const publishStatus = index.index_writer_publish_partial?.();
     if (publishStatus !== globalValue(index.INDEX_WRITER_STATUS_OK)) {
