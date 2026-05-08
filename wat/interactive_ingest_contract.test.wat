@@ -63,27 +63,42 @@
 
   (func $interactive_ingest_expect_first_events
     (export "interactive_ingest_expect_first_events")
-    (param $first_draw_at i32)
+    (param $first_draw_frame_at i32)
+    (param $first_draw_elapsed_ms i32)
     (param $query_count i32)
     (result i32)
-    local.get $first_draw_at
+    local.get $first_draw_frame_at
     i32.const 0
     i32.lt_s
     if (result i32)
       i32.const 6
     else
-      local.get $first_draw_at
+      local.get $first_draw_frame_at
       i32.const 100
       i32.gt_s
       if (result i32)
         i32.const 7
       else
-        local.get $query_count
-        i32.eqz
+        local.get $first_draw_elapsed_ms
+        i32.const 0
+        i32.lt_s
         if (result i32)
           i32.const 8
         else
-          call $ok
+          local.get $first_draw_elapsed_ms
+          i32.const 100
+          i32.gt_s
+          if (result i32)
+            i32.const 9
+          else
+            local.get $query_count
+            i32.eqz
+            if (result i32)
+              i32.const 10
+            else
+              call $ok
+            end
+          end
         end
       end
     end
@@ -247,6 +262,7 @@
     call $assert_eq_i32
 
     i32.const 16
+    i32.const 16
     i32.const 1
     call $interactive_ingest_expect_first_events
     i32.const 0
@@ -307,10 +323,19 @@
     call $assert_eq_i32
 
     i32.const 101
+    i32.const 16
     i32.const 1
     call $interactive_ingest_expect_first_events
     i32.const 7
     i32.const 10
+    call $assert_eq_i32
+
+    i32.const 96
+    i32.const 2000
+    i32.const 1
+    call $interactive_ingest_expect_first_events
+    i32.const 9
+    i32.const 101
     call $assert_eq_i32
 
     i32.const 1000

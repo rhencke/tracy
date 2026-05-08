@@ -9,6 +9,8 @@ let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
 
+const FIRST_EVENTS_BUDGET_MS = 100;
+
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
 }
@@ -63,6 +65,31 @@ function assertInteractiveContractOk(contract, name, args) {
 
 function flag(value) {
   return value ? 1 : 0;
+}
+
+function makeElapsedClock() {
+  let elapsedMs = 0;
+  let running = false;
+
+  return {
+    elapsedMs() {
+      return elapsedMs;
+    },
+    frame(ts) {
+      if (running) {
+        elapsedMs = Math.max(elapsedMs, ts);
+      }
+    },
+    start() {
+      elapsedMs = 0;
+      running = true;
+    },
+    wait(ms) {
+      if (running) {
+        elapsedMs += ms;
+      }
+    },
+  };
 }
 
 function installBrowserHarness(canvas) {
@@ -398,9 +425,10 @@ async function flushMicrotasks(count = 32) {
   }
 }
 
-async function flushAsyncWork() {
+async function flushAsyncWork(elapsedClock = null) {
   await flushMicrotasks();
   await new Promise((resolve) => setImmediate(resolve));
+  elapsedClock?.wait(1);
   await flushMicrotasks();
 }
 
@@ -499,7 +527,7 @@ function makeTraceRenderPlannerExports() {
   };
 }
 
-async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
+async function waitForAsyncCondition(callback, label, timeoutMs = 2000, elapsedClock = null) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -507,19 +535,22 @@ async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
+    elapsedClock?.wait(1);
     await flushAsyncWork();
   }
 
   assert.ok(callback(), label);
 }
 
-async function runIngestFrame(frames, canvasHarness, ts) {
+async function runIngestFrame(frames, canvasHarness, ts, elapsedClock) {
   await waitForAsyncCondition(
     () => frames.length > 0,
     `expected a frame callback at ${ts} ms`,
+    2000,
+    elapsedClock,
   );
-  await flushAsyncWork();
-  await runFrame(frames, canvasHarness, ts);
+  await flushAsyncWork(elapsedClock);
+  await runFrame(frames, canvasHarness, ts, elapsedClock);
 }
 
 async function checkInteractiveIngestGate() {
@@ -537,6 +568,7 @@ async function checkInteractiveIngestGate() {
   const workerStatuses = [];
   const ticks = [];
   const importCalls = [];
+  const elapsedClock = makeElapsedClock();
   let rendererInstance = null;
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
   const host = {
@@ -675,12 +707,13 @@ async function checkInteractiveIngestGate() {
 
   const selectedFile = makeTraceFile();
   host.files.set(77, selectedFile);
+  elapsedClock.start();
 
   fileSelectionCallbacks[0]({
     file: selectedFile,
     handle: 77,
   });
-  await flushAsyncWork();
+  await flushAsyncWork(elapsedClock);
   await waitForAsyncCondition(
     () =>
       host.calls.some(
@@ -688,6 +721,8 @@ async function checkInteractiveIngestGate() {
           call[1] === "indexes/throttled-100mb.json.idx",
       ) || controller.status().state === "error",
     "worker should create the real OPFS index before the start contract is checked",
+    2000,
+    elapsedClock,
   );
   assert.notEqual(controller.status().state, "error", controller.status().error);
 
@@ -730,27 +765,60 @@ async function checkInteractiveIngestGate() {
     ],
   );
 
-  await runFrame(frames, canvasHarness, 10);
+  await runFrame(frames, canvasHarness, 10, elapsedClock);
   assert.equal(importCalls.length, 1);
-  await waitForAsyncCondition(
-    () =>
-      (
-        host.calls.some(
-          (call) => call[0] === "index-open" &&
-            call[1] === "indexes/throttled-100mb.json.idx",
-        ) &&
-        controller.indexReader.status().state === "ready"
-      ) || controller.status().state === "error",
-    "main-thread reader should be ready for the worker-written OPFS index",
+
+  let nextFrameAt = 16;
+  while (
+    nextFrameAt <= 96 &&
+    (
+      rendererInstance === null ||
+      canvasHarness.firstTraceDrawAt() === null
+    ) &&
+    controller.status().state !== "error"
+  ) {
+    await runIngestFrame(frames, canvasHarness, nextFrameAt, elapsedClock);
+    nextFrameAt += 16;
+  }
+  if (
+    (
+      rendererInstance === null ||
+      canvasHarness.firstTraceDrawAt() === null
+    ) &&
+    controller.status().state !== "error"
+  ) {
+    await runIngestFrame(frames, canvasHarness, 100, elapsedClock);
+    nextFrameAt = 116;
+  }
+  await flushAsyncWork(elapsedClock);
+  assert.notEqual(controller.status().state, "error", controller.status().error);
+  assert.notEqual(rendererInstance, null, "progressive renderer should be created");
+  const firstTraceDrawElapsedMs = elapsedClock.elapsedMs();
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_first_events",
+    [
+      canvasHarness.firstTraceDrawAt() ?? -1,
+      firstTraceDrawElapsedMs,
+      rendererInstance.status().rows,
+    ],
+  );
+  assert.ok(
+    firstTraceDrawElapsedMs <= FIRST_EVENTS_BUDGET_MS,
+    `first visible events took ${firstTraceDrawElapsedMs}ms after file selection`,
   );
   assert.ok(
     host.calls.some(
-        (call) => call[0] === "index-open" &&
-          call[1] === "indexes/throttled-100mb.json.idx",
+      (call) => call[0] === "index-open" &&
+        call[1] === "indexes/throttled-100mb.json.idx",
     ),
     "main-thread reader should open the worker-written OPFS index",
   );
-  assert.notEqual(controller.status().state, "error", controller.status().error);
+  assert.equal(
+    controller.indexReader.status().state,
+    "ready",
+    "main-thread reader should be ready for the worker-written OPFS index",
+  );
   assert.ok(
     wasmModuleCalls.some((call) => call.id === "parser" && call.thread === "worker"),
     "interactive ingest gate should instantiate the real worker parser module",
@@ -762,37 +830,6 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
     "interactive ingest gate should instantiate the real main-thread index reader module",
-  );
-
-  let nextFrameAt = 16;
-  while (
-    nextFrameAt <= 96 &&
-    (
-      rendererInstance === null ||
-      canvasHarness.firstTraceDrawAt() === null
-    ) &&
-    controller.status().state !== "error"
-  ) {
-    await runIngestFrame(frames, canvasHarness, nextFrameAt);
-    nextFrameAt += 16;
-  }
-  if (
-    (
-      rendererInstance === null ||
-      canvasHarness.firstTraceDrawAt() === null
-    ) &&
-    controller.status().state !== "error"
-  ) {
-    await runIngestFrame(frames, canvasHarness, 100);
-    nextFrameAt = 116;
-  }
-  await flushAsyncWork();
-  assert.notEqual(controller.status().state, "error", controller.status().error);
-  assert.notEqual(rendererInstance, null, "progressive renderer should be created");
-  assertInteractiveContractOk(
-    interactiveContract,
-    "interactive_ingest_expect_first_events",
-    [canvasHarness.firstTraceDrawAt() ?? -1, rendererInstance.status().rows],
   );
 
   await runFrame(frames, canvasHarness, nextFrameAt);
@@ -901,10 +938,11 @@ function nextWorkerTime() {
 
 nextWorkerTime.times = [0, 10, 20, 34, 3034, 3035];
 
-async function runFrame(frames, canvasHarness, ts) {
+async function runFrame(frames, canvasHarness, ts, elapsedClock = null) {
   const frame = frames.shift();
 
   assert.equal(typeof frame, "function", `expected a frame callback at ${ts} ms`);
+  elapsedClock?.frame(ts);
   canvasHarness.setFrameAt(ts);
   frame(ts);
   await flushMicrotasks();
