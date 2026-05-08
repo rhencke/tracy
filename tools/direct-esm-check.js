@@ -210,6 +210,7 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
   const source = readRepoFile("tools/interactive-ingest-check.js");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
   const appSource = readRepoFile("wat/app.wat");
+  const contractSource = readRepoFile("wat/interactive_ingest_contract.test.wat");
 
   assert.match(
     startupSpecSource,
@@ -238,8 +239,8 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
 
   assert.match(
     source,
-    /dist\/wasm\/app\.wasm/,
-    "interactive ingest check should load the Wasm-owned app contract",
+    /dist\/wasm\/interactive_ingest_contract\.test\.wasm/,
+    "interactive ingest check should load the Wasm-owned verification contract off the app hot path",
   );
   assert.match(
     source,
@@ -270,9 +271,14 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     "interactive_ingest_expect_frame_interval",
   ]) {
     assert.match(
+      contractSource,
+      new RegExp(`\\(export "${exportName}"\\)`),
+      `interactive ingest Wasm contract should own ${exportName}`,
+    );
+    assert.doesNotMatch(
       appSource,
-      new RegExp(`\\(func \\(export "${exportName}"\\)`),
-      `app Wasm should own ${exportName}`,
+      new RegExp(`\\(export "${exportName}"\\)`),
+      `interactive ingest verification should stay out of app.wasm cold startup`,
     );
     assert.match(
       source,

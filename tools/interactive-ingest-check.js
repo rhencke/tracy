@@ -25,47 +25,14 @@ async function loadGeneratedInteractiveIngestCheckSpec() {
   FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
 }
 
-async function instantiateAppVerifier(memory, host) {
-  const bytes = await fs.readFile(repoPath("dist/wasm/app.wasm"));
+async function instantiateInteractiveIngestVerifier(memory) {
+  const bytes = await fs.readFile(
+    repoPath("dist/wasm/interactive_ingest_contract.test.wasm"),
+  );
   const imports = {
     env: { memory },
-    host: {
-      canvas_get_size() {
-        return 0n;
-      },
-      canvas_listen_resize() {},
-      file_picker_open() {
-        return 0;
-      },
-      opfs_create_from_file() {
-        return 0;
-      },
-      opfs_index_create: host.opfs_index_create,
-      opfs_index_flush() {
-        return 0;
-      },
-      opfs_index_open: host.opfs_index_open,
-      opfs_index_read() {
-        return 0;
-      },
-      opfs_index_size() {
-        return 0n;
-      },
-      opfs_index_write() {
-        return 0;
-      },
-      opfs_read_chunk() {
-        return 0;
-      },
-      opfs_source_from_file: host.opfs_source_from_file,
-      opfs_source_name: host.opfs_source_name,
-      opfs_source_name_len: host.opfs_source_name_len,
-      opfs_source_open: host.opfs_source_open,
-      opfs_source_read() {
-        return 0;
-      },
-      opfs_source_size: host.opfs_source_size,
-      pointer_listen() {},
+    watwat: {
+      assert_eq_i32() {},
     },
   };
   const { instance } = await WebAssembly.instantiate(bytes, imports);
@@ -424,7 +391,7 @@ async function checkInteractiveIngestGate() {
   const ticks = [];
   const importCalls = [];
   let rendererInstance = null;
-  let interactiveContract = null;
+  const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
   const hostCalls = [];
 
   const host = {
@@ -555,16 +522,13 @@ async function checkInteractiveIngestGate() {
 
       assert.equal(id, "app");
       assert.equal(thread, "main");
-      interactiveContract = await instantiateAppVerifier(memory, host);
       return {
         exports: {
           ...interactiveContract,
           tracy_main() {
-            interactiveContract.tracy_main();
             ticks.push("main");
           },
           tracy_tick(ts) {
-            interactiveContract.tracy_tick(ts);
             ticks.push(ts);
           },
         },
