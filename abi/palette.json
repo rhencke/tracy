@@ -1,0 +1,65 @@
+{
+  "description": "Application color palette constants and validation requirements.",
+  "palettes": {
+    "default": {
+      "appShell": {
+        "APP_SHELL_BACKGROUND": {
+          "description": "Initial canvas and fallback error background.",
+          "value": "#fbf8f4"
+        },
+        "ERROR_TEXT": {
+          "description": "Fallback error text on the app shell background.",
+          "value": "#1f1b16"
+        }
+      },
+      "traceRenderer": {
+        "DEFAULT_SLICE_FILL": {
+          "description": "Fallback slice color when trace data does not provide one.",
+          "value": "#3f6ea8"
+        },
+        "TRACE_BACKGROUND_FILL": {
+          "description": "Trace lane background wash.",
+          "value": "rgba(251, 248, 244, 0.92)"
+        },
+        "PARTIAL_SLICE_FILL": {
+          "description": "Unfinished slice fill while ingest is still running.",
+          "value": "rgba(92, 109, 130, 0.58)"
+        },
+        "PARTIAL_HATCH_STROKE": {
+          "description": "Hatch overlay for partial pages.",
+          "value": "rgba(40, 45, 52, 0.35)"
+        },
+        "UNKNOWN_RANGE_FILL": {
+          "description": "Covered-range leading edge progress fill.",
+          "value": "rgba(126, 134, 146, 0.18)"
+        },
+        "UNKNOWN_RANGE_STRIPE": {
+          "description": "Covered-range leading edge progress stripe.",
+          "value": "rgba(76, 85, 99, 0.38)"
+        },
+        "INCOMPLETE_QUERY_FILL": {
+          "description": "Visible region fill when dense query results were capped.",
+          "value": "rgba(180, 83, 9, 0.16)"
+        },
+        "INCOMPLETE_QUERY_STRIPE": {
+          "description": "Visible region stripe when dense query results were capped.",
+          "value": "rgba(146, 64, 14, 0.42)"
+        }
+      }
+    }
+  },
+  "contrastChecks": [
+    {
+      "background": "default.appShell.APP_SHELL_BACKGROUND",
+      "foreground": "default.appShell.ERROR_TEXT",
+      "minimumRatio": 7,
+      "description": "Fallback errors are text and should meet enhanced contrast."
+    },
+    {
+      "background": "default.appShell.APP_SHELL_BACKGROUND",
+      "foreground": "default.traceRenderer.DEFAULT_SLICE_FILL",
+      "minimumRatio": 3,
+      "description": "Default slices are non-text graphical marks."
+    }
+  ]
+}
