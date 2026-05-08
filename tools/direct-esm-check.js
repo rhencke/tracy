@@ -166,7 +166,7 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /instantiateWasmModuleForThread,/,
+    /instantiateWasmModuleForThread/,
   );
   assert.doesNotMatch(bootstrapSource, /progressive-trace-renderer-loader/);
   assert.match(bootstrapSource, /from "\.\/host\/startup-spec\.mjs"/);

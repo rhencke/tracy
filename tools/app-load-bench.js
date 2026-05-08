@@ -997,7 +997,7 @@ function runSelfTest() {
   );
   assert.match(
     bootstrap,
-    /instantiateWasmModuleForThread,/,
+    /instantiateWasmModuleForThread/,
   );
   assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);

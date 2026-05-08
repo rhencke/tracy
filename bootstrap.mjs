@@ -1,16 +1,9 @@
-import {
-  APP_SHELL_COLORS,
-  BOOTSTRAP_TIMING,
-  BOOTSTRAP_WASM_MEMORY,
-  PERFORMANCE_MARKS,
-  RUNTIME_URLS,
-} from "./host/startup-spec.mjs";
+import { APP_SHELL_COLORS, BOOTSTRAP_TIMING, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_MARKS, RUNTIME_URLS } from "./host/startup-spec.mjs";
 
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
 const wasmModulesPromise = import("./host/wasm-modules.mjs");
-const serviceWorkerController =
-  globalThis.navigator?.serviceWorker?.controller ?? null;
+const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
 const warmProgressiveTraceRendererPromise =
   serviceWorkerController === null
     ? null
@@ -45,16 +38,11 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
   globalThis.addEventListener?.("load", registerAfterReady);
 }
 
-const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
-  import("./host/shim.mjs"), import("./host/runtime.mjs"),
-]);
+const [{ makeMainThreadHost }, { runApp }] = await Promise.all([import("./host/shim.mjs"), import("./host/runtime.mjs")]);
 
 const memory = new WebAssembly.Memory({
   initial: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_INITIAL_PAGES,
-  maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES,
-  shared: false,
+  maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES, shared: false,
 });
 
-runApp(memory, makeMainThreadHost(memory), {
-  importProgressiveTraceRenderer, instantiateWasmModuleForThread,
-});
+runApp(memory, makeMainThreadHost(memory), { importProgressiveTraceRenderer, instantiateWasmModuleForThread });
