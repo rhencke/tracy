@@ -405,10 +405,13 @@ async function flushAsyncWork() {
 }
 
 async function waitForAsyncCondition(callback, label) {
-  for (let i = 0; i < 20; i += 1) {
+  const deadline = Date.now() + 2000;
+
+  while (Date.now() < deadline) {
     if (callback()) {
       return;
     }
+    await new Promise((resolve) => setTimeout(resolve, 1));
     await flushAsyncWork();
   }
 
