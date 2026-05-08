@@ -2,6 +2,7 @@ importScripts("precache-manifest.js");
 
 const { cacheName, urls } = self.TRACY_PRECACHE;
 const precacheUrls = new Set(urls.map((url) => new URL(url, self.location).href));
+const precacheCachePromise = caches.open(cacheName);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -37,5 +38,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(caches.match(cacheUrl).then((response) => response ?? fetch(event.request)));
+  event.respondWith(
+    precacheCachePromise
+      .then((cache) => cache.match(cacheUrl))
+      .then((response) => response ?? fetch(event.request)),
+  );
 });

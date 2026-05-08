@@ -27,7 +27,8 @@ function main() {
   assert.match(makefile, /node tools\/service-worker-check\.js/);
   assert.match(serviceWorker, /importScripts\("precache-manifest\.js"\)/);
   assert.match(serviceWorker, /cache\.addAll/);
-  assert.match(serviceWorker, /caches\.match\(cacheUrl\)/);
+  assert.match(serviceWorker, /const precacheCachePromise = caches\.open\(cacheName\)/);
+  assert.match(serviceWorker, /cache\.match\(cacheUrl\)/);
 
   for (const relativePath of [
     "service-worker.js",
