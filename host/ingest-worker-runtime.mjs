@@ -208,6 +208,8 @@ function postProgress(state, phase) {
 
 function drainExtractedEvents({ index, parser }) {
   let extractedEvents = 0;
+  const ingestOk = globalValue(index.INDEX_INGEST_STATUS_OK);
+  const ingestIgnored = globalValue(index.INDEX_INGEST_STATUS_IGNORED);
 
   while (true) {
     const eventPtr = parser.extractor_next();
@@ -216,7 +218,7 @@ function drainExtractedEvents({ index, parser }) {
     }
 
     const appendStatus = index.index_add_event(eventPtr);
-    if (appendStatus !== globalValue(index.INDEX_INGEST_STATUS_OK)) {
+    if (appendStatus !== ingestOk && appendStatus !== ingestIgnored) {
       throw new Error(`index ingest failed with status ${appendStatus}`);
     }
 

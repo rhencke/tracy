@@ -95,6 +95,7 @@ function makeIndexExports() {
   }
 
   return {
+    INDEX_INGEST_STATUS_IGNORED: 1,
     INDEX_INGEST_STATUS_OK: 0,
     INDEX_WRITER_STATUS_OK: 0,
     index_add_event(eventPtr) {
@@ -485,6 +486,128 @@ async function checkWorkerRuntimeReleasesFullParserTokenBuffer() {
   assert.equal(indexedEvents.at(4096), 14096);
 }
 
+async function checkWorkerRuntimeSkipsIgnoredParserEvents() {
+  const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 2 });
+  const parserState = {
+    PARSER_DEFAULT_OUTPUT_RECORD_CAP: 4096,
+    PARSER_STATE_EVENT_COUNT_OFFSET: 8,
+    PARSER_STATE_FILE_OFFSET_OFFSET: 0,
+    PARSER_STATUS_DONE: 2,
+    PARSER_STATUS_YIELDED: 1,
+    parser_state_init() {},
+  };
+  const events = [8001, 8002, 8003];
+  const parserExports = {
+    cursor: 0,
+    extractor_init() {},
+    extractor_next() {
+      if (this.cursor >= events.length) {
+        return -1;
+      }
+
+      const eventPtr = events[this.cursor];
+      this.cursor += 1;
+      return eventPtr;
+    },
+    extractor_reset_cursor() {},
+    parser_parse_with_budget(statePtr) {
+      const view = new DataView(memory.buffer);
+      view.setBigUint64(
+        statePtr + parserState.PARSER_STATE_FILE_OFFSET_OFFSET,
+        64n,
+        true,
+      );
+      view.setInt32(
+        statePtr + parserState.PARSER_STATE_EVENT_COUNT_OFFSET,
+        events.length,
+        true,
+      );
+      return parserState.PARSER_STATUS_DONE;
+    },
+    parser_token_output_reset() {
+      return 1;
+    },
+  };
+  const acceptedEvents = [];
+  const indexExports = {
+    INDEX_INGEST_STATUS_IGNORED: 1,
+    INDEX_INGEST_STATUS_OK: 0,
+    INDEX_WRITER_STATUS_OK: 0,
+    index_add_event(eventPtr) {
+      if (eventPtr === 8002) {
+        return 1;
+      }
+
+      acceptedEvents.push(eventPtr);
+      return 0;
+    },
+    index_writer_committed_events() {
+      return acceptedEvents.length;
+    },
+    index_writer_committed_pages() {
+      return acceptedEvents.length === 0 ? 0 : 1;
+    },
+    index_writer_covered_range_end() {
+      return acceptedEvents.length;
+    },
+    index_writer_covered_range_start() {
+      return 0;
+    },
+    index_writer_covered_range_valid() {
+      return acceptedEvents.length === 0 ? 0 : 1;
+    },
+    index_writer_flush() {
+      return 0;
+    },
+    index_writer_init() {},
+    index_writer_publish_partial() {
+      return 0;
+    },
+  };
+
+  const result = await runtime.runWorkerIngest(
+    {
+      indexId: 22,
+      sourceId: 11,
+      statePtr: 1000,
+      type: runtime.INGEST_WORKER_MESSAGE.START,
+    },
+    {
+      hostFactory: () => ({}),
+      instantiateWasmModuleForThread: async (id) => {
+        if (id === "parser") {
+          return {
+            exports: parserExports,
+            imports: {
+              alloc: {
+                bump_init() {},
+              },
+              mem: {
+                MEM_HEAP_BASE: 1024,
+                MEM_STACK_BASE: 2048,
+              },
+              parser_state: parserState,
+            },
+          };
+        }
+        if (id === "index") {
+          return { exports: indexExports, imports: {} };
+        }
+
+        throw new Error(`unexpected module ${id}`);
+      },
+      memoryFactory: () => memory,
+      now: () => 0,
+      postMessage() {},
+    },
+  );
+
+  assert.equal(result.extractedEvents, 3);
+  assert.equal(result.committedEvents, 2);
+  assert.deepEqual(acceptedEvents, [8001, 8003]);
+}
+
 async function checkWorkerRuntimeRequiresParserResetAbi() {
   const runtime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
   const memory = new WebAssembly.Memory({ initial: 2 });
@@ -589,6 +712,7 @@ async function checkMessageHandler() {
 async function main() {
   await checkWorkerRuntime();
   await checkWorkerRuntimeReleasesFullParserTokenBuffer();
+  await checkWorkerRuntimeSkipsIgnoredParserEvents();
   await checkWorkerRuntimeRequiresParserResetAbi();
   await checkMessageHandler();
 }
