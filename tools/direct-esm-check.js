@@ -209,6 +209,7 @@ function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
 function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
   const source = readRepoFile("tools/interactive-ingest-check.js");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
+  const appSource = readRepoFile("wat/app.wat");
 
   assert.match(
     startupSpecSource,
@@ -235,6 +236,17 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     );
   }
 
+  assert.match(
+    source,
+    /dist\/wasm\/app\.wasm/,
+    "interactive ingest check should load the Wasm-owned app contract",
+  );
+  assert.match(
+    source,
+    /assertInteractiveContractOk/,
+    "interactive ingest check should assert Wasm-owned verification results",
+  );
+
   for (const [pattern, message] of [
     [/INTERACTIVE_INGEST_CHECK\.FIXTURE_SIZE_BYTES/, "fixture size"],
     [/INTERACTIVE_INGEST_CHECK\.INGEST_WINDOW_BYTES/, "ingest window"],
@@ -244,6 +256,43 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
       source,
       pattern,
       `interactive ingest check should consume generated ${message}`,
+    );
+  }
+
+  for (const exportName of [
+    "interactive_ingest_expect_renderer_preload",
+    "interactive_ingest_expect_worker_start",
+    "interactive_ingest_expect_first_events",
+    "interactive_ingest_expect_covered_partial_unknown",
+    "interactive_ingest_expect_zoom_clamped",
+    "interactive_ingest_expect_pan_clamped",
+    "interactive_ingest_expect_progress_eta",
+    "interactive_ingest_expect_frame_interval",
+  ]) {
+    assert.match(
+      appSource,
+      new RegExp(`\\(func \\(export "${exportName}"\\)`),
+      `app Wasm should own ${exportName}`,
+    );
+    assert.match(
+      source,
+      new RegExp(JSON.stringify(exportName)),
+      `interactive ingest check should feed observations to ${exportName}`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/first indexed events should become visible/, "first-events timing rule"],
+    [/partial pages should keep unfinished styling/, "partial-page affordance rule"],
+    [/unknown time should draw a striped progress affordance/, "unknown-range affordance rule"],
+    [/early ETA should stay hidden/, "early ETA rule"],
+    [/stable ETA should be surfaced/, "stable ETA rule"],
+    [/pan\/zoom frames should stay inside/, "frame-budget rule"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `interactive ingest check should leave ${message} in the Wasm contract`,
     );
   }
 }

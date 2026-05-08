@@ -28,6 +28,22 @@
   ;; @generated host-imports app:end
   (import "app" "tracy_main" (func $tracy_main))
   (import "app" "tracy_tick" (func $tracy_tick))
+  (import "app" "interactive_ingest_expect_renderer_preload"
+    (func $interactive_ingest_expect_renderer_preload (param i32 i32) (result i32)))
+  (import "app" "interactive_ingest_expect_worker_start"
+    (func $interactive_ingest_expect_worker_start (param i32 i32 i32) (result i32)))
+  (import "app" "interactive_ingest_expect_first_events"
+    (func $interactive_ingest_expect_first_events (param i32 i32) (result i32)))
+  (import "app" "interactive_ingest_expect_covered_partial_unknown"
+    (func $interactive_ingest_expect_covered_partial_unknown (param i32 i32 i32 i32 i32) (result i32)))
+  (import "app" "interactive_ingest_expect_zoom_clamped"
+    (func $interactive_ingest_expect_zoom_clamped (param i32 f64 f64 f64 f64) (result i32)))
+  (import "app" "interactive_ingest_expect_pan_clamped"
+    (func $interactive_ingest_expect_pan_clamped (param f64 f64 f64) (result i32)))
+  (import "app" "interactive_ingest_expect_progress_eta"
+    (func $interactive_ingest_expect_progress_eta (param i32 i32 i32 i32) (result i32)))
+  (import "app" "interactive_ingest_expect_frame_interval"
+    (func $interactive_ingest_expect_frame_interval (param f64 f64) (result i32)))
 
   (data (i32.const 1024) "app test failed")
 
@@ -43,6 +59,107 @@
     i32.const 1
     i32.const 1
     call $assert_true
+  )
+
+  (func (export "test_interactive_ingest_contract_accepts_expected_observations")
+    i32.const 1
+    i32.const 0
+    call $interactive_ingest_expect_renderer_preload
+    i32.const 0
+    i32.const 18
+    call $assert_eq_i32
+
+    i32.const 1
+    i32.const 1
+    i32.const 1
+    call $interactive_ingest_expect_worker_start
+    i32.const 0
+    i32.const 19
+    call $assert_eq_i32
+
+    i32.const 16
+    i32.const 1
+    call $interactive_ingest_expect_first_events
+    i32.const 0
+    i32.const 20
+    call $assert_eq_i32
+
+    i32.const 1000
+    i32.const 1000
+    i32.const 1
+    i32.const 1
+    i32.const 1
+    call $interactive_ingest_expect_covered_partial_unknown
+    i32.const 0
+    i32.const 21
+    call $assert_eq_i32
+
+    i32.const 1
+    f64.const 100
+    f64.const 1000
+    f64.const 100
+    f64.const 1000
+    call $interactive_ingest_expect_zoom_clamped
+    i32.const 0
+    i32.const 22
+    call $assert_eq_i32
+
+    f64.const 1000
+    f64.const 1000
+    f64.const 1000
+    call $interactive_ingest_expect_pan_clamped
+    i32.const 0
+    i32.const 23
+    call $assert_eq_i32
+
+    i32.const 20971520
+    i32.const 20971520
+    i32.const 1
+    i32.const 1
+    call $interactive_ingest_expect_progress_eta
+    i32.const 0
+    i32.const 24
+    call $assert_eq_i32
+
+    f64.const 16
+    f64.const 16.67
+    call $interactive_ingest_expect_frame_interval
+    i32.const 0
+    i32.const 25
+    call $assert_eq_i32
+  )
+
+  (func (export "test_interactive_ingest_contract_reports_failures")
+    i32.const 0
+    i32.const 0
+    call $interactive_ingest_expect_renderer_preload
+    i32.const 1
+    i32.const 26
+    call $assert_eq_i32
+
+    i32.const 101
+    i32.const 1
+    call $interactive_ingest_expect_first_events
+    i32.const 7
+    i32.const 27
+    call $assert_eq_i32
+
+    i32.const 1000
+    i32.const 1001
+    i32.const 1
+    i32.const 1
+    i32.const 1
+    call $interactive_ingest_expect_covered_partial_unknown
+    i32.const 10
+    i32.const 28
+    call $assert_eq_i32
+
+    f64.const 16.68
+    f64.const 16.67
+    call $interactive_ingest_expect_frame_interval
+    i32.const 22
+    i32.const 29
+    call $assert_eq_i32
   )
 
   (func (export "test_host_stubs_are_deterministic")

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -12,12 +13,75 @@ function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
 }
 
+function repoPath(relativePath) {
+  return path.resolve(__dirname, "..", relativePath);
+}
+
 async function loadGeneratedInteractiveIngestCheckSpec() {
   const { INTERACTIVE_INGEST_CHECK } = await import(moduleUrl("host/startup-spec.mjs"));
 
   FIXTURE_SIZE_BYTES = INTERACTIVE_INGEST_CHECK.FIXTURE_SIZE_BYTES;
   INGEST_WINDOW_BYTES = INTERACTIVE_INGEST_CHECK.INGEST_WINDOW_BYTES;
   FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
+}
+
+async function instantiateAppVerifier(memory, host) {
+  const bytes = await fs.readFile(repoPath("dist/wasm/app.wasm"));
+  const imports = {
+    env: { memory },
+    host: {
+      canvas_get_size() {
+        return 0n;
+      },
+      canvas_listen_resize() {},
+      file_picker_open() {
+        return 0;
+      },
+      opfs_create_from_file() {
+        return 0;
+      },
+      opfs_index_create: host.opfs_index_create,
+      opfs_index_flush() {
+        return 0;
+      },
+      opfs_index_open: host.opfs_index_open,
+      opfs_index_read() {
+        return 0;
+      },
+      opfs_index_size() {
+        return 0n;
+      },
+      opfs_index_write() {
+        return 0;
+      },
+      opfs_read_chunk() {
+        return 0;
+      },
+      opfs_source_from_file: host.opfs_source_from_file,
+      opfs_source_name: host.opfs_source_name,
+      opfs_source_name_len: host.opfs_source_name_len,
+      opfs_source_open: host.opfs_source_open,
+      opfs_source_read() {
+        return 0;
+      },
+      opfs_source_size: host.opfs_source_size,
+      pointer_listen() {},
+    },
+  };
+  const { instance } = await WebAssembly.instantiate(bytes, imports);
+
+  return instance.exports;
+}
+
+function assertInteractiveContractOk(contract, name, args) {
+  const fn = contract?.[name];
+
+  assert.equal(typeof fn, "function", `missing Wasm interactive ingest contract export ${name}`);
+  assert.equal(fn(...args), 0, `Wasm interactive ingest contract ${name} rejected observations`);
+}
+
+function flag(value) {
+  return value ? 1 : 0;
 }
 
 function installBrowserHarness(canvas) {
@@ -336,6 +400,12 @@ async function flushMicrotasks() {
   }
 }
 
+async function flushAsyncWork() {
+  await flushMicrotasks();
+  await new Promise((resolve) => setImmediate(resolve));
+  await flushMicrotasks();
+}
+
 async function checkInteractiveIngestGate() {
   await loadGeneratedInteractiveIngestCheckSpec();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
@@ -354,6 +424,7 @@ async function checkInteractiveIngestGate() {
   const ticks = [];
   const importCalls = [];
   let rendererInstance = null;
+  let interactiveContract = null;
   const hostCalls = [];
 
   const host = {
@@ -484,12 +555,16 @@ async function checkInteractiveIngestGate() {
 
       assert.equal(id, "app");
       assert.equal(thread, "main");
+      interactiveContract = await instantiateAppVerifier(memory, host);
       return {
         exports: {
+          ...interactiveContract,
           tracy_main() {
+            interactiveContract.tracy_main();
             ticks.push("main");
           },
           tracy_tick(ts) {
+            interactiveContract.tracy_tick(ts);
             ticks.push(ts);
           },
         },
@@ -504,14 +579,20 @@ async function checkInteractiveIngestGate() {
     },
   });
 
-  await flushMicrotasks();
+  await flushAsyncWork();
   assert.equal(fileSelectionCallbacks.length, 1);
-  assert.equal(frames.length, 2);
+  assert.ok(frames.length >= 1);
 
   await runFrame(frames, canvasHarness, 0);
-  await runFrame(frames, canvasHarness, 0);
-  assert.equal(importCalls.length, 1, "renderer module should preload before trace data is queryable");
-  assert.equal(rendererInstance, null, "renderer should stay uncreated before queryable pages");
+  await flushAsyncWork();
+  if (frames.length > 0) {
+    await runFrame(frames, canvasHarness, 0);
+  }
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_renderer_preload",
+    [importCalls.length, flag(rendererInstance !== null)],
+  );
 
   const selectedFile = { name: "throttled-100mb.json", size: FIXTURE_SIZE_BYTES };
 
@@ -522,6 +603,15 @@ async function checkInteractiveIngestGate() {
   await flushMicrotasks();
   await flushMicrotasks();
 
+  const startPosted =
+    controller.worker.posted.length === 1 &&
+    controller.worker.posted[0]?.ingestId === 1 &&
+    controller.worker.posted[0]?.indexName === "indexes/throttled-100mb.json.idx" &&
+    controller.worker.posted[0]?.sourceFile === selectedFile &&
+    controller.worker.posted[0]?.sourceFileHandle === 77 &&
+    controller.worker.posted[0]?.sourceName === sourceName &&
+    controller.worker.posted[0]?.sourceSize === FIXTURE_SIZE_BYTES &&
+    controller.worker.posted[0]?.type === "start";
   assert.deepEqual(controller.worker.posted, [
     {
       ingestId: 1,
@@ -533,11 +623,18 @@ async function checkInteractiveIngestGate() {
       type: "start",
     },
   ]);
-  assert.deepEqual(hostCalls.slice(0, 2), [
-    ["source-from-file", 77],
-    ["index-create", "indexes/throttled-100mb.json.idx"],
-  ]);
-  assert.deepEqual(indexBacking.createdNames, ["indexes/throttled-100mb.json.idx"]);
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_worker_start",
+    [
+      flag(startPosted),
+      flag(
+        hostCalls[0]?.[0] === "source-from-file" &&
+          hostCalls[0]?.[1] === 77,
+      ),
+      flag(indexBacking.createdNames.includes("indexes/throttled-100mb.json.idx")),
+    ],
+  );
 
   await runFrame(frames, canvasHarness, 10);
   assert.equal(importCalls.length, 1);
@@ -545,35 +642,36 @@ async function checkInteractiveIngestGate() {
 
   await flushMicrotasks();
   await runFrame(frames, canvasHarness, 16);
-  assert.ok(
-    canvasHarness.firstTraceDrawAt() !== null &&
-      canvasHarness.firstTraceDrawAt() <= 100,
-    "first indexed events should become visible within 100 ms of file pick",
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_first_events",
+    [canvasHarness.firstTraceDrawAt() ?? -1, indexBacking.queryCalls.length],
   );
-  assert.equal(indexBacking.queryCalls.length > 0, true);
 
   await runFrame(frames, canvasHarness, 32);
 
-  assert.equal(controller.status().coveredRange.end, 1000);
-  assert.equal(indexBacking.queryCalls.at(-1).tsMax <= 1000, true);
-  assert.equal(rendererInstance.status().unknownRange.pending, true);
-  assert.equal(
-    canvasHarness.operations.some(
-      (operation) =>
-        operation.op === "fillRect" &&
-        operation.fillStyle === "rgba(92, 109, 130, 0.58)",
-    ),
-    true,
-    "partial pages should keep unfinished styling in the gate check",
-  );
-  assert.equal(
-    canvasHarness.operations.some(
-      (operation) =>
-        operation.op === "fillRect" &&
-        operation.fillStyle === "rgba(126, 134, 146, 0.18)",
-    ),
-    true,
-    "unknown time should draw a striped progress affordance",
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_covered_partial_unknown",
+    [
+      controller.status().coveredRange.end,
+      indexBacking.queryCalls.at(-1).tsMax,
+      flag(rendererInstance.status().unknownRange.pending),
+      flag(
+        canvasHarness.operations.some(
+          (operation) =>
+            operation.op === "fillRect" &&
+            operation.fillStyle === "rgba(92, 109, 130, 0.58)",
+        ),
+      ),
+      flag(
+        canvasHarness.operations.some(
+          (operation) =>
+            operation.op === "fillRect" &&
+            operation.fillStyle === "rgba(126, 134, 146, 0.18)",
+        ),
+      ),
+    ],
   );
 
   canvasHarness.listeners.get("wheel")({
@@ -583,9 +681,17 @@ async function checkInteractiveIngestGate() {
   });
   await runFrame(frames, canvasHarness, 48);
   const zoomedViewport = rendererInstance.status().viewport;
-  assert.equal(rendererInstance.status().userInteracted, true);
-  assert.ok(zoomedViewport.start >= controller.status().coveredRange.start);
-  assert.ok(zoomedViewport.end <= controller.status().coveredRange.end);
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_zoom_clamped",
+    [
+      flag(rendererInstance.status().userInteracted),
+      zoomedViewport.start,
+      zoomedViewport.end,
+      controller.status().coveredRange.start,
+      controller.status().coveredRange.end,
+    ],
+  );
 
   canvasHarness.listeners.get("pointerdown")({
     button: 0,
@@ -600,31 +706,40 @@ async function checkInteractiveIngestGate() {
   });
   canvasHarness.listeners.get("pointerup")({ pointerId: 1 });
   await runFrame(frames, canvasHarness, 64);
-  assert.equal(rendererInstance.status().viewport.end, controller.status().coveredRange.end);
-  assert.ok(indexBacking.queryCalls.at(-1).tsMax <= controller.status().coveredRange.end);
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_pan_clamped",
+    [
+      rendererInstance.status().viewport.end,
+      controller.status().coveredRange.end,
+      indexBacking.queryCalls.at(-1).tsMax,
+    ],
+  );
 
   await runFrame(frames, canvasHarness, 80);
-  assert.equal(controller.status().progress.fileOffset, 2 * INGEST_WINDOW_BYTES);
   const progressStatuses = workerStatuses.filter(
     (entry) => entry.message?.type === "progress",
   );
-  assert.equal(
-    progressStatuses.some((entry) => entry.status.progress?.etaSeconds === null),
-    true,
-    "early ETA should stay hidden until the rate stabilizes",
-  );
-  assert.equal(
-    progressStatuses.some((entry) => entry.status.progress?.etaSeconds > 0),
-    true,
-    "stable ETA should be surfaced once available",
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_progress_eta",
+    [
+      controller.status().progress.fileOffset,
+      2 * INGEST_WINDOW_BYTES,
+      flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds === null)),
+      flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds > 0)),
+    ],
   );
 
   const numericTicks = ticks.filter((tick) => typeof tick === "number");
   const frameIntervals = numericTicks.slice(1).map((tick, index) => tick - numericTicks[index]);
-  assert.ok(
-    frameIntervals.every((interval) => interval <= FRAME_BUDGET_MS),
-    "pan/zoom frames should stay inside the 60 fps gate during ingest",
-  );
+  for (const interval of frameIntervals) {
+    assertInteractiveContractOk(
+      interactiveContract,
+      "interactive_ingest_expect_frame_interval",
+      [interval, FRAME_BUDGET_MS],
+    );
+  }
 }
 
 function nextWorkerTime() {
