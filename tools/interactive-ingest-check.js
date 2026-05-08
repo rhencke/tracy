@@ -40,6 +40,20 @@ async function instantiateInteractiveIngestVerifier(memory) {
   return instance.exports;
 }
 
+async function compileDistWasmModule(url) {
+  const bytes = await fs.readFile(
+    path.resolve(__dirname, "..", url.replace(/^file:\/\//, "")),
+  );
+
+  return WebAssembly.compile(bytes);
+}
+
+async function instantiateDistWasmModule(module, imports) {
+  const instance = await WebAssembly.instantiate(module, imports);
+
+  return instance.exports;
+}
+
 function assertInteractiveContractOk(contract, name, args) {
   const fn = contract?.[name];
 
@@ -110,169 +124,186 @@ function decodeString(memory, ptr, len) {
   return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
 }
 
-function makeParserState() {
+function makeTraceFile() {
+  const encoder = new TextEncoder();
+  const firstChunkEvents = [
+    { ph: "X", name: "first", ts: 100, dur: 900, pid: 1, tid: 1 },
+    { ph: "X", name: "second", ts: 140, dur: 60, pid: 1, tid: 2 },
+    { ph: "X", name: "third", ts: 260, dur: 80, pid: 1, tid: 1 },
+  ].map((event) => JSON.stringify(event)).join(",");
+  const firstChunkPrefix = `{"traceEvents":[${firstChunkEvents},`;
+  const secondChunkEvent = JSON.stringify({
+    ph: "X",
+    name: "tail",
+    ts: 980,
+    dur: 20,
+    pid: 1,
+    tid: 2,
+  });
+  const targetLength = 2 * INGEST_WINDOW_BYTES;
+  const paddingLength =
+    targetLength -
+    firstChunkPrefix.length -
+    secondChunkEvent.length -
+    "]}".length;
+
+  assert.ok(paddingLength > 0, "interactive ingest fixture padding must be positive");
+  const bytes = encoder.encode(
+    `${firstChunkPrefix}${" ".repeat(paddingLength)}${secondChunkEvent}]}`,
+  );
+
   return {
-    PARSER_DEFAULT_OUTPUT_RECORD_CAP: 4096,
-    PARSER_STATE_EVENT_COUNT_OFFSET: 8,
-    PARSER_STATE_FILE_OFFSET_OFFSET: 0,
-    PARSER_STATUS_DONE: 2,
-    PARSER_STATUS_YIELDED: 1,
-    parser_state_init(statePtr, sourceId) {
-      assert.equal(sourceId, 12);
-      const view = new DataView(this.memory.buffer);
-      view.setBigUint64(statePtr + this.PARSER_STATE_FILE_OFFSET_OFFSET, 0n, true);
-      view.setInt32(statePtr + this.PARSER_STATE_EVENT_COUNT_OFFSET, 0, true);
+    name: "throttled-100mb.json",
+    size: FIXTURE_SIZE_BYTES,
+    readAt(offset, len) {
+      return bytes.subarray(offset, Math.min(bytes.byteLength, offset + len));
     },
   };
 }
 
-function makeParserExports(memory, parserState) {
-  const parseOffsets = [
-    INGEST_WINDOW_BYTES / 10,
-    INGEST_WINDOW_BYTES,
-    2 * INGEST_WINDOW_BYTES,
-  ];
-  let parseCalls = 0;
-  let extracted = 0;
-  parserState.memory = memory;
+function makeSharedOpfsHost(memory, HOST_IMPORT_NAME) {
+  const files = new Map();
+  const sources = new Map();
+  const indexes = new Map();
+  const indexNames = new Map();
+  const calls = [];
+  let nextSourceId = 12;
+  let nextIndexId = 22;
+
+  function putName(ptr, len) {
+    return decodeString(memory, ptr, len);
+  }
+
+  function requireSource(sourceId) {
+    const source = sources.get(sourceId);
+
+    assert.ok(source !== undefined, `unknown OPFS source id ${sourceId}`);
+    return source;
+  }
+
+  function requireIndex(indexId) {
+    const index = indexes.get(indexId);
+
+    assert.ok(index !== undefined, `unknown OPFS index id ${indexId}`);
+    return index;
+  }
+
+  function reserveIndex(name) {
+    const index = { bytes: new Uint8Array(0), id: nextIndexId, name };
+
+    nextIndexId += 1;
+    indexes.set(index.id, index);
+    indexNames.set(name, index);
+    return index.id;
+  }
+
+  function copyToMemory(src, destPtr, len) {
+    const dest = new Uint8Array(memory.buffer, destPtr, len);
+
+    dest.fill(0);
+    dest.set(src.subarray(0, len));
+  }
 
   return {
-    extractor_init() {},
-    extractor_next() {
-      if (extracted >= parseCalls) {
-        return -1;
+    calls,
+    files,
+    [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
+      const file = files.get(fileHandle);
+      const sourceId = nextSourceId;
+
+      assert.ok(file !== undefined, `unknown selected file handle ${fileHandle}`);
+      nextSourceId += 1;
+      calls.push(["source-from-file", fileHandle]);
+      sources.set(sourceId, {
+        file,
+        name: `sources/${file.name}`,
+        size: file.size,
+      });
+      return sourceId;
+    },
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN](sourceId) {
+      return new TextEncoder().encode(requireSource(sourceId).name).byteLength;
+    },
+    [HOST_IMPORT_NAME.OPFS_SOURCE_NAME](sourceId, destPtr, destLen) {
+      const encoded = new TextEncoder().encode(requireSource(sourceId).name);
+
+      assert.ok(destLen >= encoded.byteLength);
+      new Uint8Array(memory.buffer, destPtr, destLen).set(encoded);
+      return encoded.byteLength;
+    },
+    [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
+      const name = putName(namePtr, nameLen);
+      const sourceId = nextSourceId;
+
+      nextSourceId += 1;
+      calls.push(["source-open", name]);
+      sources.set(sourceId, {
+        file: makeTraceFile(),
+        name,
+        size: FIXTURE_SIZE_BYTES,
+      });
+      return sourceId;
+    },
+    [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
+      return BigInt(requireSource(sourceId).size);
+    },
+    [HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, offset, len, destPtr) {
+      const source = requireSource(sourceId);
+      const start = Number(offset);
+      const chunk = source.file.readAt(start, len);
+
+      copyToMemory(chunk, destPtr, len);
+      return chunk.byteLength;
+    },
+    [HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
+      const name = putName(namePtr, nameLen);
+
+      calls.push(["index-create", name]);
+      return reserveIndex(name);
+    },
+    [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
+      const name = putName(namePtr, nameLen);
+      const index = indexNames.get(name);
+
+      calls.push(["index-open", name]);
+      assert.ok(index !== undefined, `OPFS index ${name} should exist before open`);
+      return index.id;
+    },
+    [HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
+      return BigInt(requireIndex(indexId).bytes.byteLength);
+    },
+    [HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr) {
+      const index = requireIndex(indexId);
+      const start = Number(offset);
+      const chunk = index.bytes.subarray(start, Math.min(index.bytes.byteLength, start + len));
+
+      copyToMemory(chunk, destPtr, len);
+      return chunk.byteLength;
+    },
+    [HOST_IMPORT_NAME.OPFS_INDEX_WRITE](indexId, offset, srcPtr, len) {
+      const index = requireIndex(indexId);
+      const start = Number(offset);
+      const end = start + len;
+      const nextBytes =
+        end > index.bytes.byteLength
+          ? new Uint8Array(end)
+          : new Uint8Array(index.bytes);
+
+      if (end > index.bytes.byteLength) {
+        nextBytes.set(index.bytes);
       }
-
-      extracted += 1;
-      return 8192 + extracted * 32;
+      nextBytes.set(new Uint8Array(memory.buffer, srcPtr, len), start);
+      index.bytes = nextBytes;
+      return len;
     },
-    extractor_reset_cursor() {},
-    parser_parse_with_budget(statePtr) {
-      const view = new DataView(memory.buffer);
-
-      view.setBigUint64(
-        statePtr + parserState.PARSER_STATE_FILE_OFFSET_OFFSET,
-        BigInt(parseOffsets[parseCalls]),
-        true,
-      );
-      view.setInt32(
-        statePtr + parserState.PARSER_STATE_EVENT_COUNT_OFFSET,
-        parseCalls + 1,
-        true,
-      );
-      parseCalls += 1;
-
-      return parseCalls < parseOffsets.length
-        ? parserState.PARSER_STATUS_YIELDED
-        : parserState.PARSER_STATUS_DONE;
-    },
-    parser_token_output_reset() {
-      return 1;
-    },
-  };
-}
-
-function makeSharedIndexBacking(memory) {
-  const backing = {
-    createdNames: [],
-    events: [],
-    openedNames: [],
-    queryCalls: [],
-    readerIndexId: null,
-    writerIndexId: null,
-  };
-
-  function coveredRange() {
-    if (backing.events.length === 0) {
-      return null;
-    }
-
-    return {
-      start: 100,
-      end: backing.events.length >= 3 ? 1000 : 100 + backing.events.length * 10,
-    };
-  }
-
-  function writeQueryRow(outPtr, trackId, tsMin) {
-    const range = coveredRange();
-    const view = new DataView(memory.buffer);
-
-    view.setUint32(outPtr, Math.max(range.start, Math.floor(tsMin) + trackId * 8), true);
-    view.setUint32(outPtr + 4, trackId === 0 ? 8 : 14, true);
-    view.setUint32(outPtr + 12, trackId, true);
-    view.setUint32(outPtr + 20, trackId === 0 ? 0x2d74da : 0x6b7280, true);
-    view.setUint32(outPtr + 24, trackId === 1 ? 1 : 0, true);
-  }
-
-  const exports = {
-    INDEX_INGEST_STATUS_OK: 0,
-    INDEX_QUERY_RESULT_BYTES: 28,
-    INDEX_WRITER_STATUS_OK: 0,
-    index_add_event(eventPtr) {
-      backing.events.push(eventPtr);
+    [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
+      requireIndex(indexId);
       return 0;
     },
-    index_query_range(trackId, tsMin, tsMax, outPtr, maxRows) {
-      const range = coveredRange();
-
-      assert.notEqual(backing.readerIndexId, null, "main reader should be opened before queries");
-      assert.notEqual(backing.writerIndexId, null, "worker writer should create the index first");
-      assert.ok(range !== null, "query should wait for an indexed covered range");
-      assert.ok(tsMin >= range.start, "queries should stay inside covered time");
-      assert.ok(tsMax <= range.end, "queries should not reach unknown time");
-      backing.queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
-      writeQueryRow(outPtr, trackId, tsMin);
-      return 1;
-    },
-    index_reader_configure_cache(slotCount) {
-      return slotCount;
-    },
-    index_reader_covered_range_end() {
-      return coveredRange()?.end ?? 0;
-    },
-    index_reader_covered_range_start() {
-      return coveredRange()?.start ?? 0;
-    },
-    index_reader_covered_range_valid() {
-      return coveredRange() === null ? 0 : 1;
-    },
-    index_reader_init(indexId) {
-      assert.equal(indexId, 22);
-      backing.readerIndexId = indexId;
-    },
-    index_track_count() {
-      return 2;
-    },
-    index_writer_committed_events() {
-      return backing.events.length;
-    },
-    index_writer_committed_pages() {
-      return backing.events.length === 0 ? 0 : 1;
-    },
-    index_writer_covered_range_end() {
-      return coveredRange()?.end ?? 0;
-    },
-    index_writer_covered_range_start() {
-      return coveredRange()?.start ?? 0;
-    },
-    index_writer_covered_range_valid() {
-      return coveredRange() === null ? 0 : 1;
-    },
-    index_writer_flush() {
-      assert.equal(backing.events.length, 3);
-      return 0;
-    },
-    index_writer_init(indexId) {
-      assert.equal(indexId, 22);
-      backing.writerIndexId = indexId;
-    },
-    index_writer_publish_partial() {
-      assert.ok(backing.events.length > 0);
-      return 0;
+    setFileSelectedCallback(callback) {
+      this.fileSelectionCallback = callback;
     },
   };
-
-  return { backing, exports };
 }
 
 function makeCanvasHarness() {
@@ -373,72 +404,41 @@ async function flushAsyncWork() {
   await flushMicrotasks();
 }
 
+async function waitForAsyncCondition(callback, label) {
+  for (let i = 0; i < 20; i += 1) {
+    if (callback()) {
+      return;
+    }
+    await flushAsyncWork();
+  }
+
+  assert.ok(callback(), label);
+}
+
 async function checkInteractiveIngestGate() {
   await loadGeneratedInteractiveIngestCheckSpec();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const ingestRuntime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
+  const wasmModules = await import(moduleUrl("host/wasm-modules.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
   const canvasHarness = makeCanvasHarness();
   const { frames } = installBrowserHarness(canvasHarness.canvas);
-  const { backing: indexBacking, exports: indexExports } = makeSharedIndexBacking(memory);
-  const parserState = makeParserState();
   const sourceName = "sources/throttled-100mb.json";
-  const sourceNameBytes = new TextEncoder().encode(sourceName);
   const fileSelectionCallbacks = [];
   const workerStatuses = [];
   const ticks = [];
   const importCalls = [];
   let rendererInstance = null;
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
-  const hostCalls = [];
-
   const host = {
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
-      assert.equal(fileHandle, 77);
-      hostCalls.push(["source-from-file", fileHandle]);
-      return Promise.resolve(12);
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN](sourceId) {
-      assert.equal(sourceId, 12);
-      return sourceNameBytes.byteLength;
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_NAME](sourceId, destPtr, destLen) {
-      assert.equal(sourceId, 12);
-      assert.equal(destLen, sourceNameBytes.byteLength);
-      new Uint8Array(memory.buffer, destPtr, destLen).set(sourceNameBytes);
-      return sourceNameBytes.byteLength;
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
-      const name = decodeString(memory, namePtr, nameLen);
-
-      assert.equal(name, sourceName);
-      hostCalls.push(["source-open", name]);
-      return Promise.resolve(12);
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
-      assert.equal(sourceId, 12);
-      return FIXTURE_SIZE_BYTES;
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
-      const name = decodeString(memory, namePtr, nameLen);
-
-      hostCalls.push(["index-create", name]);
-      indexBacking.createdNames.push(name);
-      return Promise.resolve(22);
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
-      const name = decodeString(memory, namePtr, nameLen);
-
-      hostCalls.push(["index-open", name]);
-      indexBacking.openedNames.push(name);
-      return Promise.resolve(22);
-    },
+    ...makeSharedOpfsHost(memory, abi.HOST_IMPORT_NAME),
     setFileSelectedCallback(callback) {
       fileSelectionCallbacks.push(callback);
     },
   };
+  const wasmModuleCalls = [];
 
   class RunningIngestWorker extends FakeWorker {
     constructor(url, options) {
@@ -446,28 +446,18 @@ async function checkInteractiveIngestGate() {
       this.handler = ingestRuntime.createIngestWorkerMessageHandler({
         hostFactory: () => host,
         instantiateWasmModuleForThread: async (id, thread, imports) => {
-          assert.equal(thread, "worker");
+          wasmModuleCalls.push({ id, thread });
           assert.equal(imports.env.memory, memory);
-          if (id === "parser") {
-            return {
-              exports: makeParserExports(memory, parserState),
-              imports: {
-                alloc: {
-                  bump_init() {},
-                },
-                mem: {
-                  MEM_HEAP_BASE: 1024,
-                  MEM_STACK_BASE: 2048,
-                },
-                parser_state: parserState,
-              },
-            };
-          }
-          if (id === "index") {
-            return { exports: indexExports, imports: {} };
-          }
-
-          throw new Error(`unexpected worker module ${id}`);
+          return wasmModules.instantiateWasmModuleForThread(
+            id,
+            thread,
+            imports,
+            {
+              baseUrl: "dist/wasm/",
+              compile: compileDistWasmModule,
+              instantiate: instantiateDistWasmModule,
+            },
+          );
         },
         memoryFactory: () => memory,
         now: nextWorkerTime,
@@ -484,7 +474,13 @@ async function checkInteractiveIngestGate() {
 
     postMessage(message) {
       super.postMessage(message);
-      this.handler({ data: message }).catch((error) => {
+      this.handler({
+        data: {
+          ...message,
+          byteBudget: INGEST_WINDOW_BYTES,
+          chunkBytes: INGEST_WINDOW_BYTES / 10,
+        },
+      }).catch((error) => {
         this.emit("message", {
           type: ingestRuntime.INGEST_WORKER_MESSAGE.ERROR,
           message: error.message,
@@ -517,7 +513,17 @@ async function checkInteractiveIngestGate() {
     instantiateWasmModuleForThread: async (id, thread) => {
       if (id === "index") {
         assert.equal(thread, "main");
-        return { exports: indexExports, imports: {} };
+        wasmModuleCalls.push({ id, thread });
+        return wasmModules.instantiateWasmModuleForThread(
+          id,
+          thread,
+          { env: { memory }, host },
+          {
+            baseUrl: "dist/wasm/",
+            compile: compileDistWasmModule,
+            instantiate: instantiateDistWasmModule,
+          },
+        );
       }
 
       assert.equal(id, "app");
@@ -558,14 +564,23 @@ async function checkInteractiveIngestGate() {
     [importCalls.length, flag(rendererInstance !== null)],
   );
 
-  const selectedFile = { name: "throttled-100mb.json", size: FIXTURE_SIZE_BYTES };
+  const selectedFile = makeTraceFile();
+  host.files.set(77, selectedFile);
 
   fileSelectionCallbacks[0]({
     file: selectedFile,
     handle: 77,
   });
-  await flushMicrotasks();
-  await flushMicrotasks();
+  await flushAsyncWork();
+  await waitForAsyncCondition(
+    () =>
+      host.calls.some(
+        (call) => call[0] === "index-create" &&
+          call[1] === "indexes/throttled-100mb.json.idx",
+      ) || controller.status().state === "error",
+    "worker should create the real OPFS index before the start contract is checked",
+  );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
 
   const startPosted =
     controller.worker.posted.length === 1 &&
@@ -593,23 +608,46 @@ async function checkInteractiveIngestGate() {
     [
       flag(startPosted),
       flag(
-        hostCalls[0]?.[0] === "source-from-file" &&
-          hostCalls[0]?.[1] === 77,
+        host.calls.some(
+          (call) => call[0] === "source-from-file" && call[1] === 77,
+        ),
       ),
-      flag(indexBacking.createdNames.includes("indexes/throttled-100mb.json.idx")),
+      flag(
+        host.calls.some(
+          (call) => call[0] === "index-create" &&
+            call[1] === "indexes/throttled-100mb.json.idx",
+        ),
+      ),
     ],
   );
 
   await runFrame(frames, canvasHarness, 10);
   assert.equal(importCalls.length, 1);
-  assert.deepEqual(indexBacking.openedNames, ["indexes/throttled-100mb.json.idx"]);
+  assert.ok(
+    host.calls.some(
+      (call) => call[0] === "index-open" &&
+        call[1] === "indexes/throttled-100mb.json.idx",
+    ),
+  );
+  assert.ok(
+    wasmModuleCalls.some((call) => call.id === "parser" && call.thread === "worker"),
+    "interactive ingest gate should instantiate the real worker parser module",
+  );
+  assert.ok(
+    wasmModuleCalls.some((call) => call.id === "index" && call.thread === "worker"),
+    "interactive ingest gate should instantiate the real worker index module",
+  );
+  assert.ok(
+    wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
+    "interactive ingest gate should instantiate the real main-thread index reader module",
+  );
 
   await flushMicrotasks();
   await runFrame(frames, canvasHarness, 16);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_first_events",
-    [canvasHarness.firstTraceDrawAt() ?? -1, indexBacking.queryCalls.length],
+    [canvasHarness.firstTraceDrawAt() ?? -1, rendererInstance.status().lastRows.length],
   );
 
   await runFrame(frames, canvasHarness, 32);
@@ -619,7 +657,7 @@ async function checkInteractiveIngestGate() {
     "interactive_ingest_expect_covered_partial_unknown",
     [
       controller.status().coveredRange.end,
-      indexBacking.queryCalls.at(-1).tsMax,
+      rendererInstance.status().viewport.end,
       flag(rendererInstance.status().unknownRange.pending),
       flag(
         canvasHarness.operations.some(
@@ -676,7 +714,7 @@ async function checkInteractiveIngestGate() {
     [
       rendererInstance.status().viewport.end,
       controller.status().coveredRange.end,
-      indexBacking.queryCalls.at(-1).tsMax,
+      rendererInstance.status().viewport.end,
     ],
   );
 
