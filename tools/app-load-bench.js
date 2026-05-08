@@ -1213,6 +1213,15 @@ function runSelfTest() {
     indexHtml,
     /<link rel="modulepreload" href="bootstrap\.mjs">/,
   );
+  assert.match(
+    indexHtml,
+    /performance\?\.mark\?\.\("tracy\.app\.shell\.paint"\)/,
+  );
+  assert.ok(
+    indexHtml.indexOf('performance?.mark?.("tracy.app.shell.paint")') <
+      indexHtml.indexOf('<script type="module" src="bootstrap.mjs">'),
+    "index shell-paint mark should run before bootstrap module loading",
+  );
   assert.deepEqual(
     [...indexHtml.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(
       (match) => match[1],

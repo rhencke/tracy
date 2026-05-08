@@ -48,6 +48,9 @@
   </head>
   <body>
     <canvas id="tracy" aria-label="tracy trace canvas"></canvas>
+    <script>
+      globalThis.performance?.mark?.("tracy.app.shell.paint");
+    </script>
     <noscript>tracy needs JavaScript enabled to load the WebAssembly viewer.</noscript>
     <script type="module" src="bootstrap.mjs"></script>
   </body>
