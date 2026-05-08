@@ -244,6 +244,21 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
   );
   assert.match(
     source,
+    /wasmModules\.instantiateWasmModuleForThread\(\s*"app",\s*"main"/,
+    "interactive ingest check should instantiate production dist app.wasm for renderer planning",
+  );
+  assert.match(
+    source,
+    /assertProductionTraceRenderPlannerExports\(appWasm\.exports\)/,
+    "interactive ingest check should fail closed if production app.wasm renderer planner exports drift",
+  );
+  assert.doesNotMatch(
+    source,
+    /function makeTraceRenderPlannerExports/,
+    "interactive ingest check must not use a JavaScript fake renderer planner",
+  );
+  assert.match(
+    source,
     /assertInteractiveContractOk/,
     "interactive ingest check should assert Wasm-owned verification results",
   );

@@ -12,6 +12,18 @@ let FRAME_BUDGET_MS;
 
 const FIRST_EVENTS_BUDGET_MS = 100;
 const compiledDistWasmModules = new Map();
+const REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = Object.freeze([
+  "trace_render_plan_begin",
+  "trace_render_plan_next",
+  "trace_render_plan_op_end",
+  "trace_render_plan_op_start",
+  "trace_render_plan_op_track_id",
+  "trace_render_query_ranges_per_track",
+  "trace_render_query_tile_span",
+  "trace_render_slice_end_x",
+  "trace_render_slice_x",
+  "trace_render_slice_y",
+]);
 
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
@@ -647,99 +659,14 @@ async function flushAsyncWork() {
   await flushMicrotasks();
 }
 
-function makeTraceRenderPlannerExports() {
-  const state = {
-    ops: [],
-    viewportEnd: 0,
-    viewportStart: 0,
-  };
-
-  return {
-    trace_render_plan_begin(viewportStart, viewportEnd, trackCount, queryRangeBudget, queryWindow) {
-      state.viewportStart = viewportStart;
-      state.viewportEnd = viewportEnd;
-      const rangesPerTrack = Math.max(1, Math.floor(queryRangeBudget / trackCount));
-      const tileSpan = Math.max(
-        1,
-        queryWindow,
-        Math.ceil((viewportEnd - viewportStart) / rangesPerTrack),
-      );
-      const ops = [];
-      let queryRangeCount = 0;
-
-      queryLoop:
-      for (let trackId = 0; trackId < trackCount; trackId += 1) {
-        for (
-          let queryStart = viewportStart;
-          queryStart < viewportEnd;
-          queryStart = Math.min(viewportEnd, queryStart + tileSpan)
-        ) {
-          if (queryRangeCount >= queryRangeBudget) {
-            if (queryStart < viewportEnd) {
-              ops.push({ end: viewportEnd, start: queryStart, tag: 2, trackId });
-            }
-            for (
-              let skippedTrackId = trackId + 1;
-              skippedTrackId < trackCount;
-              skippedTrackId += 1
-            ) {
-              ops.push({
-                end: viewportEnd,
-                start: viewportStart,
-                tag: 2,
-                trackId: skippedTrackId,
-              });
-            }
-            break queryLoop;
-          }
-
-          ops.push({
-            end: Math.min(viewportEnd, queryStart + tileSpan),
-            start: queryStart,
-            tag: 1,
-            trackId,
-          });
-          queryRangeCount += 1;
-        }
-      }
-
-      state.ops = ops;
-    },
-    trace_render_plan_next() {
-      const op = state.ops.shift();
-
-      if (op === undefined) {
-        return 0;
-      }
-
-      state.currentOp = op;
-      return op.tag;
-    },
-    trace_render_plan_op_end() {
-      return state.currentOp?.end ?? state.viewportEnd;
-    },
-    trace_render_plan_op_start() {
-      return state.currentOp?.start ?? state.viewportStart;
-    },
-    trace_render_plan_op_track_id() {
-      return state.currentOp?.trackId ?? 0;
-    },
-    trace_render_query_ranges_per_track(queryRangeBudget, trackCount) {
-      return Math.max(1, Math.floor(queryRangeBudget / trackCount));
-    },
-    trace_render_query_tile_span(viewportSpan, queryWindow, rangesPerTrack) {
-      return Math.max(1, queryWindow, Math.ceil(viewportSpan / rangesPerTrack));
-    },
-    trace_render_slice_end_x(sliceEnd, viewportStart, viewportSpan, canvasWidth) {
-      return Math.min(canvasWidth, ((sliceEnd - viewportStart) / viewportSpan) * canvasWidth);
-    },
-    trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
-      return Math.max(0, ((sliceStart - viewportStart) / viewportSpan) * canvasWidth);
-    },
-    trace_render_slice_y(depth, top, laneHeight, laneGap) {
-      return top + depth * (laneHeight + laneGap);
-    },
-  };
+function assertProductionTraceRenderPlannerExports(exports) {
+  for (const name of REQUIRED_TRACE_RENDER_PLANNER_EXPORTS) {
+    assert.equal(
+      typeof exports?.[name],
+      "function",
+      `production app.wasm missing required renderer planner export ${name}`,
+    );
+  }
 }
 
 async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
@@ -769,7 +696,6 @@ async function checkInteractiveIngestGate() {
   const { frames } = installBrowserHarness(canvasHarness.canvas);
   const sourceName = "sources/throttled-100mb.json";
   const workerStatuses = [];
-  const ticks = [];
   const importCalls = [];
   const frameDurations = [];
   let rendererInstance = null;
@@ -777,6 +703,17 @@ async function checkInteractiveIngestGate() {
   const opfsHarness = makeProductionTopologyOpfsHarness(memory, abi.HOST_IMPORT_NAME);
   const host = {
     ...opfsHarness.mainHost,
+    [abi.HOST_IMPORT_NAME.CANVAS_GET_SIZE]() {
+      return (BigInt(canvasHarness.canvas.height) << 32n) | BigInt(canvasHarness.canvas.width);
+    },
+    [abi.HOST_IMPORT_NAME.CANVAS_LISTEN_RESIZE]() {},
+    [abi.HOST_IMPORT_NAME.POINTER_LISTEN]() {},
+    [abi.HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]() {
+      return 0;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_READ_CHUNK]() {
+      return 0;
+    },
     [abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]: true,
   };
   assert.equal(typeof host.setFileSelectedCallback, "function");
@@ -785,6 +722,17 @@ async function checkInteractiveIngestGate() {
     "function",
   );
   const wasmModuleCalls = [];
+  const appWasm = await wasmModules.instantiateWasmModuleForThread(
+    "app",
+    "main",
+    { env: { memory }, host },
+    {
+      baseUrl: "dist/wasm/",
+      compile: compileDistWasmModule,
+      instantiate: instantiateDistWasmModule,
+    },
+  );
+  assertProductionTraceRenderPlannerExports(appWasm.exports);
 
   class RunningIngestWorker extends FakeWorker {
     constructor(url, options) {
@@ -853,7 +801,7 @@ async function checkInteractiveIngestGate() {
     document: globalThis.document,
     preloadIndexReader: true,
     importProgressiveTraceRenderer: async () => {
-      importCalls.push(ticks.at(-1) ?? 0);
+      importCalls.push(performance.now());
       return {
         createProgressiveTraceRenderer(nextMemory, ingestWorker, options) {
           rendererInstance = rendererModule.createProgressiveTraceRenderer(
@@ -889,18 +837,8 @@ async function checkInteractiveIngestGate() {
 
       assert.equal(id, "app");
       assert.equal(thread, "main");
-      return {
-        exports: {
-          ...interactiveContract,
-          ...makeTraceRenderPlannerExports(),
-          tracy_main() {
-            ticks.push("main");
-          },
-          tracy_tick(ts) {
-            ticks.push(ts);
-          },
-        },
-      };
+      wasmModuleCalls.push({ id, thread });
+      return appWasm;
     },
     worker: {
       Worker: RunningIngestWorker,
@@ -1118,6 +1056,10 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
     "interactive ingest gate should instantiate the real main-thread index reader module",
+  );
+  assert.ok(
+    wasmModuleCalls.some((call) => call.id === "app" && call.thread === "main"),
+    "interactive ingest gate should instantiate the real production app renderer planner module",
   );
 
   await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
