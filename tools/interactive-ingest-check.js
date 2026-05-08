@@ -333,8 +333,8 @@ function makeCanvasHarness() {
       });
       if (
         firstTraceDrawAt === null &&
-        (this.fillStyle === "#2d74da" ||
-          this.fillStyle === "rgba(92, 109, 130, 0.58)")
+        y > 0 &&
+        height > 0
       ) {
         firstTraceDrawAt = currentFrameAt;
       }
