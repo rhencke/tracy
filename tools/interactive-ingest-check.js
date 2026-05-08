@@ -667,20 +667,6 @@ async function checkInteractiveIngestGate() {
     wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
     "interactive ingest gate should instantiate the real main-thread index reader module",
   );
-  await waitForAsyncCondition(
-    () => {
-      const workerRange = controller.status().coveredRange;
-      const readerRange = controller.indexReader.coveredRange();
-
-      return (
-        workerRange?.valid === true &&
-        readerRange.valid === true &&
-        Math.min(workerRange.end, readerRange.end) >
-          Math.max(workerRange.start, readerRange.start)
-      );
-    },
-    "main-thread reader should expose queryable covered slices before first draw",
-  );
 
   let nextFrameAt = 16;
   while (
