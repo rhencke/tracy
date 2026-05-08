@@ -1048,7 +1048,7 @@ async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
     [0, 0, 0],
     "covered-range polling should reread an unqueryable partial page whose page count did not change",
   );
-  assert.deepEqual(readerInitIds, [70, 70, 70, 70]);
+  assert.deepEqual(readerInitIds, [70, 70, 70, 70, 70, 70]);
 }
 
 async function checkMainThreadSliceCatalogReportsCapacityOverflow() {

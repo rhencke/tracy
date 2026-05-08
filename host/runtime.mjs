@@ -252,6 +252,9 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     const resetCatalog =
       force || previousPageCount === null || pageCount < previousPageCount;
     const startPage = resetCatalog ? 0 : previousPageCount;
+    if (resetCatalog && previousPageCount !== null) {
+      index.index_reader_init(indexId);
+    }
     const rebuilt =
       readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
         memory,
