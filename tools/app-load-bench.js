@@ -752,6 +752,9 @@ function runSelfTest() {
   }
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
+  const runtimeSpecJson = JSON.parse(
+    fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
+  );
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
   const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.mjs"), "utf8");
@@ -786,6 +789,10 @@ function runSelfTest() {
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
   assert.equal(packageJson.scripts["test:runtime-spec"], "node tools/generate-runtime-spec.js --check");
+  assert.equal(
+    runtimeSpecJson.urls.PROGRESSIVE_TRACE_RENDERER_URL.value,
+    "./progressive-trace-renderer.mjs",
+  );
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.notEqual(bootstrapStartOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);

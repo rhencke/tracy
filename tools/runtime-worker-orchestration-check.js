@@ -1778,7 +1778,7 @@ async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() 
   assert.equal(queryCalls.at(-1).tsMin, coveredRange.start);
 }
 
-async function checkRuntimeLoadsProgressiveTraceRendererLazily() {
+async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   const { frames } = installBrowserStubs();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -1824,15 +1824,24 @@ async function checkRuntimeLoadsProgressiveTraceRendererLazily() {
 
   await flushMicrotasks();
 
+  assert.equal(
+    importCalls,
+    1,
+    "renderer implementation module import should start before the first animation frame",
+  );
   frames[0](1);
   await flushMicrotasks();
-  assert.equal(importCalls, 1, "renderer module should load after the first frame");
+  assert.equal(importCalls, 1, "renderer implementation module should be imported once");
   assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
   coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
   readerState = "ready";
   frames[1](2);
-  assert.equal(importCalls, 1, "renderer module should be reused once pages are queryable");
+  assert.equal(
+    importCalls,
+    1,
+    "first queryable ingest frame should reuse the preloaded renderer implementation module",
+  );
 
   await flushMicrotasks();
   frames[2](3);
@@ -1984,7 +1993,7 @@ async function main() {
   await checkProgressiveTraceRendererTilesFullVisibleViewport();
   await checkProgressiveTraceRendererBoundsLargeViewportQueries();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
-  await checkRuntimeLoadsProgressiveTraceRendererLazily();
+  await checkRuntimePreloadsProgressiveTraceRendererImplementation();
   await checkAppReadyWaitsForFirstFrameAndDeferredRenderer();
   await checkAppReadyFailsWhenDeferredRendererFails();
 }
