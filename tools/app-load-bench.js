@@ -977,6 +977,14 @@ function runSelfTest() {
     bootstrap,
     /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
   );
+  assert.match(
+    bootstrap,
+    /const importColdProgressiveTraceRenderer = \(\) =>[\s\S]+setTimeout\(resolve, 0\)[\s\S]+import/,
+  );
+  assert.match(
+    bootstrap,
+    /warmProgressiveTraceRendererPromise \?\? importColdProgressiveTraceRenderer\(\)/,
+  );
   assert.match(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(

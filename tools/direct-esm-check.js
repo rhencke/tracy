@@ -145,6 +145,14 @@ function main() {
   );
   assert.match(
     bootstrapSource,
+    /const importColdProgressiveTraceRenderer = \(\) =>[\s\S]+setTimeout\(resolve, 0\)[\s\S]+import/,
+  );
+  assert.match(
+    bootstrapSource,
+    /warmProgressiveTraceRendererPromise \?\? importColdProgressiveTraceRenderer\(\)/,
+  );
+  assert.match(
+    bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(bootstrapSource, /import\("\.\/host\/wasm-modules\.mjs"\)/);
