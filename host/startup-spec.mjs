@@ -27,6 +27,12 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   DEFAULT_INGEST_ETA_STABLE_MS: 3000,
 });
 
+export const INTERACTIVE_INGEST_CHECK = Object.freeze({
+  FIXTURE_SIZE_BYTES: 104857600,
+  INGEST_WINDOW_BYTES: 10485760,
+  FRAME_BUDGET_MS: 16.67,
+});
+
 export const RUNTIME_BRIDGE = Object.freeze({
   "threads": {
     "MAIN": "main"

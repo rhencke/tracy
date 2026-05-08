@@ -206,6 +206,48 @@ function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
   }
 }
 
+function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
+  const source = readRepoFile("tools/interactive-ingest-check.js");
+  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
+
+  assert.match(
+    startupSpecSource,
+    /export const INTERACTIVE_INGEST_CHECK = Object\.freeze/,
+    "generated startup spec should expose interactive ingest verification constants",
+  );
+  assert.match(
+    source,
+    /host\/startup-spec\.mjs/,
+    "interactive ingest check should import generated verification constants",
+  );
+
+  for (const [pattern, message] of [
+    [/const\s+HUNDRED_MB\s*=/, "100 MB fixture size"],
+    [/const\s+TEN_MB\s*=/, "10 MB ingest window"],
+    [/const\s+FRAME_BUDGET_MS\s*=\s*16\.67/, "60 fps frame budget"],
+    [/100\s*\*\s*1024\s*\*\s*1024/, "100 MB fixture size expression"],
+    [/10\s*\*\s*1024\s*\*\s*1024/, "10 MB ingest window expression"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `interactive ingest check should read ${message} from generated verification constants`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/INTERACTIVE_INGEST_CHECK\.FIXTURE_SIZE_BYTES/, "fixture size"],
+    [/INTERACTIVE_INGEST_CHECK\.INGEST_WINDOW_BYTES/, "ingest window"],
+    [/INTERACTIVE_INGEST_CHECK\.FRAME_BUDGET_MS/, "frame budget"],
+  ]) {
+    assert.match(
+      source,
+      pattern,
+      `interactive ingest check should consume generated ${message}`,
+    );
+  }
+}
+
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
   const source = readRepoFile("host/ingest-worker-runtime.mjs");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
@@ -721,6 +763,7 @@ function main() {
   assertNoInlinePaletteColor("host/runtime.mjs");
   assertIndexCatalogUsesGeneratedFormatSpec();
   assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec();
+  assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
 }
 
 try {

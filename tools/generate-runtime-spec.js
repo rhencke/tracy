@@ -246,6 +246,8 @@ function renderStartupSpecModule() {
     "",
     renderNumberConstants("RUNTIME_DEFAULTS", spec.runtimeDefaults),
     "",
+    renderNumberConstants("INTERACTIVE_INGEST_CHECK", spec.interactiveIngestCheck),
+    "",
     renderObjectConstant("RUNTIME_BRIDGE", spec.runtimeBridge),
     "",
     renderNamedStrings("PERFORMANCE_MARKS", spec.performanceMarks),

@@ -4,12 +4,20 @@ const assert = require("node:assert/strict");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const HUNDRED_MB = 100 * 1024 * 1024;
-const TEN_MB = 10 * 1024 * 1024;
-const FRAME_BUDGET_MS = 16.67;
+let FIXTURE_SIZE_BYTES;
+let INGEST_WINDOW_BYTES;
+let FRAME_BUDGET_MS;
 
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
+}
+
+async function loadGeneratedInteractiveIngestCheckSpec() {
+  const { INTERACTIVE_INGEST_CHECK } = await import(moduleUrl("host/startup-spec.mjs"));
+
+  FIXTURE_SIZE_BYTES = INTERACTIVE_INGEST_CHECK.FIXTURE_SIZE_BYTES;
+  INGEST_WINDOW_BYTES = INTERACTIVE_INGEST_CHECK.INGEST_WINDOW_BYTES;
+  FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
 }
 
 function installBrowserHarness(canvas) {
@@ -88,7 +96,11 @@ function makeParserState() {
 }
 
 function makeParserExports(memory, parserState) {
-  const parseOffsets = [TEN_MB / 10, TEN_MB, 2 * TEN_MB];
+  const parseOffsets = [
+    INGEST_WINDOW_BYTES / 10,
+    INGEST_WINDOW_BYTES,
+    2 * INGEST_WINDOW_BYTES,
+  ];
   let parseCalls = 0;
   let extracted = 0;
   parserState.memory = memory;
@@ -325,6 +337,7 @@ async function flushMicrotasks() {
 }
 
 async function checkInteractiveIngestGate() {
+  await loadGeneratedInteractiveIngestCheckSpec();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const ingestRuntime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
@@ -368,7 +381,7 @@ async function checkInteractiveIngestGate() {
     },
     [abi.HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
       assert.equal(sourceId, 12);
-      return HUNDRED_MB;
+      return FIXTURE_SIZE_BYTES;
     },
     [abi.HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
       const name = decodeString(memory, namePtr, nameLen);
@@ -500,7 +513,7 @@ async function checkInteractiveIngestGate() {
   assert.equal(importCalls.length, 1, "renderer module should preload before trace data is queryable");
   assert.equal(rendererInstance, null, "renderer should stay uncreated before queryable pages");
 
-  const selectedFile = { name: "throttled-100mb.json", size: HUNDRED_MB };
+  const selectedFile = { name: "throttled-100mb.json", size: FIXTURE_SIZE_BYTES };
 
   fileSelectionCallbacks[0]({
     file: selectedFile,
@@ -516,7 +529,7 @@ async function checkInteractiveIngestGate() {
       sourceFile: selectedFile,
       sourceFileHandle: 77,
       sourceName,
-      sourceSize: HUNDRED_MB,
+      sourceSize: FIXTURE_SIZE_BYTES,
       type: "start",
     },
   ]);
@@ -591,7 +604,7 @@ async function checkInteractiveIngestGate() {
   assert.ok(indexBacking.queryCalls.at(-1).tsMax <= controller.status().coveredRange.end);
 
   await runFrame(frames, canvasHarness, 80);
-  assert.equal(controller.status().progress.fileOffset, 2 * TEN_MB);
+  assert.equal(controller.status().progress.fileOffset, 2 * INGEST_WINDOW_BYTES);
   const progressStatuses = workerStatuses.filter(
     (entry) => entry.message?.type === "progress",
   );

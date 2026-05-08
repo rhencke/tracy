@@ -166,6 +166,20 @@
       "description": "Minimum worker ingest progress sample age before ETA is surfaced to avoid first-ramp flicker."
     }
   },
+  "interactiveIngestCheck": {
+    "FIXTURE_SIZE_BYTES": {
+      "value": 104857600,
+      "description": "Size of the throttled trace fixture used by the interactive ingest verification gate."
+    },
+    "INGEST_WINDOW_BYTES": {
+      "value": 10485760,
+      "description": "Expected bytes covered by the mock-throttled ingest window in the interactive ingest verification gate."
+    },
+    "FRAME_BUDGET_MS": {
+      "value": 16.67,
+      "description": "60 fps pan/zoom frame budget enforced by the interactive ingest verification gate."
+    }
+  },
   "runtimeBridge": {
     "threads": {
       "MAIN": "main"
