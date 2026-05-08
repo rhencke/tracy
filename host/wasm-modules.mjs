@@ -81,6 +81,8 @@ function normalizePath(value) {
 }
 
 const WASM_MODULE_THREADS = Object.freeze(["main", "worker", "shared"]);
+export const CORE_SHELL_MODULE_ID = "app";
+export const CORE_SHELL_THREAD = "main";
 
 function assertWasmModuleThread(thread) {
   if (!WASM_MODULE_THREADS.includes(thread)) {
@@ -172,6 +174,10 @@ export function wasmModuleGraphIdsForThread(id, thread) {
   }
 
   return graphIds;
+}
+
+export function coreShellWasmModuleGraphIds() {
+  return wasmModuleGraphIdsForThread(CORE_SHELL_MODULE_ID, CORE_SHELL_THREAD);
 }
 
 async function defaultCompile(url) {

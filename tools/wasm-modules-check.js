@@ -94,8 +94,11 @@ function assertComesBefore(values, before, after) {
 async function main() {
   const manifestUrl = pathToFileURL(path.resolve(__dirname, "../host/wasm-modules.mjs")).href;
   const {
+    CORE_SHELL_MODULE_ID,
+    CORE_SHELL_THREAD,
     compileWasmModuleGraph,
     compileWasmModuleGraphForThread,
+    coreShellWasmModuleGraphIds,
     instantiateWasmModuleForThread,
     instantiateWasmModule,
     wasmModuleGraphIds,
@@ -110,6 +113,14 @@ async function main() {
   await testExtractorFixtures();
 
   const parserGraphIds = wasmModuleGraphIds("parser");
+  const coreShellGraphIds = coreShellWasmModuleGraphIds();
+
+  assert.equal(CORE_SHELL_MODULE_ID, "app");
+  assert.equal(CORE_SHELL_THREAD, "main");
+  assert(Object.isFrozen(coreShellGraphIds));
+  assert.deepEqual(coreShellGraphIds, wasmModuleGraphIdsForThread("app", "main"));
+  assert.deepEqual(coreShellGraphIds, [...coreShellGraphIds].sort());
+  assert.deepEqual(new Set(coreShellGraphIds), new Set(["app"]));
   assert.deepEqual(parserGraphIds, [...parserGraphIds].sort());
   assert.deepEqual(new Set(parserGraphIds), new Set([
     "std/mem",
