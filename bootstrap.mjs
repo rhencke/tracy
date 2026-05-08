@@ -32,9 +32,10 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
   globalThis.addEventListener?.("load", registerAfterReady);
 }
 
-const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
+const [{ makeMainThreadHost }, { runApp }, { instantiateWasmModuleForThread }] = await Promise.all([
   import("./host/shim.mjs"),
   import("./host/runtime.mjs"),
+  import("./host/wasm-modules.mjs"),
 ]);
 
 const memory = new WebAssembly.Memory({
@@ -45,4 +46,5 @@ const memory = new WebAssembly.Memory({
 
 runApp(memory, makeMainThreadHost(memory), {
   importProgressiveTraceRenderer,
+  instantiateWasmModuleForThread,
 });
