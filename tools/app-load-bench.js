@@ -1242,6 +1242,10 @@ function runSelfTest() {
   );
   assert.match(
     indexHtml,
+    /<link rel="preload" href="wasm\/app\.wasm" as="fetch" type="application\/wasm" crossorigin>/,
+  );
+  assert.match(
+    indexHtml,
     /performance\?\.mark\?\.\("tracy\.app\.shell\.paint"\)/,
   );
   assert.ok(

@@ -638,6 +638,11 @@ function main() {
   assert.match(makefile, /dist\/bootstrap\.mjs: bootstrap\.mjs[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/worker\.js: worker\.js[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
+  assert.match(
+    indexHtml,
+    /<link rel="preload" href="wasm\/app\.wasm" as="fetch" type="application\/wasm" crossorigin>/,
+    "index should start the core app.wasm fetch before runtime instantiation",
+  );
   assert.match(indexHtml, /<script type="module" src="bootstrap\.mjs"><\/script>/);
   assert(
     !fs.existsSync(path.join(ROOT_DIR, LEGACY_BOOTSTRAP_ENTRYPOINT)),
