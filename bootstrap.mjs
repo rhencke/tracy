@@ -8,8 +8,11 @@ import {
 
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
+const wasmModulesPromise = import("./host/wasm-modules.mjs");
 const importProgressiveTraceRenderer = () =>
   import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+const instantiateWasmModuleForThread = async (...args) =>
+  (await wasmModulesPromise).instantiateWasmModuleForThread(...args);
 
 const canvas = globalThis.document?.getElementById?.("tracy");
 const context = canvas?.getContext?.("2d");
@@ -32,10 +35,8 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
   globalThis.addEventListener?.("load", registerAfterReady);
 }
 
-const [{ makeMainThreadHost }, { runApp }, { instantiateWasmModuleForThread }] = await Promise.all([
-  import("./host/shim.mjs"),
-  import("./host/runtime.mjs"),
-  import("./host/wasm-modules.mjs"),
+const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
+  import("./host/shim.mjs"), import("./host/runtime.mjs"),
 ]);
 
 const memory = new WebAssembly.Memory({
@@ -45,6 +46,5 @@ const memory = new WebAssembly.Memory({
 });
 
 runApp(memory, makeMainThreadHost(memory), {
-  importProgressiveTraceRenderer,
-  instantiateWasmModuleForThread,
+  importProgressiveTraceRenderer, instantiateWasmModuleForThread,
 });

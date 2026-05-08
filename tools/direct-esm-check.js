@@ -135,7 +135,15 @@ function main() {
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(
+    bootstrapSource,
+    /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
+  );
   assert.match(bootstrapSource, /import\("\.\/host\/wasm-modules\.mjs"\)/);
+  assert.match(
+    bootstrapSource,
+    /const instantiateWasmModuleForThread = async \(\.\.\.args\) =>[\s\S]+\(await wasmModulesPromise\)\.instantiateWasmModuleForThread\(\.\.\.args\)/,
+  );
   assert.match(
     bootstrapSource,
     /importProgressiveTraceRenderer,/,
