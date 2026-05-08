@@ -163,7 +163,7 @@ function makeTraceFile() {
     pid: 1,
     tid: 2,
   });
-  const targetLength = 2 * INGEST_WINDOW_BYTES;
+  const targetLength = 256 * 1024;
   const paddingLength =
     targetLength -
     firstChunkPrefix.length -
@@ -176,6 +176,7 @@ function makeTraceFile() {
   );
 
   return {
+    contentBytes: bytes.byteLength,
     name: "throttled-100mb.json",
     size: FIXTURE_SIZE_BYTES,
     readAt(offset, len) {
@@ -517,7 +518,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         calls.push({ host: "worker", id: indexId, len, name: index.name, offset: start, op: "index-write" });
         return len;
       },
-      [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
+      async [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
         const index = requireIndex(indexId);
 
         if (
@@ -530,6 +531,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         ) {
           calls.push({ host: "worker", id: indexId, name: index.name, op: "index-flush" });
         }
+        await new Promise((resolve) => setImmediate(resolve));
         return 0;
       },
     };
@@ -633,7 +635,7 @@ function makeCanvasHarness() {
   };
 }
 
-async function flushMicrotasks(count = 8) {
+async function flushMicrotasks(count = 1) {
   for (let i = 0; i < count; i += 1) {
     await Promise.resolve();
   }
@@ -754,16 +756,6 @@ async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
   assert.ok(callback(), label);
 }
 
-async function runIngestFrame(frames, canvasHarness, ts, frameDurations) {
-  await waitForAsyncCondition(
-    () => frames.length > 0,
-    `expected a frame callback at ${ts} ms`,
-    2000,
-  );
-  await flushAsyncWork();
-  await runFrame(frames, canvasHarness, ts, frameDurations);
-}
-
 async function checkInteractiveIngestGate() {
   await loadGeneratedInteractiveIngestCheckSpec();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
@@ -840,16 +832,18 @@ async function checkInteractiveIngestGate() {
 
     postMessage(message) {
       super.postMessage(message);
-      this.handler({
-        data: {
-          ...message,
-          byteBudget: INGEST_WINDOW_BYTES / 10,
-          chunkBytes: INGEST_WINDOW_BYTES / 10,
-        },
-      }).catch((error) => {
-        this.emit("message", {
-          type: ingestRuntime.INGEST_WORKER_MESSAGE.ERROR,
-          message: error.message,
+      setImmediate(() => {
+        this.handler({
+          data: {
+            ...message,
+            byteBudget: INGEST_WINDOW_BYTES / 10,
+            chunkBytes: 64 * 1024,
+          },
+        }).catch((error) => {
+          this.emit("message", {
+            type: ingestRuntime.INGEST_WORKER_MESSAGE.ERROR,
+            message: error.message,
+          });
         });
       });
     }
@@ -857,6 +851,7 @@ async function checkInteractiveIngestGate() {
 
   const controller = runtime.runApp(memory, host, {
     document: globalThis.document,
+    preloadIndexReader: true,
     importProgressiveTraceRenderer: async () => {
       importCalls.push(ticks.at(-1) ?? 0);
       return {
@@ -939,6 +934,10 @@ async function checkInteractiveIngestGate() {
 
   await runFrame(frames, canvasHarness, 0);
   await flushAsyncWork();
+  await waitForAsyncCondition(
+    () => wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
+    "interactive ingest gate should preload the main-thread index reader before file selection",
+  );
   if (frames.length > 0) {
     await runFrame(frames, canvasHarness, 0);
   }
@@ -1202,7 +1201,7 @@ async function checkInteractiveIngestGate() {
     "interactive_ingest_expect_progress_eta",
     [
       controller.status().progress.fileOffset,
-      2 * INGEST_WINDOW_BYTES,
+      selectedFile.contentBytes,
       flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds === null)),
       flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds > 0)),
     ],

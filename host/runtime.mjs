@@ -940,7 +940,9 @@ async function loadApp(memory, host, options = {}) {
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
   installFilePickerGesture(host, options.ingestWorker, options);
-  options.ingestWorker?.indexReader?.preload?.().catch(reportAppLoadError);
+  if (options.preloadIndexReader === true) {
+    options.ingestWorker?.indexReader?.preload?.().catch(reportAppLoadError);
+  }
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
