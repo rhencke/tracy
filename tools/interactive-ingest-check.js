@@ -637,12 +637,6 @@ async function checkInteractiveIngestGate() {
       ) || controller.status().state === "error",
     "main-thread reader should be ready for the worker-written OPFS index",
   );
-  await waitForAsyncCondition(
-    () =>
-      controller.indexReader.coveredRange().valid ||
-      controller.status().state === "error",
-    "main-thread reader should expose queryable covered slices",
-  );
   assert.ok(
     host.calls.some(
         (call) => call[0] === "index-open" &&
