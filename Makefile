@@ -19,6 +19,7 @@ GENERATED_WAT_FILES := \
 	wat/std/mem.wat
 GENERATOR_WAT_INPUTS := $(filter-out $(GENERATED_WAT_FILES),$(WAT_SOURCES))
 WASM_FILES := $(patsubst wat/%.wat,dist/wasm/%.wasm,$(WAT_SOURCES))
+PRODUCTION_WASM_FILES := $(filter-out %.test.wasm,$(WASM_FILES))
 WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
 COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
@@ -35,6 +36,15 @@ STATIC_FILES := $(shell find static -type f -print | sort)
 STATIC_DIST_FILES := $(patsubst static/%,dist/%,$(STATIC_FILES))
 APP_SHELL_FILES := dist/index.html dist/manifest.webmanifest
 SERVICE_WORKER_FILES := dist/service-worker.js dist/precache-manifest.js
+APP_RUNTIME_DIST_FILES := \
+	$(PRODUCTION_WASM_FILES) \
+	$(JS_DIST_FILES) \
+	$(APP_SHELL_FILES) \
+	$(STATIC_DIST_FILES)
+PRECACHE_DIST_FILES := \
+	$(APP_RUNTIME_DIST_FILES) \
+	dist/build-info.js \
+	dist/service-worker.js
 DIST_FILES := \
 	$(WASM_FILES) \
 	$(JS_DIST_FILES) \
@@ -213,13 +223,13 @@ dist/service-worker.js: service-worker.js
 	mkdir -p $(dir $@)
 	cp $< $@
 
-dist/precache-manifest.js: $(filter-out dist/precache-manifest.js,$(DIST_FILES)) tools/generate-precache-manifest.js
-	node tools/generate-precache-manifest.js dist $@ $(filter-out dist/precache-manifest.js,$(DIST_FILES))
+dist/precache-manifest.js: $(PRECACHE_DIST_FILES) tools/generate-precache-manifest.js
+	node tools/generate-precache-manifest.js dist $@ $(PRECACHE_DIST_FILES)
 
-dist/build-info.js: $(filter-out dist/build-info.js $(SERVICE_WORKER_FILES),$(DIST_FILES))
+dist/build-info.js: $(APP_RUNTIME_DIST_FILES)
 	build_hash="$$( \
 		cd dist && \
-		find . -type f ! -name 'build-info.js' ! -path './.wat-compat/*' -print0 \
+		find . -type f ! -name 'build-info.js' ! -name 'precache-manifest.js' ! -name 'service-worker.js' ! -name '*.test.wasm' ! -path './.wat-compat/*' -print0 \
 			| sort -z \
 			| xargs -0 sha256sum \
 			| sha256sum \

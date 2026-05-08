@@ -30,7 +30,10 @@ function main() {
   assert.doesNotMatch(startupSpec, /BOOTSTRAP_TIMING/);
   assert.equal(packageJson.scripts["test:service-worker"], "node tools/service-worker-check.js");
   assert.match(makefile, /SERVICE_WORKER_FILES := dist\/service-worker\.js dist\/precache-manifest\.js/);
-  assert.match(makefile, /dist\/precache-manifest\.js: \$\(filter-out dist\/precache-manifest\.js,\$\(DIST_FILES\)\)/);
+  assert.match(makefile, /PRODUCTION_WASM_FILES := \$\(filter-out %\.test\.wasm,\$\(WASM_FILES\)\)/);
+  assert.match(makefile, /APP_RUNTIME_DIST_FILES :=[\s\S]+\$\(PRODUCTION_WASM_FILES\)/);
+  assert.match(makefile, /PRECACHE_DIST_FILES :=[\s\S]+\$\(APP_RUNTIME_DIST_FILES\)/);
+  assert.match(makefile, /dist\/precache-manifest\.js: \$\(PRECACHE_DIST_FILES\)/);
   assert.match(makefile, /node tools\/service-worker-check\.js/);
   assert.match(serviceWorker, /importScripts\("precache-manifest\.js"\)/);
   assert.match(serviceWorker, /\.addAll/);

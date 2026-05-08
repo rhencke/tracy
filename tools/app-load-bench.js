@@ -1226,12 +1226,16 @@ function runSelfTest() {
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
   assert.match(
     makefile,
-    /dist\/precache-manifest\.js: \$\(filter-out dist\/precache-manifest\.js,\$\(DIST_FILES\)\) tools\/generate-precache-manifest\.js/,
+    /dist\/precache-manifest\.js: \$\(PRECACHE_DIST_FILES\) tools\/generate-precache-manifest\.js/,
   );
   assert.match(
     makefile,
-    /dist\/build-info\.js: \$\(filter-out dist\/build-info\.js \$\(SERVICE_WORKER_FILES\),\$\(DIST_FILES\)\)/,
+    /dist\/build-info\.js: \$\(APP_RUNTIME_DIST_FILES\)/,
   );
+  assert.match(makefile, /PRODUCTION_WASM_FILES := \$\(filter-out %\.test\.wasm,\$\(WASM_FILES\)\)/);
+  assert.match(makefile, /APP_RUNTIME_DIST_FILES :=[\s\S]+\$\(PRODUCTION_WASM_FILES\)/);
+  assert.match(makefile, /PRECACHE_DIST_FILES :=[\s\S]+\$\(APP_RUNTIME_DIST_FILES\)/);
+  assert.match(makefile, /find \. -type f[\s\S]+! -name '\*\.test\.wasm'/);
   assert.match(makefile, /node tools\/app-load-bench\.js --self-test/);
   assert.match(makefile, /node tools\/generate-runtime-spec\.js --check/);
 }
