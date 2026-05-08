@@ -194,6 +194,8 @@ function makeSharedOpfsHost(memory, HOST_IMPORT_NAME) {
   const indexes = new Map();
   const indexNames = new Map();
   const calls = [];
+  let fileSelectedCallback = null;
+  let pendingFilePickerOpen = null;
   let nextSourceId = 12;
   let nextIndexId = 22;
 
@@ -234,6 +236,41 @@ function makeSharedOpfsHost(memory, HOST_IMPORT_NAME) {
   return {
     calls,
     files,
+    selectPickedFile(handle, file) {
+      assert.notEqual(
+        pendingFilePickerOpen,
+        null,
+        "interactive ingest gate must start from a production file_picker_open call",
+      );
+      const callback =
+        typeof fileSelectedCallback === "function"
+          ? fileSelectedCallback
+          : fileSelectedCallback?.fn;
+      assert.equal(
+        typeof callback,
+        "function",
+        `interactive ingest gate must install the production file-selection callback; calls=${JSON.stringify(calls)}`,
+      );
+      files.set(handle, file);
+      queueMicrotask(() => callback({ file, handle }));
+      pendingFilePickerOpen.resolve(handle);
+      pendingFilePickerOpen = null;
+    },
+    setFileSelectedCallback(callback) {
+      calls.push(["set-file-selected-callback", typeof callback]);
+      fileSelectedCallback = callback;
+    },
+    [HOST_IMPORT_NAME.FILE_PICKER_OPEN](acceptPtr, acceptLen) {
+      assert.equal(
+        pendingFilePickerOpen,
+        null,
+        "interactive ingest gate should not open multiple file pickers at once",
+      );
+      calls.push(["file-picker-open", putName(acceptPtr, acceptLen)]);
+      return new Promise((resolve) => {
+        pendingFilePickerOpen = { resolve };
+      });
+    },
     [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
       const file = files.get(fileHandle);
       const sourceId = nextSourceId;
@@ -326,9 +363,6 @@ function makeSharedOpfsHost(memory, HOST_IMPORT_NAME) {
     [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
       requireIndex(indexId);
       return 0;
-    },
-    setFileSelectedCallback(callback) {
-      this.fileSelectionCallback = callback;
     },
   };
 }
@@ -564,7 +598,6 @@ async function checkInteractiveIngestGate() {
   const canvasHarness = makeCanvasHarness();
   const { frames } = installBrowserHarness(canvasHarness.canvas);
   const sourceName = "sources/throttled-100mb.json";
-  const fileSelectionCallbacks = [];
   const workerStatuses = [];
   const ticks = [];
   const importCalls = [];
@@ -574,10 +607,12 @@ async function checkInteractiveIngestGate() {
   const host = {
     ...makeSharedOpfsHost(memory, abi.HOST_IMPORT_NAME),
     [abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]: true,
-    setFileSelectedCallback(callback) {
-      fileSelectionCallbacks.push(callback);
-    },
   };
+  assert.equal(typeof host.setFileSelectedCallback, "function");
+  assert.equal(
+    typeof host[abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE],
+    "function",
+  );
   const wasmModuleCalls = [];
 
   class RunningIngestWorker extends FakeWorker {
@@ -691,7 +726,10 @@ async function checkInteractiveIngestGate() {
   });
 
   await flushAsyncWork();
-  assert.equal(fileSelectionCallbacks.length, 1);
+  assert.ok(
+    host.calls.some((call) => call[0] === "file-picker-open"),
+    "interactive ingest gate should open the production file picker path",
+  );
   assert.ok(frames.length >= 1);
 
   await runFrame(frames, canvasHarness, 0);
@@ -706,13 +744,9 @@ async function checkInteractiveIngestGate() {
   );
 
   const selectedFile = makeTraceFile();
-  host.files.set(77, selectedFile);
   elapsedClock.start();
 
-  fileSelectionCallbacks[0]({
-    file: selectedFile,
-    handle: 77,
-  });
+  host.selectPickedFile(77, selectedFile);
   await flushAsyncWork(elapsedClock);
   await waitForAsyncCondition(
     () =>
@@ -720,7 +754,7 @@ async function checkInteractiveIngestGate() {
         (call) => call[0] === "index-create" &&
           call[1] === "indexes/throttled-100mb.json.idx",
       ) || controller.status().state === "error",
-    "worker should create the real OPFS index before the start contract is checked",
+    `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(host.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
     2000,
     elapsedClock,
   );

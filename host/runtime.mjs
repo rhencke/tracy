@@ -740,6 +740,24 @@ function installFileSelectionIngest(memory, host, ingestWorker, options) {
   });
 }
 
+function openInitialFilePicker(host, ingestWorker, options) {
+  if (
+    options.openInitialFilePicker === false ||
+    options.ingestFromFileSelection === false ||
+    typeof host[HOST_IMPORT_NAME.FILE_PICKER_OPEN] !== "function"
+  ) {
+    return;
+  }
+
+  try {
+    Promise.resolve(host[HOST_IMPORT_NAME.FILE_PICKER_OPEN](0, 0)).catch(
+      (error) => ingestWorker?.fail?.(error),
+    );
+  } catch (error) {
+    ingestWorker?.fail?.(error);
+  }
+}
+
 function shouldLoadProgressiveTraceRenderer(ingestWorker) {
   const workerStatus = ingestWorker?.status?.();
   const workerCoveredRange = workerStatus?.coveredRange;
@@ -888,6 +906,7 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
+  openInitialFilePicker(host, options.ingestWorker, options);
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
