@@ -26,8 +26,11 @@ function main() {
   assert.match(makefile, /dist\/precache-manifest\.js: \$\(filter-out dist\/precache-manifest\.js,\$\(DIST_FILES\)\)/);
   assert.match(makefile, /node tools\/service-worker-check\.js/);
   assert.match(serviceWorker, /importScripts\("precache-manifest\.js"\)/);
-  assert.match(serviceWorker, /cache\.addAll/);
+  assert.match(serviceWorker, /\.addAll/);
   assert.match(serviceWorker, /const precacheCachePromise = caches\.open\(cacheName\)/);
+  assert.match(serviceWorker, /const precacheResponses = new Map\(\)/);
+  assert.match(serviceWorker, /warmPrecacheResponses\(cache\)/);
+  assert.match(serviceWorker, /precacheResponses\.get\(cacheUrl\)\?\.clone\(\)/);
   assert.match(serviceWorker, /cache\.match\(cacheUrl\)/);
 
   for (const relativePath of [
