@@ -45,6 +45,12 @@ function measurePerformance(name, start, end, options) {
   } catch {}
 }
 
+function reportAppLoadError(error) {
+  console.error(error);
+  globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
+  showError("tracy failed to load the WebAssembly viewer.");
+}
+
 function cloneWorkerStatus(status) {
   return {
     coveredRange: status.coveredRange,
@@ -733,33 +739,70 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
-  markPerformance(PERFORMANCE_MARKS.appReady, options);
-  measurePerformance(
-    PERFORMANCE_MEASURES.appLoad,
-    PERFORMANCE_MARKS.bootstrapStart,
-    PERFORMANCE_MARKS.appReady,
-    options,
-  );
 
   let progressiveTraceRenderer =
     options.progressiveTraceRenderer === false
       ? null
       : (options.progressiveTraceRenderer ?? null);
+  let progressiveTraceRendererModule = null;
   let progressiveTraceRendererPromise = null;
+  let progressiveTraceRendererCreatePromise = null;
+  let firstFrameResolve = null;
+  let firstFrameSeen = false;
+  const firstFramePromise = new Promise((resolve) => {
+    firstFrameResolve = resolve;
+  });
+
+  function loadProgressiveTraceRendererModule() {
+    if (options.progressiveTraceRenderer === false) {
+      return Promise.resolve(null);
+    }
+    if (progressiveTraceRendererModule !== null) {
+      return Promise.resolve(progressiveTraceRendererModule);
+    }
+    if (progressiveTraceRendererPromise !== null) {
+      return progressiveTraceRendererPromise;
+    }
+
+    progressiveTraceRendererPromise = (
+      options.importProgressiveTraceRenderer?.() ??
+      import(PROGRESSIVE_TRACE_RENDERER_URL)
+    ).then((module) => {
+      progressiveTraceRendererModule = module;
+      return module;
+    });
+
+    return progressiveTraceRendererPromise;
+  }
+
+  firstFramePromise.then(() => (
+    progressiveTraceRenderer === null
+      ? loadProgressiveTraceRendererModule()
+      : null
+  )).then(() => {
+    markPerformance(PERFORMANCE_MARKS.appReady, options);
+    measurePerformance(
+      PERFORMANCE_MEASURES.appLoad,
+      PERFORMANCE_MARKS.bootstrapStart,
+      PERFORMANCE_MARKS.appReady,
+      options,
+    );
+  }).catch(reportAppLoadError);
 
   const loop = (ts) => {
     tracy_tick(ts);
+    if (!firstFrameSeen) {
+      firstFrameSeen = true;
+      firstFrameResolve();
+    }
     if (progressiveTraceRenderer !== null) {
       progressiveTraceRenderer.draw?.(ts);
     } else if (
       options.progressiveTraceRenderer !== false &&
-      progressiveTraceRendererPromise === null &&
+      progressiveTraceRendererCreatePromise === null &&
       shouldLoadProgressiveTraceRenderer(options.ingestWorker)
     ) {
-      progressiveTraceRendererPromise = (
-        options.importProgressiveTraceRenderer?.() ??
-        import(PROGRESSIVE_TRACE_RENDERER_URL)
-      ).then((module) => {
+      progressiveTraceRendererCreatePromise = loadProgressiveTraceRendererModule().then((module) => {
         progressiveTraceRenderer = module.createProgressiveTraceRenderer(
           memory,
           options.ingestWorker,
@@ -771,7 +814,7 @@ async function loadApp(memory, host, options = {}) {
         return progressiveTraceRenderer;
       }).catch((error) => {
         options.ingestWorker?.fail?.(error);
-        progressiveTraceRendererPromise = null;
+        reportAppLoadError(error);
       });
     }
     requestAnimationFrame(loop);
@@ -808,9 +851,7 @@ export function runApp(memory, host, options = {}) {
   installFileSelectionIngest(memory, host, ingestWorker, options);
 
   loadApp(memory, host, { ...options, ingestWorker }).catch((error) => {
-    console.error(error);
-    globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
-    showError("tracy failed to load the WebAssembly viewer.");
+    reportAppLoadError(error);
   });
 
   return ingestWorker;

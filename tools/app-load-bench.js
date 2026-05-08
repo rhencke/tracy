@@ -583,7 +583,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
         return {
           detail,
           error,
-          ready: performance.getEntriesByName("tracy.app.ready").length > 0,
+          fullReady: performance.getEntriesByName("tracy.app.ready").length > 0,
         };
       })()`,
       returnByValue: true,
@@ -595,7 +595,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       throw new Error(`page reported app-load failure: ${status.error}${detail}`);
     }
 
-    return status.ready === true;
+    return status.fullReady === true;
   });
 
   const result = await cdp.send("Runtime.evaluate", {
@@ -763,6 +763,8 @@ function runSelfTest() {
   const runtimeCoreReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreReady",
   );
+  const firstFramePromiseOffset = runtime.indexOf("firstFramePromise");
+  const rendererModuleLoadOffset = runtime.indexOf("loadProgressiveTraceRendererModule()");
   const tracyMainOffset = runtime.indexOf("tracy_main();");
   const appReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.appReady",
@@ -774,11 +776,23 @@ function runSelfTest() {
   assert.equal(bootstrapCoreReadyOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeCoreReadyOffset, -1);
+  assert.notEqual(firstFramePromiseOffset, -1);
+  assert.notEqual(rendererModuleLoadOffset, -1);
   assert.notEqual(tracyMainOffset, -1);
   assert.notEqual(appReadyOffset, -1);
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
+  assert.ok(runtimeCoreReadyOffset < firstFramePromiseOffset);
+  assert.ok(firstFramePromiseOffset < appReadyOffset);
   assert.ok(runtimeCoreReadyOffset < appReadyOffset);
+  assert.match(runtime, /firstFramePromise\.then\(\(\) => \(/);
+  assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
+  assert.match(runtime, /\.catch\(reportAppLoadError\)/);
+  assert.match(
+    navigateAndMeasure.toString(),
+    /fullReady: performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
+  );
+  assert.match(navigateAndMeasure.toString(), /return status\.fullReady === true/);
   assert.match(
     indexHtml,
     /<link rel="modulepreload" href="bootstrap\.js">/,

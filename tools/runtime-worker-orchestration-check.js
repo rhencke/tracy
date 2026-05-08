@@ -77,6 +77,12 @@ class FakeWorker {
   }
 }
 
+async function flushMicrotasks(count = 8) {
+  for (let index = 0; index < count; index += 1) {
+    await Promise.resolve();
+  }
+}
+
 async function checkRuntimeOrchestratesWorker() {
   const { frames } = installBrowserStubs();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
@@ -130,6 +136,13 @@ async function checkRuntimeOrchestratesWorker() {
         },
       };
     },
+    importProgressiveTraceRenderer: async () => ({
+      createProgressiveTraceRenderer() {
+        return {
+          draw() {},
+        };
+      },
+    }),
     performance,
     worker: {
       Worker: FakeWorker,
@@ -169,13 +182,6 @@ async function checkRuntimeOrchestratesWorker() {
       end: "tracy.main.end",
     },
     { kind: "mark", name: "tracy.core.ready" },
-    { kind: "mark", name: "tracy.app.ready" },
-    {
-      kind: "measure",
-      name: "tracy.app.load",
-      start: "tracy.bootstrap.start",
-      end: "tracy.app.ready",
-    },
   ]);
   assert.equal(frames.length, 1, "requestAnimationFrame should be scheduled");
   assert.deepEqual(worker.posted, [
@@ -214,6 +220,16 @@ async function checkRuntimeOrchestratesWorker() {
   });
 
   frames[0](123);
+  await flushMicrotasks();
+  assert.deepEqual(performanceEntries.slice(-2), [
+    { kind: "mark", name: "tracy.app.ready" },
+    {
+      kind: "measure",
+      name: "tracy.app.load",
+      start: "tracy.bootstrap.start",
+      end: "tracy.app.ready",
+    },
+  ]);
   assert.deepEqual(ticks, ["main", 123]);
   assert.equal(controller.status().state, "complete");
   assert.equal(controller.status().progress.fileOffset, 32);
@@ -1806,21 +1822,146 @@ async function checkRuntimeLoadsProgressiveTraceRendererLazily() {
     },
   });
 
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
 
   frames[0](1);
-  assert.equal(importCalls, 0, "renderer should stay off the cold startup path");
+  await flushMicrotasks();
+  assert.equal(importCalls, 1, "renderer module should load after the first frame");
+  assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
   coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
   readerState = "ready";
   frames[1](2);
-  assert.equal(importCalls, 1, "renderer should load once covered pages are queryable");
+  assert.equal(importCalls, 1, "renderer module should be reused once pages are queryable");
 
-  await Promise.resolve();
+  await flushMicrotasks();
   frames[2](3);
   assert.equal(importCalls, 1);
   assert.equal(drawCalls, 1);
+}
+
+async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
+  const { frames } = installBrowserStubs();
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const performanceEntries = [];
+  const performance = {
+    mark(name) {
+      performanceEntries.push({ kind: "mark", name });
+    },
+    measure(name, start, end) {
+      performanceEntries.push({ kind: "measure", name, start, end });
+    },
+  };
+  let resolveRendererImport;
+  let rendererImportStarted = false;
+  const rendererImport = new Promise((resolve) => {
+    resolveRendererImport = resolve;
+  });
+
+  runtime.runApp(memory, {}, {
+    importProgressiveTraceRenderer: () => {
+      rendererImportStarted = true;
+      return rendererImport;
+    },
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        tracy_main() {},
+        tracy_tick() {},
+      },
+    }),
+    performance,
+    worker: {
+      Worker: FakeWorker,
+    },
+  });
+
+  await flushMicrotasks();
+
+  assert.equal(
+    performanceEntries.some((entry) => entry.name === "tracy.core.ready"),
+    true,
+    "core readiness should remain on the tight startup path",
+  );
+  assert.equal(
+    performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
+    false,
+    "full readiness should not fire before the first frame",
+  );
+  assert.equal(rendererImportStarted, false);
+
+  frames[0](1);
+  await flushMicrotasks();
+  assert.equal(rendererImportStarted, true);
+  assert.equal(
+    performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
+    false,
+    "full readiness should wait for deferred renderer import",
+  );
+
+  resolveRendererImport({
+    createProgressiveTraceRenderer() {
+      throw new Error("not expected before queryable pages");
+    },
+  });
+  await flushMicrotasks();
+  assert.deepEqual(performanceEntries.slice(-2), [
+    { kind: "mark", name: "tracy.app.ready" },
+    {
+      kind: "measure",
+      name: "tracy.app.load",
+      start: "tracy.bootstrap.start",
+      end: "tracy.app.ready",
+    },
+  ]);
+}
+
+async function checkAppReadyFailsWhenDeferredRendererFails() {
+  const { frames } = installBrowserStubs();
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const performanceEntries = [];
+  const previousError = globalThis.__TRACY_APP_LOAD_ERROR__;
+  const previousConsoleError = console.error;
+  const performance = {
+    mark(name) {
+      performanceEntries.push({ kind: "mark", name });
+    },
+    measure(name, start, end) {
+      performanceEntries.push({ kind: "measure", name, start, end });
+    },
+  };
+
+  globalThis.__TRACY_APP_LOAD_ERROR__ = "";
+  console.error = () => {};
+  runtime.runApp(memory, {}, {
+    importProgressiveTraceRenderer: async () => {
+      throw new Error("deferred renderer unavailable");
+    },
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        tracy_main() {},
+        tracy_tick() {},
+      },
+    }),
+    performance,
+    worker: {
+      Worker: FakeWorker,
+    },
+  });
+
+  await flushMicrotasks();
+  frames[0](1);
+  await flushMicrotasks();
+
+  assert.equal(
+    performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
+    false,
+    "full readiness should not pass when deferred renderer import fails",
+  );
+  assert.equal(globalThis.__TRACY_APP_LOAD_ERROR__, "deferred renderer unavailable");
+  globalThis.__TRACY_APP_LOAD_ERROR__ = previousError;
+  console.error = previousConsoleError;
 }
 
 async function main() {
@@ -1841,6 +1982,8 @@ async function main() {
   await checkProgressiveTraceRendererBoundsLargeViewportQueries();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimeLoadsProgressiveTraceRendererLazily();
+  await checkAppReadyWaitsForFirstFrameAndDeferredRenderer();
+  await checkAppReadyFailsWhenDeferredRendererFails();
 }
 
 main().catch((error) => {

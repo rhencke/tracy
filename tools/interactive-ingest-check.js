@@ -495,7 +495,8 @@ async function checkInteractiveIngestGate() {
   assert.equal(frames.length, 1);
 
   await runFrame(frames, canvasHarness, 0);
-  assert.equal(importCalls.length, 0, "renderer should stay off cold startup");
+  assert.equal(importCalls.length, 1, "renderer module should load after first frame");
+  assert.equal(rendererInstance, null, "renderer should stay uncreated before queryable pages");
 
   const selectedFile = { name: "throttled-100mb.json", size: HUNDRED_MB };
 
