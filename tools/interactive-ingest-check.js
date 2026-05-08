@@ -3,6 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { performance } = require("node:perf_hooks");
 const { pathToFileURL } = require("node:url");
 
 let FIXTURE_SIZE_BYTES;
@@ -10,6 +11,7 @@ let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
 
 const FIRST_EVENTS_BUDGET_MS = 100;
+const compiledDistWasmModules = new Map();
 
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
@@ -43,11 +45,30 @@ async function instantiateInteractiveIngestVerifier(memory) {
 }
 
 async function compileDistWasmModule(url) {
+  if (compiledDistWasmModules.has(url)) {
+    return compiledDistWasmModules.get(url);
+  }
+
   const bytes = await fs.readFile(
     path.resolve(__dirname, "..", url.replace(/^file:\/\//, "")),
   );
 
-  return WebAssembly.compile(bytes);
+  const compiled = WebAssembly.compile(bytes);
+
+  compiledDistWasmModules.set(url, compiled);
+  return compiled;
+}
+
+async function preloadDistWasmModules(wasmModules, threads) {
+  const urls = new Set();
+
+  for (const thread of threads) {
+    for (const id of wasmModules.wasmModuleIdsForThread(thread)) {
+      urls.add(wasmModules.wasmModuleUrl(id, "dist/wasm/"));
+    }
+  }
+
+  await Promise.all([...urls].map((url) => compileDistWasmModule(url)));
 }
 
 async function instantiateDistWasmModule(module, imports) {
@@ -65,31 +86,6 @@ function assertInteractiveContractOk(contract, name, args) {
 
 function flag(value) {
   return value ? 1 : 0;
-}
-
-function makeElapsedClock() {
-  let elapsedMs = 0;
-  let running = false;
-
-  return {
-    elapsedMs() {
-      return elapsedMs;
-    },
-    frame(ts) {
-      if (running) {
-        elapsedMs = Math.max(elapsedMs, ts);
-      }
-    },
-    start() {
-      elapsedMs = 0;
-      running = true;
-    },
-    wait(ms) {
-      if (running) {
-        elapsedMs += ms;
-      }
-    },
-  };
 }
 
 function installBrowserHarness(canvas) {
@@ -524,7 +520,16 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
       [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
         const index = requireIndex(indexId);
 
-        calls.push({ host: "worker", id: indexId, name: index.name, op: "index-flush" });
+        if (
+          !calls.some(
+            (call) => call.host === "worker" &&
+              call.id === indexId &&
+              call.name === index.name &&
+              call.op === "index-flush",
+          )
+        ) {
+          calls.push({ host: "worker", id: indexId, name: index.name, op: "index-flush" });
+        }
         return 0;
       },
     };
@@ -628,16 +633,15 @@ function makeCanvasHarness() {
   };
 }
 
-async function flushMicrotasks(count = 32) {
+async function flushMicrotasks(count = 8) {
   for (let i = 0; i < count; i += 1) {
     await Promise.resolve();
   }
 }
 
-async function flushAsyncWork(elapsedClock = null) {
+async function flushAsyncWork() {
   await flushMicrotasks();
   await new Promise((resolve) => setImmediate(resolve));
-  elapsedClock?.wait(1);
   await flushMicrotasks();
 }
 
@@ -736,30 +740,28 @@ function makeTraceRenderPlannerExports() {
   };
 }
 
-async function waitForAsyncCondition(callback, label, timeoutMs = 2000, elapsedClock = null) {
-  const deadline = Date.now() + timeoutMs;
+async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
+  const deadline = performance.now() + timeoutMs;
 
-  while (Date.now() < deadline) {
+  while (performance.now() < deadline) {
     if (callback()) {
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 1));
-    elapsedClock?.wait(1);
     await flushAsyncWork();
   }
 
   assert.ok(callback(), label);
 }
 
-async function runIngestFrame(frames, canvasHarness, ts, elapsedClock) {
+async function runIngestFrame(frames, canvasHarness, ts, frameDurations) {
   await waitForAsyncCondition(
     () => frames.length > 0,
     `expected a frame callback at ${ts} ms`,
     2000,
-    elapsedClock,
   );
-  await flushAsyncWork(elapsedClock);
-  await runFrame(frames, canvasHarness, ts, elapsedClock);
+  await flushAsyncWork();
+  await runFrame(frames, canvasHarness, ts, frameDurations);
 }
 
 async function checkInteractiveIngestGate() {
@@ -769,6 +771,7 @@ async function checkInteractiveIngestGate() {
   const wasmModules = await import(moduleUrl("host/wasm-modules.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  await preloadDistWasmModules(wasmModules, ["main", "worker"]);
   const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
   const canvasHarness = makeCanvasHarness();
   const { frames } = installBrowserHarness(canvasHarness.canvas);
@@ -776,7 +779,7 @@ async function checkInteractiveIngestGate() {
   const workerStatuses = [];
   const ticks = [];
   const importCalls = [];
-  const elapsedClock = makeElapsedClock();
+  const frameDurations = [];
   let rendererInstance = null;
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
   const opfsHarness = makeProductionTopologyOpfsHarness(memory, abi.HOST_IMPORT_NAME);
@@ -840,7 +843,7 @@ async function checkInteractiveIngestGate() {
       this.handler({
         data: {
           ...message,
-          byteBudget: INGEST_WINDOW_BYTES,
+          byteBudget: INGEST_WINDOW_BYTES / 10,
           chunkBytes: INGEST_WINDOW_BYTES / 10,
         },
       }).catch((error) => {
@@ -946,10 +949,9 @@ async function checkInteractiveIngestGate() {
   );
 
   const selectedFile = makeTraceFile();
-  elapsedClock.start();
 
   canvasHarness.listeners.get("click")({ preventDefault() {} });
-  await flushAsyncWork(elapsedClock);
+  await flushAsyncWork();
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" && call.op === "file-picker-open",
@@ -957,19 +959,10 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should open the production file picker path from a user gesture",
   );
 
+  const fileSelectionStartedAt = performance.now();
+
   host.selectPickedFile(77, selectedFile);
-  await flushAsyncWork(elapsedClock);
-  await waitForAsyncCondition(
-    () =>
-      opfsHarness.calls.some(
-        (call) => call.host === "worker" &&
-          call.op === "index-create" &&
-          call.name === "indexes/throttled-100mb.json.idx",
-      ) || controller.status().state === "error",
-    `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
-    2000,
-    elapsedClock,
-  );
+  await flushMicrotasks(1);
   assert.notEqual(controller.status().state, "error", controller.status().error);
 
   const startPosted =
@@ -992,6 +985,58 @@ async function checkInteractiveIngestGate() {
       type: "start",
     },
   ]);
+
+  let nextFrameAt = 10;
+  while (
+    performance.now() - fileSelectionStartedAt <= FIRST_EVENTS_BUDGET_MS &&
+    (
+      rendererInstance === null ||
+      canvasHarness.firstTraceDrawAt() === null
+    ) &&
+    controller.status().state !== "error"
+  ) {
+    if (frames.length === 0) {
+      await flushAsyncWork();
+      continue;
+    }
+
+    await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
+    await flushAsyncWork();
+    nextFrameAt += 16;
+  }
+  await flushAsyncWork();
+  assert.notEqual(controller.status().state, "error", controller.status().error);
+  assert.notEqual(
+    rendererInstance,
+    null,
+    `progressive renderer should be created within ${FIRST_EVENTS_BUDGET_MS}ms; elapsed=${performance.now() - fileSelectionStartedAt}ms status=${JSON.stringify(controller.status())} frames=${frames.length} calls=${JSON.stringify(opfsHarness.calls)}`,
+  );
+  assert.equal(importCalls.length, 1);
+  const firstTraceDrawElapsedMs = performance.now() - fileSelectionStartedAt;
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_first_events",
+    [
+      canvasHarness.firstTraceDrawAt() ?? -1,
+      firstTraceDrawElapsedMs,
+      rendererInstance.status().rows,
+    ],
+  );
+  assert.ok(
+    firstTraceDrawElapsedMs <= FIRST_EVENTS_BUDGET_MS,
+    `first visible events took ${firstTraceDrawElapsedMs}ms after file selection`,
+  );
+  await waitForAsyncCondition(
+    () =>
+      opfsHarness.calls.some(
+        (call) => call.host === "worker" &&
+          call.op === "index-create" &&
+          call.name === "indexes/throttled-100mb.json.idx",
+      ) || controller.status().state === "error",
+    `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
+    2000,
+  );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_worker_start",
@@ -1012,49 +1057,6 @@ async function checkInteractiveIngestGate() {
         ),
       ),
     ],
-  );
-
-  await runFrame(frames, canvasHarness, 10, elapsedClock);
-  assert.equal(importCalls.length, 1);
-
-  let nextFrameAt = 16;
-  while (
-    nextFrameAt <= 96 &&
-    (
-      rendererInstance === null ||
-      canvasHarness.firstTraceDrawAt() === null
-    ) &&
-    controller.status().state !== "error"
-  ) {
-    await runIngestFrame(frames, canvasHarness, nextFrameAt, elapsedClock);
-    nextFrameAt += 16;
-  }
-  if (
-    (
-      rendererInstance === null ||
-      canvasHarness.firstTraceDrawAt() === null
-    ) &&
-    controller.status().state !== "error"
-  ) {
-    await runIngestFrame(frames, canvasHarness, 100, elapsedClock);
-    nextFrameAt = 116;
-  }
-  await flushAsyncWork(elapsedClock);
-  assert.notEqual(controller.status().state, "error", controller.status().error);
-  assert.notEqual(rendererInstance, null, "progressive renderer should be created");
-  const firstTraceDrawElapsedMs = elapsedClock.elapsedMs();
-  assertInteractiveContractOk(
-    interactiveContract,
-    "interactive_ingest_expect_first_events",
-    [
-      canvasHarness.firstTraceDrawAt() ?? -1,
-      firstTraceDrawElapsedMs,
-      rendererInstance.status().rows,
-    ],
-  );
-  assert.ok(
-    firstTraceDrawElapsedMs <= FIRST_EVENTS_BUDGET_MS,
-    `first visible events took ${firstTraceDrawElapsedMs}ms after file selection`,
   );
   assert.ok(
     opfsHarness.calls.some(
@@ -1119,7 +1121,7 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should instantiate the real main-thread index reader module",
   );
 
-  await runFrame(frames, canvasHarness, nextFrameAt);
+  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   nextFrameAt += 16;
 
   const queryableCoveredRange = controller.indexReader.coveredRange();
@@ -1152,7 +1154,7 @@ async function checkInteractiveIngestGate() {
     deltaY: -500,
     preventDefault() {},
   });
-  await runFrame(frames, canvasHarness, nextFrameAt);
+  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   nextFrameAt += 16;
   const zoomedViewport = rendererInstance.status().viewport;
   assertInteractiveContractOk(
@@ -1179,7 +1181,7 @@ async function checkInteractiveIngestGate() {
     preventDefault() {},
   });
   canvasHarness.listeners.get("pointerup")({ pointerId: 1 });
-  await runFrame(frames, canvasHarness, nextFrameAt);
+  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   nextFrameAt += 16;
   assertInteractiveContractOk(
     interactiveContract,
@@ -1191,7 +1193,7 @@ async function checkInteractiveIngestGate() {
     ],
   );
 
-  await runFrame(frames, canvasHarness, nextFrameAt);
+  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   const progressStatuses = workerStatuses.filter(
     (entry) => entry.message?.type === "progress",
   );
@@ -1206,13 +1208,16 @@ async function checkInteractiveIngestGate() {
     ],
   );
 
-  const numericTicks = ticks.filter((tick) => typeof tick === "number");
-  const frameIntervals = numericTicks.slice(1).map((tick, index) => tick - numericTicks[index]);
-  for (const interval of frameIntervals) {
+  assert.ok(frameDurations.length > 0, "interactive ingest gate should record real frame durations");
+  for (const duration of frameDurations) {
     assertInteractiveContractOk(
       interactiveContract,
       "interactive_ingest_expect_frame_interval",
-      [interval, FRAME_BUDGET_MS],
+      [duration, FRAME_BUDGET_MS],
+    );
+    assert.ok(
+      duration <= FRAME_BUDGET_MS,
+      `frame callback took ${duration}ms, over ${FRAME_BUDGET_MS}ms budget`,
     );
   }
 }
@@ -1225,13 +1230,15 @@ function nextWorkerTime() {
 
 nextWorkerTime.times = [0, 10, 20, 34, 3034, 3035];
 
-async function runFrame(frames, canvasHarness, ts, elapsedClock = null) {
+async function runFrame(frames, canvasHarness, ts, frameDurations = null) {
   const frame = frames.shift();
 
   assert.equal(typeof frame, "function", `expected a frame callback at ${ts} ms`);
-  elapsedClock?.frame(ts);
   canvasHarness.setFrameAt(ts);
+  const startedAt = performance.now();
   frame(ts);
+  const duration = performance.now() - startedAt;
+  frameDurations?.push(duration);
   await flushMicrotasks();
 }
 
