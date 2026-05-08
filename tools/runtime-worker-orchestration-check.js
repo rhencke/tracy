@@ -1620,6 +1620,124 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
   );
 }
 
+async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhausted() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const queryCalls = [];
+  const operations = [];
+  const canvas = {
+    height: 120,
+    width: 240,
+    getContext() {
+      return {
+        beginPath() {
+          operations.push({ op: "beginPath" });
+        },
+        clearRect(x, y, width, height) {
+          operations.push({ height, op: "clearRect", width, x, y });
+        },
+        clip() {
+          operations.push({ op: "clip" });
+        },
+        fillRect(x, y, width, height) {
+          operations.push({
+            fillStyle: this.fillStyle,
+            height,
+            op: "fillRect",
+            width,
+            x,
+            y,
+          });
+        },
+        lineTo(x, y) {
+          operations.push({ op: "lineTo", x, y });
+        },
+        moveTo(x, y) {
+          operations.push({ op: "moveTo", x, y });
+        },
+        rect(x, y, width, height) {
+          operations.push({ height, op: "rect", width, x, y });
+        },
+        restore() {
+          operations.push({ op: "restore" });
+        },
+        save() {
+          operations.push({ op: "save" });
+        },
+        stroke() {
+          operations.push({ op: "stroke", strokeStyle: this.strokeStyle });
+        },
+      };
+    },
+  };
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
+      const view = new DataView(memory.buffer);
+
+      view.setUint32(outPtr, 10 + trackId * 10, true);
+      view.setUint32(outPtr + 4, 8, true);
+      view.setUint32(outPtr + 12, trackId, true);
+      view.setUint32(outPtr + 20, 0x2d74da, true);
+      view.setUint32(outPtr + 24, 0, true);
+      return 1;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 4;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return {
+        coveredRange: { end: 100, start: 0, type: "covered_range", valid: true },
+        state: "running",
+      };
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    queryOutPtr: 2048,
+    queryRangeBudget: 2,
+    queryWindow: 100,
+  });
+
+  const rows = renderer.draw(123);
+
+  assert.deepEqual(queryCalls, [
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 100, tsMin: 0 },
+    { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 100, tsMin: 0 },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(renderer.status().incompleteQueryRanges, [
+    { end: 100, start: 0, trackId: 2 },
+    { end: 100, start: 0, trackId: 3 },
+  ]);
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "fillRect" &&
+        operation.fillStyle === "rgba(180, 83, 9, 0.16)" &&
+        operation.x === 0 &&
+        operation.width === 240,
+    ),
+    true,
+    "tracks skipped by query budget exhaustion should be visibly marked incomplete",
+  );
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "stroke" &&
+        operation.strokeStyle === "rgba(146, 64, 14, 0.42)",
+    ),
+    true,
+    "tracks skipped by query budget exhaustion should include the incomplete stripe overlay",
+  );
+}
+
 async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -1992,6 +2110,7 @@ async function main() {
   await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererTilesFullVisibleViewport();
   await checkProgressiveTraceRendererBoundsLargeViewportQueries();
+  await checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhausted();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimePreloadsProgressiveTraceRendererImplementation();
   await checkAppReadyWaitsForFirstFrameAndDeferredRenderer();

@@ -171,6 +171,26 @@ function normalizedPositiveInteger(value, fallback) {
     : fallback;
 }
 
+function appendSkippedQueryRanges(ranges, viewport, trackId, queryStart, trackCount) {
+  const start = Math.max(viewport.start, queryStart);
+
+  if (start < viewport.end) {
+    ranges.push({
+      end: viewport.end,
+      start,
+      trackId,
+    });
+  }
+
+  for (let skippedTrackId = trackId + 1; skippedTrackId < trackCount; skippedTrackId += 1) {
+    ranges.push({
+      end: viewport.end,
+      start: viewport.start,
+      trackId: skippedTrackId,
+    });
+  }
+}
+
 function drawPartialHatch(context, x, y, width, height, spacing) {
   context.save?.();
   context.beginPath?.();
@@ -531,6 +551,13 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
           queryStart = Math.min(viewport.end, queryStart + queryTileSpan)
         ) {
           if (queryRangeCount >= queryRangeBudget) {
+            appendSkippedQueryRanges(
+              incompleteQueryRanges,
+              viewport,
+              trackId,
+              queryStart,
+              trackCount,
+            );
             break queryLoop;
           }
           const queryEnd = Math.min(viewport.end, queryStart + queryTileSpan);
