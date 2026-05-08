@@ -246,6 +246,36 @@ function assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRen
   }
 }
 
+function assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource) {
+  assert.match(
+    hostAbiSource,
+    /export const OPFS_BRIDGE_CONTRACT = Object\.freeze/,
+    "host ABI should export the generated OPFS bridge contract",
+  );
+  assert.match(
+    opfsSourceSource,
+    /import \{ HOST_IMPORT_NAME, OPFS_BRIDGE_CONTRACT \} from "\.\/abi\.mjs"/,
+    "OPFS source host should consume the generated OPFS bridge contract",
+  );
+
+  for (const [pattern, message] of [
+    [/const\s+OPFS_SOURCE_IMPORTS\s*=/, "source import grouping"],
+    [/const\s+OPFS_INDEX_READER_IMPORTS\s*=/, "index reader import grouping"],
+    [/const\s+OPFS_INDEX_WRITER_IMPORTS\s*=/, "index writer import grouping"],
+    [/const\s+WORKER_UNSUPPORTED_FILE_IMPORTS\s*=/, "worker unsupported file imports"],
+    [/const\s+OPFS_INDEX_SIZE_MAY_BE_STALE\s*=/, "index size stale marker"],
+    [/"tracy\.opfsIndexSizeMayBeStale"/, "index size stale marker string"],
+    [/"file handles are owned by the main thread"/, "worker unsupported reason"],
+    [/`trace-\$\{Date\.now\(\)\.toString\(36\)\}-\$\{sourceId\}\.bin`/, "file source name shape"],
+  ]) {
+    assert.doesNotMatch(
+      opfsSourceSource,
+      pattern,
+      `host/opfs-source.mjs should read ${message} from OPFS_BRIDGE_CONTRACT`,
+    );
+  }
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -255,6 +285,8 @@ function main() {
   const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
   const indexFormatSpecSource = readRepoFile("host/index-format-spec.mjs");
+  const hostAbiSource = readRepoFile("host/abi.mjs");
+  const opfsSourceSource = readRepoFile("host/opfs-source.mjs");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
   const traceRendererSpecSource = readRepoFile("host/trace-renderer-spec.mjs");
   const workerSource = readRepoFile("worker.js");
@@ -266,6 +298,7 @@ function main() {
 
   assertIngestWorkerProgressPolicyUsesGeneratedSpec();
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
+  assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
 
   assert.match(
     buildScript,
