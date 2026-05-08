@@ -657,6 +657,7 @@ async function checkInteractiveIngestGate() {
     ) &&
     controller.status().state !== "error"
   ) {
+    await flushAsyncWork();
     await runFrame(frames, canvasHarness, nextFrameAt);
     nextFrameAt += 16;
   }
