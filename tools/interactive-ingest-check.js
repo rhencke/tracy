@@ -492,10 +492,11 @@ async function checkInteractiveIngestGate() {
 
   await flushMicrotasks();
   assert.equal(fileSelectionCallbacks.length, 1);
-  assert.equal(frames.length, 1);
+  assert.equal(frames.length, 2);
 
   await runFrame(frames, canvasHarness, 0);
-  assert.equal(importCalls.length, 1, "renderer module should load after first frame");
+  await runFrame(frames, canvasHarness, 0);
+  assert.equal(importCalls.length, 1, "renderer module should preload before trace data is queryable");
   assert.equal(rendererInstance, null, "renderer should stay uncreated before queryable pages");
 
   const selectedFile = { name: "throttled-100mb.json", size: HUNDRED_MB };
