@@ -531,6 +531,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
+  let coreTransferBytes = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
@@ -581,6 +582,34 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
         const error = document.querySelector('[role="alert"]')?.textContent ?? "";
         const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
         return {
+          coreReady: performance.getEntriesByName("tracy.core.ready").length > 0,
+          detail,
+          error,
+        };
+      })()`,
+      returnByValue: true,
+    }, page.sessionId);
+    const status = result.result?.value ?? {};
+
+    if (status.error) {
+      const detail = status.detail ? ` (${status.detail})` : "";
+      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
+    }
+    if (status.coreReady === true) {
+      coreTransferBytes = [...loadingBytes]
+        .filter(([requestId]) => requestIds.has(requestId) && !cachedRequestIds.has(requestId))
+        .reduce((total, [, bytes]) => total + bytes, 0);
+      return true;
+    }
+
+    return false;
+  });
+  await waitUntil(async () => {
+    const result = await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
+        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
+        return {
           detail,
           error,
           fullReady: performance.getEntriesByName("tracy.app.ready").length > 0,
@@ -616,9 +645,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   }, page.sessionId);
   const metrics = result.result.value;
 
-  metrics.transferBytes = [...loadingBytes]
-    .filter(([requestId]) => requestIds.has(requestId) && !cachedRequestIds.has(requestId))
-    .reduce((total, [, bytes]) => total + bytes, 0);
+  metrics.transferBytes = coreTransferBytes;
 
   offRequest();
   offCache();
@@ -788,6 +815,18 @@ function runSelfTest() {
   assert.match(runtime, /firstFramePromise\.then\(\(\) => \(/);
   assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);
+  assert.match(
+    navigateAndMeasure.toString(),
+    /coreReady: performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /coreTransferBytes = \[\.\.\.loadingBytes\]/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /metrics\.transferBytes = coreTransferBytes/,
+  );
   assert.match(
     navigateAndMeasure.toString(),
     /fullReady: performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
