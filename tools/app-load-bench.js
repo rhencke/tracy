@@ -969,6 +969,14 @@ function runSelfTest() {
   assert.match(bootstrap, /from "\.\/host\/startup-spec\.mjs"/);
   assert.doesNotMatch(bootstrap, /runtime-spec\.mjs/);
   assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(
+    bootstrap,
+    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
+  );
+  assert.match(
+    bootstrap,
+    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
+  );
   assert.match(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(

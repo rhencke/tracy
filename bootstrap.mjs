@@ -9,7 +9,14 @@ import {
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
 const wasmModulesPromise = import("./host/wasm-modules.mjs");
+const serviceWorkerController =
+  globalThis.navigator?.serviceWorker?.controller ?? null;
+const warmProgressiveTraceRendererPromise =
+  serviceWorkerController === null
+    ? null
+    : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const importProgressiveTraceRenderer = () =>
+  warmProgressiveTraceRendererPromise ??
   import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const instantiateWasmModuleForThread = async (...args) =>
   (await wasmModulesPromise).instantiateWasmModuleForThread(...args);

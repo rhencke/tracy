@@ -137,6 +137,14 @@ function main() {
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrapSource,
+    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
+  );
+  assert.match(
+    bootstrapSource,
+    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
+  );
+  assert.match(
+    bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(bootstrapSource, /import\("\.\/host\/wasm-modules\.mjs"\)/);
