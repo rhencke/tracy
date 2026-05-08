@@ -114,11 +114,7 @@ function main() {
   assert.match(makefile, /dist\/worker\.js: worker\.js[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
-  assert.match(indexHtml, /<link rel="modulepreload" href="host\/runtime-spec\.mjs">/);
-  assert.match(
-    indexHtml,
-    /<link rel="modulepreload" href="host\/progressive-trace-renderer-loader\.mjs">/,
-  );
+  assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer-loader\.mjs"/);
   assert.match(runtimeSpecSource, /Generated from abi\/runtime\.json and abi\/palette\.json/);
   assert.match(runtimeSpecSource, /APP_SHELL_COLORS/);

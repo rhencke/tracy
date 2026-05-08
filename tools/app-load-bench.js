@@ -765,11 +765,14 @@ function runSelfTest() {
   const runtimeCoreStartOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreStart",
   );
+  const runtimeWasmStartOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart",
+  );
   const runtimeCoreReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreReady",
   );
   const firstFramePromiseOffset = runtime.indexOf("firstFramePromise");
-  const rendererModuleLoadOffset = runtime.indexOf("loadProgressiveTraceRendererModule()");
+  const rendererModuleLoadOffset = runtime.indexOf("const deferredRendererReadyPromise");
   const tracyMainOffset = runtime.indexOf("tracy_main();");
   const appReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.appReady",
@@ -778,19 +781,20 @@ function runSelfTest() {
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
   assert.equal(packageJson.scripts["test:runtime-spec"], "node tools/generate-runtime-spec.js --check");
-  assert.match(indexHtml, /<link rel="modulepreload" href="host\/runtime-spec\.mjs">/);
-  assert.match(
-    indexHtml,
-    /<link rel="modulepreload" href="host\/progressive-trace-renderer-loader\.mjs">/,
-  );
+  assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.notEqual(bootstrapStartOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
+  assert.notEqual(runtimeWasmStartOffset, -1);
   assert.notEqual(runtimeCoreReadyOffset, -1);
   assert.notEqual(firstFramePromiseOffset, -1);
   assert.notEqual(rendererModuleLoadOffset, -1);
   assert.notEqual(tracyMainOffset, -1);
   assert.notEqual(appReadyOffset, -1);
+  assert.ok(
+    rendererModuleLoadOffset < runtimeWasmStartOffset,
+    "deferred renderer import should overlap WASM startup",
+  );
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
   assert.ok(runtimeCoreReadyOffset < firstFramePromiseOffset);

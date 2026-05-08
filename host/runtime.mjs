@@ -690,6 +690,41 @@ async function loadApp(memory, host, options = {}) {
   }
 
   const imports = { env: { memory }, host };
+  let progressiveTraceRenderer =
+    options.progressiveTraceRenderer === false
+      ? null
+      : (options.progressiveTraceRenderer ?? null);
+  let progressiveTraceRendererModule = null;
+  let progressiveTraceRendererPromise = null;
+  let progressiveTraceRendererCreatePromise = null;
+
+  function loadProgressiveTraceRendererModule() {
+    if (options.progressiveTraceRenderer === false) {
+      return Promise.resolve(null);
+    }
+    if (progressiveTraceRendererModule !== null) {
+      return Promise.resolve(progressiveTraceRendererModule);
+    }
+    if (progressiveTraceRendererPromise !== null) {
+      return progressiveTraceRendererPromise;
+    }
+
+    progressiveTraceRendererPromise = (
+      options.importProgressiveTraceRenderer?.() ??
+      import(RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL)
+    ).then((module) => {
+      progressiveTraceRendererModule = module;
+      return module;
+    });
+
+    return progressiveTraceRendererPromise;
+  }
+
+  const deferredRendererReadyPromise =
+    progressiveTraceRenderer === null
+      ? loadProgressiveTraceRendererModule()
+      : Promise.resolve(null);
+
   async function defaultInstantiateMainWasm(id, thread, baseImports, {
     baseUrl = "wasm/",
     compile = defaultCompileWasm,
@@ -732,45 +767,11 @@ async function loadApp(memory, host, options = {}) {
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
 
-  let progressiveTraceRenderer =
-    options.progressiveTraceRenderer === false
-      ? null
-      : (options.progressiveTraceRenderer ?? null);
-  let progressiveTraceRendererModule = null;
-  let progressiveTraceRendererPromise = null;
-  let progressiveTraceRendererCreatePromise = null;
   let firstFrameResolve = null;
   let firstFrameSeen = false;
   const firstFramePromise = new Promise((resolve) => {
     firstFrameResolve = resolve;
   });
-
-  function loadProgressiveTraceRendererModule() {
-    if (options.progressiveTraceRenderer === false) {
-      return Promise.resolve(null);
-    }
-    if (progressiveTraceRendererModule !== null) {
-      return Promise.resolve(progressiveTraceRendererModule);
-    }
-    if (progressiveTraceRendererPromise !== null) {
-      return progressiveTraceRendererPromise;
-    }
-
-    progressiveTraceRendererPromise = (
-      options.importProgressiveTraceRenderer?.() ??
-      import(RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL)
-    ).then((module) => {
-      progressiveTraceRendererModule = module;
-      return module;
-    });
-
-    return progressiveTraceRendererPromise;
-  }
-
-  const deferredRendererReadyPromise =
-    progressiveTraceRenderer === null
-      ? loadProgressiveTraceRendererModule()
-      : Promise.resolve(null);
 
   Promise.all([firstFramePromise, deferredRendererReadyPromise]).then(() => {
     markPerformance(PERFORMANCE_MARKS.appReady, options);
