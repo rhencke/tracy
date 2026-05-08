@@ -13,7 +13,7 @@ function readRepoFile(relativePath) {
 }
 
 function main() {
-  const bootstrap = readRepoFile("bootstrap.js");
+  const bootstrap = readRepoFile("bootstrap.mjs");
   const makefile = readRepoFile("Makefile");
   const packageJson = JSON.parse(readRepoFile("package.json"));
   const runtimeSpec = readRepoFile("host/runtime-spec.mjs");
@@ -44,7 +44,7 @@ function main() {
     fs.mkdirSync(path.join(distDir, "host"), { recursive: true });
     fs.mkdirSync(path.join(distDir, "wasm", "std"), { recursive: true });
     fs.writeFileSync(path.join(distDir, "index.html"), "");
-    fs.writeFileSync(path.join(distDir, "bootstrap.js"), "");
+    fs.writeFileSync(path.join(distDir, "bootstrap.mjs"), "");
     fs.writeFileSync(path.join(distDir, "host", "runtime.mjs"), "");
     fs.writeFileSync(path.join(distDir, "stale.txt"), "");
     fs.writeFileSync(path.join(distDir, "wasm", "app.wasm"), "");
@@ -57,7 +57,7 @@ function main() {
         distDir,
         output,
         path.join(distDir, "index.html"),
-        path.join(distDir, "bootstrap.js"),
+        path.join(distDir, "bootstrap.mjs"),
         path.join(distDir, "host", "runtime.mjs"),
         path.join(distDir, "wasm", "app.wasm"),
         path.join(distDir, "wasm", "std", "mem.wasm"),
@@ -68,7 +68,7 @@ function main() {
     const manifest = fs.readFileSync(output, "utf8");
     assert.match(manifest, /cacheName: "tracy-app-shell-[0-9a-f]{16}"/);
     assert.match(manifest, /"index\.html"/);
-    assert.match(manifest, /"bootstrap\.js"/);
+    assert.match(manifest, /"bootstrap\.mjs"/);
     assert.match(manifest, /"host\/runtime\.mjs"/);
     assert.match(manifest, /"wasm\/app\.wasm"/);
     assert.match(manifest, /"wasm\/std\/mem\.wasm"/);

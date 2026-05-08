@@ -7,7 +7,7 @@
     <title>tracy</title>
     <link rel="manifest" href="manifest.webmanifest">
     <link rel="icon" href="icons/tracy-icon.svg" type="image/svg+xml">
-    <link rel="modulepreload" href="bootstrap.js">
+    <link rel="modulepreload" href="bootstrap.mjs">
     <link rel="modulepreload" href="host/wasm-modules.mjs">
     <style>
       :root {
@@ -50,6 +50,6 @@
   <body>
     <canvas id="tracy" aria-label="tracy trace canvas"></canvas>
     <noscript>tracy needs JavaScript enabled to load the WebAssembly viewer.</noscript>
-    <script type="module" src="bootstrap.js"></script>
+    <script type="module" src="bootstrap.mjs"></script>
   </body>
 </html>

@@ -18,6 +18,8 @@ const FORBIDDEN_BUNDLE_PATTERNS = [
   new RegExp(`${"bootstrap" + ".bundle"}.js`),
   new RegExp(`${"worker" + ".bundle"}.js`),
 ];
+const LEGACY_BOOTSTRAP_ENTRYPOINT = "bootstrap" + ".js";
+const LEGACY_BOOTSTRAP_PATTERN = new RegExp(`${"bootstrap"}\\.js`);
 
 function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
@@ -97,7 +99,7 @@ function assertNoInlinePaletteColor(relativePath) {
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
-  const bootstrapSource = readRepoFile("bootstrap.js");
+  const bootstrapSource = readRepoFile("bootstrap.mjs");
   const indexHtml = readRepoFile("index.html");
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
@@ -105,16 +107,30 @@ function main() {
   const runtimeSpecSource = readRepoFile("host/runtime-spec.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
+  const readmeSource = readRepoFile("README.md");
+  const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
+  const bootstrapLineCheckSource = readRepoFile("tools/check-bootstrap-lines.sh");
+  const serviceWorkerCheckSource = readRepoFile("tools/service-worker-check.js");
 
   assert.match(
     buildScript,
     /exec make -C "\$\{ROOT_DIR\}" -j"\$\{jobs\}" dist/,
     "build shim should delegate to make dist",
   );
-  assert.match(makefile, /dist\/bootstrap\.js: bootstrap\.js[\s\S]+cp \$< \$@/);
+  assert.match(makefile, /dist\/bootstrap\.mjs: bootstrap\.mjs[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/worker\.js: worker\.js[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
-  assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
+  assert.match(indexHtml, /<script type="module" src="bootstrap\.mjs"><\/script>/);
+  assert(
+    !fs.existsSync(path.join(ROOT_DIR, LEGACY_BOOTSTRAP_ENTRYPOINT)),
+    `${LEGACY_BOOTSTRAP_ENTRYPOINT} should stay renamed to bootstrap.mjs`,
+  );
+  assert.doesNotMatch(makefile, LEGACY_BOOTSTRAP_PATTERN);
+  assert.doesNotMatch(indexHtml, LEGACY_BOOTSTRAP_PATTERN);
+  assert.doesNotMatch(readmeSource, LEGACY_BOOTSTRAP_PATTERN);
+  assert.doesNotMatch(appLoadBenchSource, LEGACY_BOOTSTRAP_PATTERN);
+  assert.doesNotMatch(bootstrapLineCheckSource, LEGACY_BOOTSTRAP_PATTERN);
+  assert.doesNotMatch(serviceWorkerCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.doesNotMatch(bootstrapSource, /progressive-trace-renderer/);
   assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer\.mjs"/);
@@ -170,7 +186,7 @@ function main() {
   }
 
   for (const relativePath of [
-    "bootstrap.js",
+    "bootstrap.mjs",
     "host/ingest-worker-runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime.mjs",
@@ -182,7 +198,7 @@ function main() {
   }
 
   for (const relativePath of [
-    "bootstrap.js",
+    "bootstrap.mjs",
     "worker.js",
     "host/runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
@@ -195,7 +211,7 @@ function main() {
     }
   }
 
-  assertNoInlinePaletteColor("bootstrap.js");
+  assertNoInlinePaletteColor("bootstrap.mjs");
   assertNoInlinePaletteColor("host/canvas.mjs");
   assertNoInlinePaletteColor("host/runtime.mjs");
   assertNoInlinePaletteColor("host/progressive-trace-renderer.mjs");

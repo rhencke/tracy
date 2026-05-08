@@ -70,7 +70,7 @@ make dist
 make -j4 dist
 
 # produced app shell
-ls dist/index.html dist/bootstrap.js dist/host/runtime.mjs dist/wasm/app.wasm
+ls dist/index.html dist/bootstrap.mjs dist/host/runtime.mjs dist/wasm/app.wasm
 
 # run the local test gate
 make test

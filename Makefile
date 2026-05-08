@@ -25,7 +25,7 @@ COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
 COV_MANIFEST_FILES :=
 HOST_JS_GENERATED := host/abi.mjs host/runtime-spec.mjs host/wasm-modules.mjs
 HOST_JS := $(sort $(shell find host -type f -name '*.mjs' -print) $(HOST_JS_GENERATED))
-APP_JS_SOURCES := bootstrap.js worker.js
+APP_JS_SOURCES := bootstrap.mjs worker.js
 APP_JS_DIST_FILES := $(patsubst %,dist/%,$(APP_JS_SOURCES))
 HOST_JS_DIST_FILES := $(patsubst host/%,dist/host/%,$(HOST_JS))
 JS_DIST_FILES := \
@@ -179,7 +179,7 @@ $(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_COV_RULE,$(wat))))
 
 wasm-cov: $(COV_WAT_FILES) $(COV_MANIFEST_FILES) $(COV_WASM_FILES)
 
-dist/bootstrap.js: bootstrap.js
+dist/bootstrap.mjs: bootstrap.mjs
 	mkdir -p $(dir $@)
 	cp $< $@
 

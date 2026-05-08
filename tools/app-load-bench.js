@@ -38,7 +38,7 @@ const MIME_TYPES = Object.freeze({
   ".webmanifest": "application/manifest+json",
 });
 const REQUIRED_DIST_FILES = Object.freeze([
-  "bootstrap.js",
+  "bootstrap.mjs",
   "build-info.js",
   "host/abi.mjs",
   "host/progressive-trace-renderer-loader.mjs",
@@ -753,7 +753,7 @@ function runSelfTest() {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
   const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
-  const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
+  const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.mjs"), "utf8");
   const rendererLoader = fs.readFileSync(
     path.join(ROOT_DIR, "host", "progressive-trace-renderer-loader.mjs"),
     "utf8",
@@ -854,7 +854,7 @@ function runSelfTest() {
   assert.match(navigateAndMeasure.toString(), /return status\.fullReady === true/);
   assert.match(
     indexHtml,
-    /<link rel="modulepreload" href="bootstrap\.js">/,
+    /<link rel="modulepreload" href="bootstrap\.mjs">/,
   );
   assert.match(
     indexHtml,
