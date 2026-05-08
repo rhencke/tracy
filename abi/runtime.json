@@ -63,18 +63,57 @@
       }
     }
   },
+  "constantAudit": {
+    "duplicateNumericValues": [
+      {
+        "numericValue": 250,
+        "paths": [
+          "bootstrap.SERVICE_WORKER_READY_DELAY_MS",
+          "appLoadBench.budgets.cold.coreTtiMs"
+        ],
+        "description": "These are intentionally distinct timing boundaries: service-worker registration delay after full readiness and cold core interactivity budget."
+      },
+      {
+        "numericValue": 25,
+        "paths": [
+          "appLoadBench.budgets.warmHttp.coreTtiMs",
+          "appLoadBench.budgets.warmHttp.fullLoadMs",
+          "appLoadBench.budgets.warmHttp.wasmInstantiateMs",
+          "appLoadBench.budgets.warmSw.coreTtiMs",
+          "appLoadBench.budgets.warmSw.fullLoadMs"
+        ],
+        "description": "Warm-load budget fields share the same target value, but each measures a separate browser/cache path boundary and may move independently."
+      },
+      {
+        "numericValue": 0,
+        "paths": [
+          "appLoadBench.budgets.warmHttp.transferBytes",
+          "appLoadBench.budgets.warmSw.transferBytes"
+        ],
+        "description": "Warm HTTP cache and warm service-worker paths both require no protected-path network transfer, but they are separate cache-mode gates."
+      },
+      {
+        "numericValue": 4096,
+        "paths": [
+          "runtimeDefaults.DEFAULT_INGEST_NAME_PTR",
+          "runtimeDefaults.DEFAULT_INGEST_NAME_MAX_BYTES"
+        ],
+        "description": "The ingest source-name pointer and source-name byte capacity are intentionally equal today but describe different parts of the scratch-memory layout."
+      }
+    ]
+  },
   "runtimeDefaults": {
     "DEFAULT_INGEST_NAME_PTR": {
       "value": 4096,
-      "description": "Default memory pointer for host-written ingest source names."
+      "description": "Default memory pointer for host-written ingest source names; this is a scratch-memory address, not the source-name capacity."
     },
     "DEFAULT_INGEST_NAME_MAX_BYTES": {
       "value": 4096,
-      "description": "Maximum encoded byte length for host-written ingest source names."
+      "description": "Maximum encoded byte length for host-written ingest source names; intentionally distinct from DEFAULT_INGEST_NAME_PTR even while both values are 4096."
     },
     "DEFAULT_READER_NAME_PTR": {
       "value": 8192,
-      "description": "Default memory pointer for main-thread reader index names."
+      "description": "Default memory pointer for main-thread reader index names; starts after the ingest-name scratch buffer."
     },
     "DEFAULT_READER_CACHE_SLOTS": {
       "value": 4,
