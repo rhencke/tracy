@@ -237,6 +237,68 @@
     i32.const 1
   )
 
+  (func $index_page_catalog_add_page (export "index_page_catalog_add_page")
+    (param $page i32)
+    (param $page_len i32)
+    (param $page_id i32)
+    (result i32)
+    (local $hints i32)
+    (local $added i32)
+    (local $status i32)
+
+    local.get $page
+    local.get $page_len
+    call $index_validate_page
+    local.tee $status
+    global.get $INDEX_STATUS_OK
+    i32.ne
+    if
+      local.get $status
+      return
+    end
+
+    local.get $page
+    i32.const 36
+    i32.add
+    i32.load
+    local.tee $hints
+    global.get $INDEX_DECODE_HINT_COMPACT_SLICES
+    i32.and
+    i32.eqz
+    if
+      global.get $INDEX_STATUS_OK
+      return
+    end
+
+    local.get $hints
+    i32.const 8
+    i32.shr_u
+    local.get $page_id
+    local.get $page
+    i32.const 12
+    i32.add
+    i32.load
+    local.get $page
+    i32.const 20
+    i32.add
+    i32.load
+    local.get $page
+    i32.const 28
+    i32.add
+    i32.load
+    call $index_page_catalog_add_slice_page
+    local.set $added
+
+    local.get $added
+    i32.eqz
+    if
+      global.get $INDEX_WRITER_STATUS_CATALOG_FULL
+      return
+    end
+
+    global.get $INDEX_STATUS_OK
+  )
+
   (func (export "index_covered_range_valid") (result i32)
     global.get $index_covered_range_valid
   )

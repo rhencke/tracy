@@ -616,21 +616,19 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
             return 9;
           },
           INDEX_STATUS_OK: 0,
-          index_page_catalog_add_slice_page(
-            trackId,
-            pageId,
-            bucketStart,
-            bucketEnd,
-            recordCount,
-          ) {
+          INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+          index_page_catalog_add_page(ptr, len, pageId) {
+            assert.equal(ptr, pagePtr);
+            assert.equal(len, OPFS_PAGE_SIZE);
+            const record = pageRecords[pageId];
             pageCatalog.push({
-              bucketEnd,
-              bucketStart,
+              bucketEnd: record.bucketEnd,
+              bucketStart: record.bucketStart,
               pageId,
-              recordCount,
-              trackId,
+              recordCount: record.recordCount,
+              trackId: record.trackId,
             });
-            return 1;
+            return 0;
           },
           index_page_catalog_reset() {
             pageCatalog.length = 0;
@@ -651,11 +649,6 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
           index_reader_init(indexId) {
             assert.equal(indexId, 70);
             readerInitIds.push(indexId);
-          },
-          index_validate_page(ptr, len) {
-            assert.equal(ptr, pagePtr);
-            assert.equal(len, OPFS_PAGE_SIZE);
-            return 0;
           },
           read_page(level, pageId) {
             assert.equal(level, 0);
@@ -818,21 +811,19 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
           return 5;
         },
         INDEX_STATUS_OK: 0,
-        index_page_catalog_add_slice_page(
-          trackId,
-          pageId,
-          bucketStart,
-          bucketEnd,
-          recordCount,
-        ) {
+        INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+        index_page_catalog_add_page(ptr, len, pageId) {
+          assert.equal(ptr, pagePtr);
+          assert.equal(len, OPFS_PAGE_SIZE);
+          const record = pageRecords[pageId];
           pageCatalog.push({
-            bucketEnd,
-            bucketStart,
+            bucketEnd: record.bucketEnd,
+            bucketStart: record.bucketStart,
             pageId,
-            recordCount,
-            trackId,
+            recordCount: record.recordCount,
+            trackId: record.trackId,
           });
-          return 1;
+          return 0;
         },
         index_page_catalog_reset() {
           pageCatalog.length = 0;
@@ -840,11 +831,6 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
         index_reader_init(indexId) {
           assert.equal(indexId, 70);
           readerInitIds.push(indexId);
-        },
-        index_validate_page(ptr, len) {
-          assert.equal(ptr, pagePtr);
-          assert.equal(len, OPFS_PAGE_SIZE);
-          return 0;
         },
         read_page(level, pageId) {
           assert.equal(level, 0);
@@ -924,32 +910,24 @@ async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
   };
   const index = {
     INDEX_STATUS_OK: 0,
-    index_page_catalog_add_slice_page(
-      trackId,
-      pageId,
-      bucketStart,
-      bucketEnd,
-      recordCount,
-    ) {
+    INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+    index_page_catalog_add_page(ptr, len, pageId) {
+      assert.equal(ptr, pagePtr);
+      assert.equal(len, OPFS_PAGE_SIZE);
       if (pageId === 1) {
-        return 0;
+        return 23;
       }
       addedPages.push({
-        bucketEnd,
-        bucketStart,
+        bucketEnd: pageId * 40 + 40,
+        bucketStart: pageId * 40,
         pageId,
-        recordCount,
-        trackId,
+        recordCount: 2,
+        trackId: 4,
       });
-      return 1;
+      return 0;
     },
     index_page_catalog_reset() {
       addedPages.length = 0;
-    },
-    index_validate_page(ptr, len) {
-      assert.equal(ptr, pagePtr);
-      assert.equal(len, OPFS_PAGE_SIZE);
-      return 0;
     },
     read_page(level, pageId) {
       assert.equal(level, 0);
@@ -998,18 +976,15 @@ async function checkMainThreadIndexReaderFailsOnCatalogOverflow() {
     instantiateWasmModuleForThread: async () => ({
       exports: {
         INDEX_STATUS_OK: 0,
-        index_page_catalog_add_slice_page(trackId, pageId) {
-          assert.equal(trackId, 4);
-          return pageId === 0 ? 1 : 0;
+        INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+        index_page_catalog_add_page(ptr, len, pageId) {
+          assert.equal(ptr, pagePtr);
+          assert.equal(len, OPFS_PAGE_SIZE);
+          return pageId === 0 ? 0 : 23;
         },
         index_page_catalog_reset() {},
         index_reader_init(indexId) {
           assert.equal(indexId, 70);
-        },
-        index_validate_page(ptr, len) {
-          assert.equal(ptr, pagePtr);
-          assert.equal(len, OPFS_PAGE_SIZE);
-          return 0;
         },
         read_page(level, pageId) {
           assert.equal(level, 0);

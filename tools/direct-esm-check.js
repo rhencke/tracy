@@ -128,6 +128,43 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
     /\b0x00010000\b/,
     "index reader catalog should not inline OPFS page size",
   );
+  assert.match(
+    source,
+    /index_page_catalog_add_page/,
+    "index reader catalog should use the Wasm-owned page catalog contract",
+  );
+  assert.match(
+    source,
+    /INDEX_WRITER_STATUS_CATALOG_FULL/,
+    "index reader catalog should consume Wasm catalog overflow status",
+  );
+  assert.doesNotMatch(
+    source,
+    /new DataView/,
+    "index reader catalog should not decode page headers in host JavaScript",
+  );
+  assert.doesNotMatch(
+    source,
+    /getUint32/,
+    "index reader catalog should not classify catalog pages in host JavaScript",
+  );
+  assert.doesNotMatch(
+    source,
+    /index_page_catalog_add_slice_page/,
+    "host JavaScript should not own slice page catalog insertion policy",
+  );
+
+  const watSource = readRepoFile("wat/index/catalog-and-tracks.wat.inc");
+  assert.match(
+    watSource,
+    /\(func \$index_page_catalog_add_page \(export "index_page_catalog_add_page"\)/,
+    "Wasm index code should own catalog page validation and classification",
+  );
+  assert.match(
+    watSource,
+    /call \$index_validate_page[\s\S]+call \$index_page_catalog_add_slice_page/,
+    "Wasm catalog contract should validate pages before adding slice pages",
+  );
 }
 
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
