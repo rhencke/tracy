@@ -67,6 +67,10 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "worker.js",
 ]);
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function parseArgs(argv) {
   const options = {
     browser: process.env.TRACY_APP_LOAD_BROWSER ?? "",
@@ -908,6 +912,9 @@ function runSelfTest() {
   const runtimeSpecJson = JSON.parse(
     fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
   );
+  const paletteSpecJson = JSON.parse(
+    fs.readFileSync(path.join(ROOT_DIR, "abi", "palette.json"), "utf8"),
+  );
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
   const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.mjs"), "utf8");
@@ -1049,6 +1056,22 @@ function runSelfTest() {
   assert.doesNotMatch(startupSpec, /TRACE_RENDERER_COLORS/);
   assert.match(traceRendererSpec, /TRACE_RENDERER_COLORS/);
   assert.doesNotMatch(traceRendererSpec, /APP_SHELL_COLORS/);
+  for (const group of Object.values(paletteSpecJson.palettes.default)) {
+    for (const [name, entry] of Object.entries(group)) {
+      const colorPattern = new RegExp(
+        `${name}: ${escapeRegExp(JSON.stringify(entry.value))}`,
+      );
+
+      if (entry.scope === "init") {
+        assert.match(startupSpec, colorPattern);
+      } else if (entry.scope === "full") {
+        assert.doesNotMatch(startupSpec, colorPattern);
+        assert.match(traceRendererSpec, colorPattern);
+      } else {
+        assert.fail(`${name} should declare palette scope init or full`);
+      }
+    }
+  }
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
   assert.match(bootstrap, /BOOTSTRAP_TIMING\.SERVICE_WORKER_READY_DELAY_MS/);
   assert.match(

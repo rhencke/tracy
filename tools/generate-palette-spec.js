@@ -6,6 +6,7 @@ const { dirname, join } = require("node:path");
 const root = dirname(__dirname);
 const sourcePath = join(root, "abi/palette.json");
 const spec = JSON.parse(readFileSync(sourcePath, "utf8"));
+const VALID_COLOR_SCOPES = new Set(["init", "full"]);
 
 function assertObject(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -105,6 +106,11 @@ function validatePaletteSpec() {
       for (const [colorName, entry] of Object.entries(group)) {
         if (typeof entry.value !== "string") {
           throw new Error(`${paletteName}.${groupName}.${colorName}.value must be a string`);
+        }
+        if (!VALID_COLOR_SCOPES.has(entry.scope)) {
+          throw new Error(
+            `${paletteName}.${groupName}.${colorName}.scope must be one of init, full`,
+          );
         }
         parseColor(entry.value);
       }

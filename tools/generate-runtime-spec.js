@@ -118,6 +118,21 @@ function renderStringConstants(groupName, entries) {
   return lines.join("\n");
 }
 
+function colorEntriesByScope(paletteName, scope) {
+  const selected = {};
+  const palette = paletteSpec.palettes?.[paletteName] ?? {};
+
+  for (const group of Object.values(palette)) {
+    for (const [name, entry] of Object.entries(group)) {
+      if (entry.scope === scope) {
+        selected[name] = entry;
+      }
+    }
+  }
+
+  return selected;
+}
+
 function renderLocalStringConstants(groupName, entries) {
   const lines = [`const ${groupName} = Object.freeze({`];
 
@@ -210,6 +225,8 @@ function renderObjectConstant(groupName, value) {
 }
 
 function renderStartupSpecModule() {
+  const initColors = colorEntriesByScope("default", "init");
+
   return [
     [
       "// Generated from abi/runtime.json and abi/palette.json by tools/generate-runtime-spec.js.",
@@ -218,7 +235,7 @@ function renderStartupSpecModule() {
     "",
     renderStringConstants("RUNTIME_URLS", spec.urls),
     "",
-    renderStringConstants("APP_SHELL_COLORS", paletteSpec.palettes.default.appShell),
+    renderStringConstants("APP_SHELL_COLORS", initColors),
     "",
     renderNumberConstants("BOOTSTRAP_WASM_MEMORY", spec.wasmMemory),
     "",
@@ -236,6 +253,8 @@ function renderStartupSpecModule() {
 }
 
 function renderTraceRendererSpecModule() {
+  const fullColors = colorEntriesByScope("default", "full");
+
   return [
     [
       "// Generated from abi/runtime.json, abi/layout.json, and abi/palette.json by tools/generate-runtime-spec.js.",
@@ -246,7 +265,7 @@ function renderTraceRendererSpecModule() {
     "",
     renderTraceRendererLoaderBridge({ local: false }),
     "",
-    renderStringConstants("TRACE_RENDERER_COLORS", paletteSpec.palettes.default.traceRenderer),
+    renderStringConstants("TRACE_RENDERER_COLORS", fullColors),
     "",
   ].join("\n");
 }
@@ -256,7 +275,7 @@ function assertTraceRendererInlinePalette() {
   const renderer = readFileSync(rendererPath, "utf8");
   const expected = renderLocalStringConstants(
     "TRACE_RENDERER_COLORS",
-    paletteSpec.palettes.default.traceRenderer,
+    colorEntriesByScope("default", "full"),
   );
 
   if (!renderer.includes(expected)) {

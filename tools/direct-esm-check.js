@@ -25,6 +25,10 @@ function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function assertNoIsolationRequirement(relativePath) {
   const source = readRepoFile(relativePath);
 
@@ -309,6 +313,49 @@ function assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, t
   }
 }
 
+function assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource) {
+  const initColors = [];
+  const fullColors = [];
+
+  for (const palette of Object.values(paletteSpec.palettes ?? {})) {
+    for (const group of Object.values(palette)) {
+      for (const [name, entry] of Object.entries(group)) {
+        if (entry.scope === "init") {
+          initColors.push([name, entry.value]);
+        } else if (entry.scope === "full") {
+          fullColors.push([name, entry.value]);
+        } else {
+          assert.fail(`${name} should declare palette scope init or full`);
+        }
+      }
+    }
+  }
+
+  assert(initColors.length > 0, "palette should define init-scoped colors");
+  assert(fullColors.length > 0, "palette should define full-scoped colors");
+
+  for (const [name, value] of initColors) {
+    assert.match(
+      startupSpecSource,
+      new RegExp(`${name}: ${escapeRegExp(JSON.stringify(value))}`),
+      `startup spec should export init-scoped color ${name}`,
+    );
+  }
+
+  for (const [name, value] of fullColors) {
+    assert.doesNotMatch(
+      startupSpecSource,
+      new RegExp(`${name}: ${escapeRegExp(JSON.stringify(value))}`),
+      `startup spec should not export full-scoped color ${name}`,
+    );
+    assert.match(
+      traceRendererSpecSource,
+      new RegExp(`${name}: ${escapeRegExp(JSON.stringify(value))}`),
+      `trace renderer spec should export full-scoped color ${name}`,
+    );
+  }
+}
+
 function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource) {
   assert.match(
     startupSpecSource,
@@ -397,6 +444,7 @@ function main() {
   const traceRendererSpecSource = readRepoFile("host/trace-renderer-spec.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
+  const paletteSpec = JSON.parse(readRepoFile("abi/palette.json"));
   const readmeSource = readRepoFile("README.md");
   const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
   const bootstrapLineCheckSource = readRepoFile("tools/check-bootstrap-lines.sh");
@@ -407,6 +455,7 @@ function main() {
   assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
   assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
+  assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
 
   assert.match(
     buildScript,
