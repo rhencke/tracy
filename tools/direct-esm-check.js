@@ -181,14 +181,17 @@ function main() {
   );
   assert.match(bootstrapSource, /afterProtectedStartupBoundary\(\)\.then\(\(\) =>[\s\S]+import/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(resolve/);
-  assert.match(
+  assert.doesNotMatch(
     bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
-  assert.match(bootstrapSource, /import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(
     bootstrapSource,
-    /const instantiateWasmModuleForThread = async \(\.\.\.args\) =>[\s\S]+\(await wasmModulesPromise\)\.instantiateWasmModuleForThread\(\.\.\.args\)/,
+    /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
+  );
+  assert.match(
+    bootstrapSource,
+    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(
     bootstrapSource,

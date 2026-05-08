@@ -984,11 +984,14 @@ function runSelfTest() {
   assert.match(bootstrap, /const afterProtectedStartupBoundary = \(\) =>[\s\S]+new MessageChannel\(\)/);
   assert.match(bootstrap, /afterProtectedStartupBoundary\(\)\.then\(\(\) =>[\s\S]+import/);
   assert.doesNotMatch(bootstrap, /setTimeout\(resolve/);
-  assert.match(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
-  assert.match(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);
+  assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(
     bootstrap,
-    /const instantiateWasmModuleForThread = async \(\.\.\.args\) =>[\s\S]+\(await wasmModulesPromise\)\.instantiateWasmModuleForThread\(\.\.\.args\)/,
+    /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
+  );
+  assert.match(
+    bootstrap,
+    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(
     bootstrap,
