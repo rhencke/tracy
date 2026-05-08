@@ -15,6 +15,7 @@ const RUNTIME_SPEC = JSON.parse(
   fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
 );
 const DEFAULT_TIMEOUT_MS = 15000;
+const CORE_READY_REQUEST_EPSILON_MS = 0.5;
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
   latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -515,6 +516,51 @@ function coreTransferBytesForRequests(requestIds, cachedRequestIds, loadingBytes
     .reduce((total, requestId) => total + (loadingBytes.get(requestId) ?? 0), 0);
 }
 
+function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackRequestIds) {
+  if (!Number.isFinite(wallTimeMs)) {
+    return new Set(fallbackRequestIds);
+  }
+
+  const cutoffMs = wallTimeMs + CORE_READY_REQUEST_EPSILON_MS;
+  const requestIds = new Set();
+
+  for (const [requestId, startedAtMs] of requestStartWallMs) {
+    if (Number.isFinite(startedAtMs) && startedAtMs <= cutoffMs) {
+      requestIds.add(requestId);
+    }
+  }
+
+  for (const requestId of fallbackRequestIds) {
+    if (!requestStartWallMs.has(requestId)) {
+      requestIds.add(requestId);
+    }
+  }
+
+  return requestIds;
+}
+
+async function performanceMarkWallMs(cdp, page, markName) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const marks = performance.getEntriesByName(${JSON.stringify(markName)}, "mark");
+      const mark = marks[marks.length - 1];
+      if (!mark) {
+        return null;
+      }
+      return performance.timeOrigin + mark.startTime;
+    })()`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  const wallTimeMs = result.result?.value;
+
+  if (!Number.isFinite(wallTimeMs)) {
+    throw new Error(`missing performance mark ${markName}`);
+  }
+
+  return wallTimeMs;
+}
+
 async function createPage(cdp) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send("Target.attachToTarget", {
@@ -532,6 +578,7 @@ async function createPage(cdp) {
 
 async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
+  const requestStartWallMs = new Map();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
   let coreRequestIds = null;
@@ -541,6 +588,9 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
+    if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
+      requestStartWallMs.set(event.requestId, event.wallTime * 1000);
+    }
   });
   const offCache = cdp.on("Network.requestServedFromCache", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
@@ -598,13 +648,14 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       const detail = status.detail ? ` (${status.detail})` : "";
       throw new Error(`page reported app-load failure: ${status.error}${detail}`);
     }
-    if (status.coreReady === true) {
-      coreRequestIds = new Set(requestIds);
-      return true;
-    }
-
-    return false;
+    return status.coreReady === true;
   });
+  const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
+  coreRequestIds = requestIdsStartedAtOrBefore(
+    requestStartWallMs,
+    coreReadyWallMs,
+    requestIds,
+  );
   await waitUntil(async () => {
     const result = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
@@ -762,6 +813,29 @@ function runSelfTest() {
       loadingTransferBytes,
     ),
     46,
+  );
+  assert.deepEqual(
+    requestIdsStartedAtOrBefore(
+      new Map([
+        ["bootstrap", 1000],
+        ["renderer", 1002],
+        ["trace-spec", 999.75],
+      ]),
+      1000,
+      new Set(["bootstrap", "renderer", "trace-spec", "unknown"]),
+    ),
+    new Set(["bootstrap", "trace-spec", "unknown"]),
+  );
+  assert.deepEqual(
+    requestIdsStartedAtOrBefore(
+      new Map([
+        ["bootstrap", 1000],
+        ["renderer", 1002],
+      ]),
+      Number.NaN,
+      new Set(["bootstrap", "renderer"]),
+    ),
+    new Set(["bootstrap", "renderer"]),
   );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /fs\.promises\.stat/);
@@ -933,7 +1007,11 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /coreRequestIds = new Set\(requestIds\)/,
+    /performanceMarkWallMs\(cdp, page, "tracy\.core\.ready"\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds/,
   );
   assert.match(
     navigateAndMeasure.toString(),
