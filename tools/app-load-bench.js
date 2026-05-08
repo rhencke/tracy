@@ -41,6 +41,7 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "bootstrap.js",
   "build-info.js",
   "host/abi.mjs",
+  "host/progressive-trace-renderer-loader.mjs",
   "host/runtime-spec.mjs",
   "host/wasm-modules.mjs",
   "index.html",
@@ -753,6 +754,10 @@ function runSelfTest() {
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
   const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
+  const rendererLoader = fs.readFileSync(
+    path.join(ROOT_DIR, "host", "progressive-trace-renderer-loader.mjs"),
+    "utf8",
+  );
   const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
   const runtimeSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
@@ -798,6 +803,8 @@ function runSelfTest() {
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);
   assert.match(runtime, /from "\.\/runtime-spec\.mjs"/);
   assert.match(runtime, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(runtimeSpec, /progressive-trace-renderer-loader\.mjs/);
+  assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpec, /Generated from abi\/runtime\.json/);
   assert.match(bootstrap, /from "\.\/host\/runtime-spec\.mjs"/);
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);

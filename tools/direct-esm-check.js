@@ -75,6 +75,7 @@ function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
   const indexHtml = readRepoFile("index.html");
+  const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
   const runtimeSpecSource = readRepoFile("host/runtime-spec.mjs");
   const workerSource = readRepoFile("worker.js");
@@ -89,6 +90,8 @@ function main() {
   assert.match(makefile, /dist\/worker\.js: worker\.js[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
+  assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer-loader\.mjs"/);
+  assert.match(rendererLoaderSource, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpecSource, /WORKER_URL: "worker\.js"/);
   assert.match(runtimeSource, /RUNTIME_URLS\.WORKER_URL/);
   assert.match(
@@ -121,6 +124,7 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
+    "host/progressive-trace-renderer-loader.mjs",
     "host/runtime-spec.mjs",
     "index.html",
     "package.json",
@@ -131,6 +135,7 @@ function main() {
   for (const relativePath of [
     "bootstrap.js",
     "host/ingest-worker-runtime.mjs",
+    "host/progressive-trace-renderer-loader.mjs",
     "host/runtime.mjs",
     "index.html",
     "manifest.webmanifest",
@@ -143,6 +148,7 @@ function main() {
     "bootstrap.js",
     "worker.js",
     "host/runtime.mjs",
+    "host/progressive-trace-renderer-loader.mjs",
     "host/runtime-spec.mjs",
     "host/ingest-worker-runtime.mjs",
   ]) {

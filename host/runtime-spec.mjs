@@ -4,7 +4,7 @@
 export const RUNTIME_URLS = Object.freeze({
   WORKER_URL: "worker.js",
   SERVICE_WORKER_URL: "service-worker.js",
-  PROGRESSIVE_TRACE_RENDERER_URL: "./progressive-trace-renderer.mjs",
+  PROGRESSIVE_TRACE_RENDERER_URL: "./progressive-trace-renderer-loader.mjs",
 });
 
 export const BOOTSTRAP_WASM_MEMORY = Object.freeze({

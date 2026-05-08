@@ -9,8 +9,8 @@
       "description": "Service worker entrypoint registered after the app reaches full readiness."
     },
     "PROGRESSIVE_TRACE_RENDERER_URL": {
-      "value": "./progressive-trace-renderer.mjs",
-      "description": "Deferred progressive trace renderer module URL, relative to host/runtime.mjs."
+      "value": "./progressive-trace-renderer-loader.mjs",
+      "description": "Lightweight deferred progressive trace renderer loader module URL, relative to host/runtime.mjs."
     }
   },
   "wasmMemory": {
