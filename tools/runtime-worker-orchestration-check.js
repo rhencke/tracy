@@ -2105,6 +2105,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   assert.equal(importCalls, 1, "renderer implementation module should be imported once");
   assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
+  coveredRange = { end: 0, start: 0, type: "covered_range", valid: false };
   readerCoveredRange = { end: 120, start: 100, valid: true };
   readerState = "ready";
   frames[1](2);
