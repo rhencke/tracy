@@ -41,8 +41,10 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "bootstrap.js",
   "build-info.js",
   "host/abi.mjs",
+  "host/palette.mjs",
   "host/progressive-trace-renderer-loader.mjs",
   "host/runtime-spec.mjs",
+  "host/startup-palette.mjs",
   "host/wasm-modules.mjs",
   "index.html",
   "manifest.webmanifest",
@@ -759,6 +761,10 @@ function runSelfTest() {
     "utf8",
   );
   const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
+  const startupPalette = fs.readFileSync(
+    path.join(ROOT_DIR, "host", "startup-palette.mjs"),
+    "utf8",
+  );
   const runtimeSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
@@ -807,6 +813,8 @@ function runSelfTest() {
   assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpec, /Generated from abi\/runtime\.json/);
   assert.match(bootstrap, /from "\.\/host\/runtime-spec\.mjs"/);
+  assert.match(bootstrap, /from "\.\/host\/startup-palette\.mjs"/);
+  assert.match(startupPalette, /Generated from abi\/palette\.json/);
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
   assert.match(bootstrap, /BOOTSTRAP_TIMING\.SERVICE_WORKER_READY_DELAY_MS/);
   assert.match(

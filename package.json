@@ -13,6 +13,7 @@
     "test": "make test",
     "test:layout": "node tools/generate-layout.js --check",
     "test:host-abi": "node tools/generate-host-abi.js --check",
+    "test:palette-spec": "node tools/generate-palette-spec.js --check",
     "test:parser-state-abi": "node tools/generate-parser-state-abi.js --check",
     "test:runtime-spec": "node tools/generate-runtime-spec.js --check",
     "test:wasm-modules-abi": "node tools/extract-wasm-modules.js --check",

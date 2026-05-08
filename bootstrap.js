@@ -4,13 +4,14 @@ import {
   PERFORMANCE_MARKS,
   RUNTIME_URLS,
 } from "./host/runtime-spec.mjs";
+import { APP_SHELL_COLORS } from "./host/startup-palette.mjs";
 
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
 const canvas = globalThis.document?.getElementById?.("tracy");
 const context = canvas?.getContext?.("2d");
 if (context !== undefined) {
-  context.fillStyle = "#fbf8f4";
+  context.fillStyle = APP_SHELL_COLORS.APP_SHELL_BACKGROUND;
   context.fillRect(0, 0, canvas.width, canvas.height);
 }
 

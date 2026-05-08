@@ -71,6 +71,29 @@ function assertDistCopy(relativePath) {
   );
 }
 
+function assertNoInlinePaletteColor(relativePath) {
+  const source = readRepoFile(relativePath);
+  const forbiddenColors = [
+    "#1f1b16",
+    "#3f6ea8",
+    "#fbf8f4",
+    "rgba(40, 45, 52, 0.35)",
+    "rgba(76, 85, 99, 0.38)",
+    "rgba(92, 109, 130, 0.58)",
+    "rgba(126, 134, 146, 0.18)",
+    "rgba(146, 64, 14, 0.42)",
+    "rgba(180, 83, 9, 0.16)",
+    "rgba(251, 248, 244, 0.92)",
+  ];
+
+  for (const color of forbiddenColors) {
+    assert(
+      !source.includes(color),
+      `${relativePath} should read ${color} from abi/palette.json instead of inlining it`,
+    );
+  }
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -78,6 +101,8 @@ function main() {
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
   const runtimeSpecSource = readRepoFile("host/runtime-spec.mjs");
+  const paletteSpecSource = readRepoFile("host/palette.mjs");
+  const startupPaletteSource = readRepoFile("host/startup-palette.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
 
@@ -91,6 +116,9 @@ function main() {
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
   assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer-loader\.mjs"/);
+  assert.match(paletteSpecSource, /Generated from abi\/palette\.json/);
+  assert.match(startupPaletteSource, /Generated from abi\/palette\.json/);
+  assert.match(startupPaletteSource, /APP_SHELL_COLORS/);
   assert.match(rendererLoaderSource, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpecSource, /WORKER_URL: "worker\.js"/);
   assert.match(runtimeSource, /RUNTIME_URLS\.WORKER_URL/);
@@ -107,9 +135,14 @@ function main() {
     packageJson.scripts["test:direct-esm"],
     "node tools/direct-esm-check.js",
   );
+  assert.equal(
+    packageJson.scripts["test:palette-spec"],
+    "node tools/generate-palette-spec.js --check",
+  );
   assert.equal(packageJson.scripts.test, "make test");
   assert.equal(packageJson.devDependencies?.["es" + "build"], undefined);
   assert.match(makefile, /node tools\/direct-esm-check\.js/);
+  assert.match(makefile, /node tools\/generate-palette-spec\.js --check/);
 
   assert(fs.existsSync(path.join(ROOT_DIR, "tools/direct-esm-check.js")));
 
@@ -124,8 +157,10 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
+    "host/palette.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime-spec.mjs",
+    "host/startup-palette.mjs",
     "index.html",
     "package.json",
   ]) {
@@ -148,8 +183,10 @@ function main() {
     "bootstrap.js",
     "worker.js",
     "host/runtime.mjs",
+    "host/palette.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime-spec.mjs",
+    "host/startup-palette.mjs",
     "host/ingest-worker-runtime.mjs",
   ]) {
     if (fs.existsSync(path.join(ROOT_DIR, "dist", relativePath))) {
@@ -157,6 +194,11 @@ function main() {
       assertNoIsolationRequirement(path.join("dist", relativePath));
     }
   }
+
+  assertNoInlinePaletteColor("bootstrap.js");
+  assertNoInlinePaletteColor("host/canvas.mjs");
+  assertNoInlinePaletteColor("host/runtime.mjs");
+  assertNoInlinePaletteColor("host/progressive-trace-renderer.mjs");
 }
 
 try {

@@ -1,3 +1,5 @@
+import { TRACE_RENDERER_COLORS } from "./palette.mjs";
+
 const DEFAULT_TRACE_QUERY_OUT_PTR = 12288;
 const DEFAULT_TRACE_QUERY_WINDOW = 1000;
 const DEFAULT_TRACE_QUERY_ROW_CAP = 1024;
@@ -43,7 +45,9 @@ function eventCanvasX(canvas, event, fallbackWidth) {
 function colorForSlice(color) {
   const rgb = Number(color) >>> 0;
 
-  return rgb === 0 ? "#3f6ea8" : `#${(rgb & 0xffffff).toString(16).padStart(6, "0")}`;
+  return rgb === 0
+    ? TRACE_RENDERER_COLORS.DEFAULT_SLICE_FILL
+    : `#${(rgb & 0xffffff).toString(16).padStart(6, "0")}`;
 }
 
 function readerQueryResultBytes(reader) {
@@ -174,7 +178,7 @@ function drawPartialHatch(context, x, y, width, height, spacing) {
     context.rect(x, y, width, height);
     context.clip();
   }
-  context.strokeStyle = "rgba(40, 45, 52, 0.35)";
+  context.strokeStyle = TRACE_RENDERER_COLORS.PARTIAL_HATCH_STROKE;
   context.lineWidth = 1;
 
   for (let sx = x - height; sx < x + width + height; sx += spacing) {
@@ -196,14 +200,16 @@ function drawUnknownRangeAffordance(context, width, bandHeight, options) {
   const spacing = options.unknownStripeSpacing ?? 8;
 
   context.save?.();
-  context.fillStyle = options.unknownFillStyle ?? "rgba(126, 134, 146, 0.18)";
+  context.fillStyle =
+    options.unknownFillStyle ?? TRACE_RENDERER_COLORS.UNKNOWN_RANGE_FILL;
   context.fillRect?.(x, 0, affordanceWidth, bandHeight);
   context.beginPath?.();
   if (typeof context.rect === "function" && typeof context.clip === "function") {
     context.rect(x, 0, affordanceWidth, bandHeight);
     context.clip();
   }
-  context.strokeStyle = options.unknownStripeStyle ?? "rgba(76, 85, 99, 0.38)";
+  context.strokeStyle =
+    options.unknownStripeStyle ?? TRACE_RENDERER_COLORS.UNKNOWN_RANGE_STRIPE;
   context.lineWidth = 1;
 
   for (let sx = x - bandHeight; sx < width + bandHeight; sx += spacing) {
@@ -227,9 +233,10 @@ function drawIncompleteQueryAffordances(context, width, bandHeight, viewport, ra
 
   context.save?.();
   context.fillStyle =
-    options.incompleteQueryFillStyle ?? "rgba(180, 83, 9, 0.16)";
+    options.incompleteQueryFillStyle ?? TRACE_RENDERER_COLORS.INCOMPLETE_QUERY_FILL;
   context.strokeStyle =
-    options.incompleteQueryStripeStyle ?? "rgba(146, 64, 14, 0.42)";
+    options.incompleteQueryStripeStyle ??
+    TRACE_RENDERER_COLORS.INCOMPLETE_QUERY_STRIPE;
   context.lineWidth = 1;
 
   for (const range of ranges) {
@@ -290,7 +297,8 @@ function drawTraceRows(
 
   context.save?.();
   context.clearRect?.(0, 0, width, bandHeight);
-  context.fillStyle = options.backgroundFillStyle ?? "rgba(251, 248, 244, 0.92)";
+  context.fillStyle =
+    options.backgroundFillStyle ?? TRACE_RENDERER_COLORS.TRACE_BACKGROUND_FILL;
   context.fillRect?.(0, 0, width, bandHeight);
 
   for (const row of rows) {
@@ -302,7 +310,7 @@ function drawTraceRows(
     const showPartial = row.partial && ingestActive;
 
     context.fillStyle = showPartial
-      ? (options.partialFillStyle ?? "rgba(92, 109, 130, 0.58)")
+      ? (options.partialFillStyle ?? TRACE_RENDERER_COLORS.PARTIAL_SLICE_FILL)
       : colorForSlice(row.color);
     context.fillRect?.(x, y, sliceWidth, laneHeight);
 

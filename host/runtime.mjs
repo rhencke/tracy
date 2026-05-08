@@ -5,6 +5,7 @@ import {
   RUNTIME_DEFAULTS,
   RUNTIME_URLS,
 } from "./runtime-spec.mjs";
+import { APP_SHELL_COLORS } from "./startup-palette.mjs";
 
 const MAIN_THREAD = "main";
 const INGEST_WORKER_MESSAGE = Object.freeze({
@@ -541,10 +542,10 @@ function showError(message) {
   error.style.display = "grid";
   error.style.placeItems = "center";
   error.style.padding = "2rem";
-  error.style.color = "#1f1b16";
+  error.style.color = APP_SHELL_COLORS.ERROR_TEXT;
   error.style.font = "1rem/1.4 system-ui, sans-serif";
   error.style.textAlign = "center";
-  error.style.background = "#fbf8f4";
+  error.style.background = APP_SHELL_COLORS.APP_SHELL_BACKGROUND;
   error.textContent = message;
 
   if (canvas !== null) {
