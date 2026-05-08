@@ -24,6 +24,7 @@
   (import "index" "INDEX_WRITER_STATUS_NOT_INITIALIZED" (global $INDEX_WRITER_STATUS_NOT_INITIALIZED i32))
   (import "index" "INDEX_WRITER_STATUS_HOST_WRITE_FAILED" (global $INDEX_WRITER_STATUS_HOST_WRITE_FAILED i32))
   (import "index" "INDEX_WRITER_STATUS_HOST_FLUSH_FAILED" (global $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED i32))
+  (import "index" "INDEX_WRITER_STATUS_CATALOG_FULL" (global $INDEX_WRITER_STATUS_CATALOG_FULL i32))
   (import "index" "INDEX_READER_STATUS_OK" (global $INDEX_READER_STATUS_OK i32))
   (import "index" "INDEX_READER_STATUS_NOT_INITIALIZED" (global $INDEX_READER_STATUS_NOT_INITIALIZED i32))
   (import "index" "INDEX_READER_STATUS_MISSING_PAGE" (global $INDEX_READER_STATUS_MISSING_PAGE i32))
@@ -425,6 +426,41 @@
       i32.sub
       memory.grow
       drop
+    end
+  )
+
+  (func $fill_slice_catalog_to_capacity
+    (local $i i32)
+
+    block $done
+      loop $loop
+        local.get $i
+        global.get $INDEX_PAGE_CATALOG_CAPACITY
+        i32.ge_u
+        br_if $done
+
+        i32.const 0
+        local.get $i
+        local.get $i
+        i32.const 10
+        i32.mul
+        local.get $i
+        i32.const 10
+        i32.mul
+        i32.const 5
+        i32.add
+        i32.const 1
+        call $index_page_catalog_add_slice_page
+        i32.const 1
+        i32.const 456
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
     end
   )
 
@@ -1407,6 +1443,56 @@
     i32.and
     global.get $INDEX_DECODE_HINT_COMPACT_SLICES
     i32.const 455
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_writer_reports_catalog_full_on_slice_commit")
+    call $grow_to_index_cache
+
+    i32.const 21
+    global.get $ALT_PAGE
+    i32.const 25
+    call $index_writer_init
+
+    call $fill_slice_catalog_to_capacity
+
+    i32.const 88
+    i32.const 301
+    f64.const 10
+    f64.const 5
+    i32.const 1
+    i32.const 1
+    i32.const 0
+    call $write_event
+    global.get $EVENT
+    call $index_add_event
+    global.get $INDEX_INGEST_STATUS_OK
+    i32.const 457
+    call $assert_eq_i32
+
+    call $index_writer_flush
+    global.get $INDEX_WRITER_STATUS_CATALOG_FULL
+    i32.const 458
+    call $assert_eq_i32
+
+    call $index_writer_committed_pages
+    i32.const 0
+    i32.const 459
+    call $assert_eq_i32
+
+    call $index_writer_committed_events
+    i32.const 0
+    i32.const 460
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_valid
+    i32.const 1
+    i32.const 461
+    call $assert_eq_i32
+
+    call $index_writer_covered_range_end
+    i32.const 40955
+    i32.const 462
     call $assert_eq_i32
   )
 
