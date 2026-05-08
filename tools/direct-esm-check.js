@@ -157,8 +157,8 @@ function main() {
   assert.doesNotMatch(bootstrapSource, /runtime-spec\.mjs/);
   assert.match(runtimeSource, /from "\.\/startup-spec\.mjs"/);
   assert.doesNotMatch(runtimeSource, /from "\.\/runtime-spec\.mjs"/);
-  assert.match(runtimeSource, /preloadTraceRendererSpecModule/);
-  assert.match(runtimeSource, /deferredTraceRendererSpecPromise/);
+  assert.doesNotMatch(runtimeSource, /preloadTraceRendererSpecModule/);
+  assert.doesNotMatch(runtimeSource, /deferredTraceRendererSpecPromise/);
   assert.match(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);
   assert.doesNotMatch(rendererSource, /from "\.\/runtime-spec\.mjs"/);
   assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
