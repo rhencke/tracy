@@ -123,6 +123,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
   const instantiate =
     options.instantiateWasmModuleForThread ?? defaultInstantiateIndexWasm;
   const readerState = {
+    catalogFull: false,
     catalogPageCount: null,
     error: null,
     exports: null,
@@ -135,11 +136,23 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
   function cloneReaderStatus() {
     return {
+      catalogFull: readerState.catalogFull,
       error: readerState.error,
       indexId: readerState.indexId,
       indexName: readerState.indexName,
       state: readerState.state,
     };
+  }
+
+  function failSliceCatalogOverflow(indexId, pageCount) {
+    const message =
+      `main-thread slice catalog full while rebuilding index ${indexId}` +
+      ` at page ${pageCount}`;
+
+    readerState.catalogFull = true;
+    readerState.error = message;
+    readerState.state = "error";
+    throw new Error(message);
   }
 
   async function loadIndexExports() {
@@ -206,9 +219,13 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
           },
         );
       readerState.catalogPageCount = probed.pageCount;
+      if (probed.catalogFull === true) {
+        failSliceCatalogOverflow(indexId, probed.pageCount);
+      }
       if (probed.rebuilt) {
         index.index_reader_init(indexId);
       }
+      readerState.catalogFull = false;
       return probed.rebuilt;
     }
     if (!force && previousPageCount === pageCount) {
@@ -235,10 +252,14 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         },
       );
     readerState.catalogPageCount = rebuilt.pageCount;
+    if (rebuilt.catalogFull === true) {
+      failSliceCatalogOverflow(indexId, rebuilt.pageCount);
+    }
     if (rebuilt.rebuilt) {
       index.index_reader_init(indexId);
     }
 
+    readerState.catalogFull = false;
     return rebuilt.rebuilt;
   }
 
@@ -258,6 +279,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     }
 
     readerState.error = null;
+    readerState.catalogFull = false;
     readerState.indexName = indexName;
     readerState.state = "opening";
     readerState.openPromise = (async () => {

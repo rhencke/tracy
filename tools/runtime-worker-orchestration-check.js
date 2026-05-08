@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
@@ -673,6 +674,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   });
 
   assert.deepEqual(reader.status(), {
+    catalogFull: false,
     error: null,
     indexId: null,
     indexName: null,
@@ -687,6 +689,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
     { id: "index", hasMemory: true, baseUrl: "wasm/" },
   ]);
   assert.deepEqual(reader.status(), {
+    catalogFull: false,
     error: null,
     indexId: 70,
     indexName: "indexes/trace.idx",
@@ -956,6 +959,131 @@ async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
       trackId: 4,
     },
   ]);
+}
+
+async function checkMainThreadIndexReaderFailsOnCatalogOverflow() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const pagePtr = 32768;
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN]() {
+      return 70;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
+      assert.equal(indexId, 70);
+      return BigInt(2 * OPFS_PAGE_SIZE);
+    },
+  };
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        INDEX_STATUS_OK: 0,
+        index_page_catalog_add_slice_page(trackId, pageId) {
+          assert.equal(trackId, 4);
+          return pageId === 0 ? 1 : 0;
+        },
+        index_page_catalog_reset() {},
+        index_reader_init(indexId) {
+          assert.equal(indexId, 70);
+        },
+        index_validate_page(ptr, len) {
+          assert.equal(ptr, pagePtr);
+          assert.equal(len, OPFS_PAGE_SIZE);
+          return 0;
+        },
+        read_page(level, pageId) {
+          assert.equal(level, 0);
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+            pageId * 40,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+            pageId * 40 + 40,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+            2,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+            INDEX_DECODE_HINT_COMPACT_SLICES |
+              (4 << INDEX_DECODE_HINT_TRACK_ID_SHIFT),
+            true,
+          );
+          return pagePtr;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    reader.open("indexes/trace.idx"),
+    /main-thread slice catalog full/,
+  );
+  assert.deepEqual(reader.status(), {
+    catalogFull: true,
+    error: "main-thread slice catalog full while rebuilding index 70 at page 2",
+    indexId: null,
+    indexName: "indexes/trace.idx",
+    state: "error",
+  });
+}
+
+async function checkWorkerStatusReportsReaderCatalogOverflow() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const workerStatus = [];
+  const indexReader = {
+    open() {
+      return Promise.reject(new Error("main-thread slice catalog full"));
+    },
+  };
+  const controller = runtime.createIngestWorkerController({
+    Worker: FakeWorker,
+    indexReader,
+    onWorkerStatus(status, message) {
+      workerStatus.push({ message, status });
+    },
+  });
+
+  controller.start({ indexName: "indexes/trace.idx" });
+  const worker = FakeWorker.instances.at(-1);
+  const ingestId = worker.posted.at(-1).ingestId;
+
+  worker.emit("message", {
+    end: 140,
+    ingestId,
+    start: 100,
+    type: "covered_range",
+    valid: true,
+  });
+  await Promise.resolve();
+
+  assert.equal(controller.status().state, "error");
+  assert.equal(controller.status().error, "main-thread slice catalog full");
+  assert.equal(workerStatus.at(-1).status.state, "error");
+}
+
+function checkWatWriterPropagatesCatalogOverflow() {
+  const constants = fs.readFileSync(
+    path.resolve(__dirname, "../wat/index/constants-and-helpers.wat.inc"),
+    "utf8",
+  );
+  const writer = fs.readFileSync(
+    path.resolve(__dirname, "../wat/index/page-layout-and-writer-pages.wat.inc"),
+    "utf8",
+  );
+
+  assert.match(constants, /INDEX_WRITER_STATUS_CATALOG_FULL/);
+  assert.match(
+    writer,
+    /call \$index_page_catalog_add_slice_page\s+local\.set \$status\s+local\.get \$status\s+i32\.eqz\s+if\s+global\.get \$INDEX_WRITER_STATUS_CATALOG_FULL\s+return\s+end/,
+  );
 }
 
 async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
@@ -1620,6 +1748,9 @@ async function main() {
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkMainThreadSliceCatalogReportsCapacityOverflow();
+  await checkMainThreadIndexReaderFailsOnCatalogOverflow();
+  await checkWorkerStatusReportsReaderCatalogOverflow();
+  checkWatWriterPropagatesCatalogOverflow();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererTilesFullVisibleViewport();

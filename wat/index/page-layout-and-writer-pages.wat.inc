@@ -713,7 +713,13 @@
       global.get $index_writer_bucket_end
       global.get $index_writer_count
       call $index_page_catalog_add_slice_page
-      drop
+      local.set $status
+      local.get $status
+      i32.eqz
+      if
+        global.get $INDEX_WRITER_STATUS_CATALOG_FULL
+        return
+      end
     else
       global.get $index_writer_bucket_start
       global.get $index_writer_bucket_end
