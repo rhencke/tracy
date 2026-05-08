@@ -702,11 +702,12 @@ async function checkInteractiveIngestGate() {
   await runFrame(frames, canvasHarness, nextFrameAt);
   nextFrameAt += 16;
 
+  const queryableCoveredRange = controller.indexReader.coveredRange();
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_covered_partial_unknown",
     [
-      controller.status().coveredRange.end,
+      queryableCoveredRange.end,
       rendererInstance.status().viewport.end,
       flag(rendererInstance.status().unknownRange.pending),
       flag(
@@ -741,8 +742,8 @@ async function checkInteractiveIngestGate() {
       flag(rendererInstance.status().userInteracted),
       zoomedViewport.start,
       zoomedViewport.end,
-      controller.status().coveredRange.start,
-      controller.status().coveredRange.end,
+      queryableCoveredRange.start,
+      queryableCoveredRange.end,
     ],
   );
 
@@ -765,7 +766,7 @@ async function checkInteractiveIngestGate() {
     "interactive_ingest_expect_pan_clamped",
     [
       rendererInstance.status().viewport.end,
-      controller.status().coveredRange.end,
+      queryableCoveredRange.end,
       rendererInstance.status().viewport.end,
     ],
   );

@@ -410,10 +410,14 @@ export async function runWorkerIngest(data, options = {}) {
 
   let extractedEvents = 0;
   while (true) {
+    const parserByteBudget =
+      byteBudget > 0
+        ? Math.min(byteBudget, DEFAULT_BYTE_BUDGET)
+        : byteBudget;
     const status = parser.parser_parse_with_budget(
       statePtr,
       chunkBytes,
-      byteBudget,
+      parserByteBudget,
     );
 
     extractedEvents += drainExtractedEvents({ index, parser });

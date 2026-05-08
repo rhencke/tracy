@@ -160,6 +160,7 @@
   (data (i32.const 2820) "[{\22ph\22:\22i\22,\22name\22:\22baz\22,\22pid\22:\22proc\22,\22tid\22:\22thread\22}]")
   (data (i32.const 2880) "[{\22unknown\22:{\22ph\22:\22B\22,\22nested\22:[{\22name\22:\22bad\22}]},\22ph\22:\22X\22,\22name\22:\22foo\22}]")
   (data (i32.const 2962) "[{\22args\22:{\22a\22:[1,true]},\22name\22:\22arg\22}]")
+  (data (i32.const 3040) "{\22traceEvents\22:[{\22ph\22:\22X\22,\22name\22:\22foo\22,\22ts\22:1,\22dur\22:2,\22pid\22:3,\22tid\22:4}]}")
 
   (func (export "message_for") (param $code i32) (result i32 i32)
     i32.const 1024
@@ -1622,6 +1623,52 @@
     call $extractor_next
     i32.const -1
     i32.const 163
+    call $assert_eq_i32
+  )
+
+  (func (export "test_extractor_populates_trace_events_wrapper_fields")
+    (local $event_ptr i32)
+
+    call $ensure_alloc
+
+    i32.const 55296
+    i32.const 173
+    call $parser_state_init
+
+    i32.const 55296
+    i32.const 3040
+    i32.const 72
+    i32.const 57344
+    i32.const 64
+    call $parser_tokenize_bytes
+    global.get $PARSER_STATUS_DONE
+    i32.const 164
+    call $assert_eq_i32
+
+    i32.const 57344
+    call $extractor_init
+
+    call $extractor_next
+    local.tee $event_ptr
+    i32.const -1
+    i32.ne
+    i32.const 165
+    call $assert_true
+
+    local.get $event_ptr
+    i32.const 88
+    i32.const 3074
+    i32.const 3
+    f64.const 1
+    f64.const 2
+    i32.const 3
+    i32.const 4
+    i32.const 166
+    call $assert_event_base_fields
+
+    call $extractor_next
+    i32.const -1
+    i32.const 172
     call $assert_eq_i32
   )
 
