@@ -471,12 +471,14 @@ function createWasmCanvasOpPlanner(exports = null, options = {}) {
         fallbackY,
       )
       : fallbackY;
+    const clippedX = Math.min(width, Math.max(0, x));
+    const clippedEndX = Math.min(width, Math.max(clippedX, endX));
 
     return {
       height,
       op: CANVAS_OP.SLICE_RECT,
-      width: Math.max(1, endX - x),
-      x: Math.max(0, x),
+      width: Math.max(1, clippedEndX - clippedX),
+      x: clippedX,
       y,
     };
   }

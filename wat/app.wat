@@ -237,6 +237,7 @@
     (param $viewport_span i32)
     (param $canvas_width i32)
     (result i32)
+    (local $x i32)
     local.get $viewport_span
     i32.eqz
     if
@@ -251,6 +252,25 @@
     i32.mul
     local.get $viewport_span
     i32.div_s
+    local.set $x
+
+    local.get $x
+    i32.const 0
+    i32.lt_s
+    if
+      i32.const 0
+      return
+    end
+
+    local.get $x
+    local.get $canvas_width
+    i32.gt_s
+    if
+      local.get $canvas_width
+      return
+    end
+
+    local.get $x
   )
 
   (func $trace_render_slice_end_x (export "trace_render_slice_end_x")

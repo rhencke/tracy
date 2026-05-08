@@ -236,6 +236,24 @@
     i32.const 0
     i32.const 43
     call $assert_eq_i32
+
+    i32.const -50
+    i32.const 0
+    i32.const 100
+    i32.const 320
+    call $trace_render_slice_x
+    i32.const 0
+    i32.const 44
+    call $assert_eq_i32
+
+    i32.const 150
+    i32.const 0
+    i32.const 100
+    i32.const 320
+    call $trace_render_slice_x
+    i32.const 320
+    i32.const 45
+    call $assert_eq_i32
   )
 
   (func (export "test_host_stubs_are_deterministic")

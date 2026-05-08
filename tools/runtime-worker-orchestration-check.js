@@ -1650,6 +1650,100 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   });
 }
 
+async function checkProgressiveTraceRendererClipsLeftEdgeSlices() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const operations = [];
+  const canvas = {
+    height: 160,
+    width: 320,
+    getContext() {
+      return context;
+    },
+  };
+  const context = {
+    clearRect(x, y, width, height) {
+      operations.push({ height, op: "clearRect", width, x, y });
+    },
+    fillRect(x, y, width, height) {
+      operations.push({
+        fillStyle: this.fillStyle,
+        height,
+        op: "fillRect",
+        width,
+        x,
+        y,
+      });
+    },
+    restore() {
+      operations.push({ op: "restore" });
+    },
+    save() {
+      operations.push({ op: "save" });
+    },
+  };
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      assert.deepEqual(
+        { maxRows, trackId, tsMax, tsMin },
+        { maxRows: 1024, trackId: 0, tsMax: 200, tsMin: 100 },
+      );
+      const view = new DataView(memory.buffer);
+      view.setUint32(outPtr, 50, true);
+      view.setUint32(outPtr + 4, 75, true);
+      view.setUint32(outPtr + 12, 0, true);
+      view.setUint32(outPtr + 20, 0x2d74da, true);
+      view.setUint32(outPtr + 24, 0, true);
+      return 1;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 1;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return {
+        coveredRange: { end: 200, start: 100, type: "covered_range", valid: true },
+        state: "complete",
+      };
+    },
+  };
+  const renderPlannerExports = {
+    ...makeTraceRenderPlannerExports(),
+    trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
+      return ((sliceStart - viewportStart) / viewportSpan) * canvasWidth;
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    queryOutPtr: 2048,
+    queryWindow: 100,
+    renderPlannerExports,
+  });
+
+  renderer.draw(123);
+  const sliceFill = operations.find(
+    (operation) => operation.op === "fillRect" && operation.fillStyle === "#2d74da",
+  );
+
+  assert.deepEqual(
+    sliceFill,
+    {
+      fillStyle: "#2d74da",
+      height: 10,
+      op: "fillRect",
+      width: 80,
+      x: 0,
+      y: 18,
+    },
+    "slice crossing the left viewport edge should draw only its clipped visible span",
+  );
+}
+
 async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -2705,6 +2799,7 @@ async function main() {
   await checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid();
   checkWatWriterPropagatesCatalogOverflow();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
+  await checkProgressiveTraceRendererClipsLeftEdgeSlices();
   await checkProgressiveTraceRendererClampsToSliceCatalogCoverage();
   await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererTilesFullVisibleViewport();
