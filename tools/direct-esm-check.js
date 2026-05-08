@@ -568,9 +568,24 @@ function main() {
   assert.match(runtimeSource, /from "\.\/startup-spec\.mjs"/);
   assert.doesNotMatch(runtimeSource, /from "\.\/runtime-spec\.mjs"/);
   assert.match(indexFormatSpecSource, /Generated from abi\/layout\.json/);
+  assert.match(indexFormatSpecSource, /INDEX_FORMAT_CONTRACT/);
+  assert.match(indexFormatSpecSource, /OWNER: "index-wasm"/);
+  assert.match(indexFormatSpecSource, /SOURCE: "abi\/layout\.json#index"/);
+  assert.match(indexFormatSpecSource, /WASM_MODULE: "index"/);
   assert.match(indexFormatSpecSource, /INDEX_FORMAT/);
   assert.match(indexFormatSpecSource, /INDEX_DECODE_HINTS/);
+  assert.match(indexFormatSpecSource, /PARTIAL: 4/);
   assert.match(indexFormatSpecSource, /INDEX_PAGE_HEADER_OFFSETS/);
+  assert.match(indexFormatSpecSource, /INDEX_QUERY_RESULT_LAYOUT/);
+  assert.match(indexFormatSpecSource, /BYTES: 28/);
+  assert.match(indexFormatSpecSource, /FIELD_BYTES: 4/);
+  assert.match(indexFormatSpecSource, /START: 0/);
+  assert.match(indexFormatSpecSource, /PARTIAL: 24/);
+  assert.match(
+    readRepoFile("tools/generate-layout.js"),
+    /spec\.index\.queryResult\.fields\.map/,
+    "index format bridge should be generated from the shared index contract",
+  );
   assert.doesNotMatch(runtimeSource, /preloadTraceRendererSpecModule/);
   assert.doesNotMatch(runtimeSource, /deferredTraceRendererSpecPromise/);
   assert.doesNotMatch(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);

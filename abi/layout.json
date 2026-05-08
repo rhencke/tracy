@@ -161,6 +161,8 @@
     }
   },
   "index": {
+    "owner": "index-wasm",
+    "wasmModule": "index",
     "INDEX_TARGET_ENCODED_BYTES_PER_EVENT": {
       "value": 12,
       "description": "Maximum average compact index payload bytes per event."

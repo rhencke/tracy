@@ -3,12 +3,6 @@
 const { readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const {
-  INDEX_DECODE_HINT_COMPACT_SLICES,
-  INDEX_DECODE_HINT_TRACK_ID_SHIFT,
-  INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
-  INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
-  INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
-  INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
   OPFS_PAGE_SIZE,
   assertLayoutSpec,
   constantEntries,
@@ -131,23 +125,51 @@ function renderMemTest() {
 }
 
 function renderIndexFormatSpecModule() {
+  const decodeHints = Object.entries(spec.index.decodeHints).map(
+    ([name, entry]) => [
+      name.replace(/^INDEX_DECODE_HINT_/, ""),
+      entry.value,
+    ],
+  );
+  const pageHeaderOffsets = spec.index.pageHeader.fields.map((entry) => [
+    entry.name
+      .replace(/^INDEX_PAGE_HEADER_/, "")
+      .replace(/_OFFSET$/, ""),
+    entry.value,
+  ]);
+  const queryResultFields = spec.index.queryResult.fields.map((entry) => [
+    entry.property.toUpperCase(),
+    entry.value,
+  ]);
+  const queryResultBytes =
+    spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value *
+    spec.index.queryResult.fields.length;
+
   return [
     generatedJsHeader("host/index-format-spec.mjs"),
+    "",
+    "export const INDEX_FORMAT_CONTRACT = Object.freeze({",
+    `  OWNER: ${JSON.stringify(spec.index.owner)},`,
+    '  SOURCE: "abi/layout.json#index",',
+    `  WASM_MODULE: ${JSON.stringify(spec.index.wasmModule)},`,
+    "});",
     "",
     "export const INDEX_FORMAT = Object.freeze({",
     `  OPFS_PAGE_SIZE: ${OPFS_PAGE_SIZE},`,
     "});",
     "",
     "export const INDEX_DECODE_HINTS = Object.freeze({",
-    `  COMPACT_SLICES: ${INDEX_DECODE_HINT_COMPACT_SLICES},`,
-    `  TRACK_ID_SHIFT: ${INDEX_DECODE_HINT_TRACK_ID_SHIFT},`,
+    ...decodeHints.map(([name, value]) => `  ${name}: ${value},`),
     "});",
     "",
     "export const INDEX_PAGE_HEADER_OFFSETS = Object.freeze({",
-    `  BUCKET_START: ${INDEX_PAGE_HEADER_BUCKET_START_OFFSET},`,
-    `  BUCKET_END: ${INDEX_PAGE_HEADER_BUCKET_END_OFFSET},`,
-    `  RECORD_COUNT: ${INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET},`,
-    `  DECODE_HINTS: ${INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET},`,
+    ...pageHeaderOffsets.map(([name, value]) => `  ${name}: ${value},`),
+    "});",
+    "",
+    "export const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({",
+    `  BYTES: ${queryResultBytes},`,
+    `  FIELD_BYTES: ${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value},`,
+    ...queryResultFields.map(([name, value]) => `  ${name}: ${value},`),
     "});",
     "",
   ].join("\n");

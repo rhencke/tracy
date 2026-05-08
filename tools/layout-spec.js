@@ -142,6 +142,12 @@ function layoutInvariantErrors() {
   if (cursor > workingBytes) {
     errors.push("memory regions exceed MEM_WORKING_TARGET_BYTES");
   }
+  if (spec.index?.owner !== "index-wasm") {
+    errors.push("index format contract owner must be index-wasm");
+  }
+  if (spec.index?.wasmModule !== "index") {
+    errors.push("index format contract wasmModule must be index");
+  }
 
   return errors;
 }
