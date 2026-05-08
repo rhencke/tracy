@@ -164,17 +164,18 @@ function main() {
   assert.doesNotMatch(bootstrapLineCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(serviceWorkerCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
-  assert.match(bootstrapSource, /const progressiveTraceRendererModulePromise = import/);
   assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrapSource,
-    /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/,
+    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
   );
   assert.match(
     bootstrapSource,
-    /const importProgressiveTraceRenderer = \(\) =>[\s\S]+progressiveTraceRendererModulePromise/,
+    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
   );
+  assert.match(bootstrapSource, /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/);
+  assert.doesNotMatch(bootstrapSource, /setTimeout\(resolve/);
   assert.match(
     bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
