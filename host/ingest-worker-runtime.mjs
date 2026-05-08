@@ -145,16 +145,35 @@ function indexCoveredRange(index) {
   };
 }
 
+function coveredRangeChanged(previous, next) {
+  if (previous === null) {
+    return true;
+  }
+  return (
+    previous.valid !== next.valid ||
+    previous.start !== next.start ||
+    previous.end !== next.end
+  );
+}
+
 function postCoveredRangeIfDue(state, force = false) {
   const now = state.now();
-  if (!force && now - state.lastCoveredRangeAt < state.coveredRangeIntervalMs) {
+  const coveredRange = indexCoveredRange(state.index);
+  const changed = coveredRangeChanged(state.lastCoveredRange, coveredRange);
+
+  if (
+    !force &&
+    !changed &&
+    now - state.lastCoveredRangeAt < state.coveredRangeIntervalMs
+  ) {
     return;
   }
 
   state.lastCoveredRangeAt = now;
+  state.lastCoveredRange = coveredRange;
   state.postMessage({
     type: INGEST_WORKER_MESSAGE.COVERED_RANGE,
-    ...indexCoveredRange(state.index),
+    ...coveredRange,
   });
 }
 
@@ -366,6 +385,7 @@ export async function runWorkerIngest(data, options = {}) {
     etaStableMs: data.etaStableMs ?? DEFAULT_INGEST_ETA_STABLE_MS,
     index,
     lastCoveredRangeAt: Number.NEGATIVE_INFINITY,
+    lastCoveredRange: null,
     memory,
     now: options.now ?? (() => performance.now()),
     parserState,

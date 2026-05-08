@@ -259,6 +259,7 @@ async function checkWorkerRuntime() {
     })),
     [
       { end: 110, start: 100, valid: true },
+      { end: 120, start: 100, valid: true },
       { end: 130, start: 100, valid: true },
     ],
   );
