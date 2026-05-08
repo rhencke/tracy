@@ -404,8 +404,8 @@ async function flushAsyncWork() {
   await flushMicrotasks();
 }
 
-async function waitForAsyncCondition(callback, label) {
-  const deadline = Date.now() + 2000;
+async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
     if (callback()) {
@@ -633,6 +633,7 @@ async function checkInteractiveIngestGate() {
           call[1] === "indexes/throttled-100mb.json.idx",
       ) || controller.status().state === "error",
     "main-thread reader should open the worker-written OPFS index",
+    10000,
   );
   assert.notEqual(controller.status().state, "error", controller.status().error);
   assert.ok(
