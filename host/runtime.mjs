@@ -3,18 +3,22 @@ import {
   APP_SHELL_COLORS,
   PERFORMANCE_MARKS,
   PERFORMANCE_MEASURES,
+  RUNTIME_BRIDGE,
   RUNTIME_DEFAULTS,
   RUNTIME_URLS,
 } from "./startup-spec.mjs";
 
-const MAIN_THREAD = "main";
-const INGEST_WORKER_MESSAGE = Object.freeze({
-  COMPLETE: "complete",
-  COVERED_RANGE: "covered_range",
-  ERROR: "error",
-  PROGRESS: "progress",
-  START: "start",
-});
+const {
+  errors: RUNTIME_ERRORS,
+  fileSelection: FILE_SELECTION,
+  modules: RUNTIME_MODULES,
+  readerStatus: READER_STATUS,
+  threads: RUNTIME_THREADS,
+  worker: WORKER_CONTRACT,
+  workerMessages: INGEST_WORKER_MESSAGE,
+  workerStatus: WORKER_STATUS,
+} = RUNTIME_BRIDGE;
+const MAIN_THREAD = RUNTIME_THREADS.MAIN;
 const {
   DEFAULT_INGEST_NAME_MAX_BYTES,
   DEFAULT_INGEST_NAME_PTR,
@@ -51,7 +55,7 @@ function measurePerformance(name, start, end, options) {
 function reportAppLoadError(error) {
   console.error(error);
   globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
-  showError("tracy failed to load the WebAssembly viewer.");
+  showError(RUNTIME_ERRORS.APP_LOAD_FAILED);
 }
 
 function cloneWorkerStatus(status) {
@@ -140,7 +144,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     indexName: null,
     openPromise: null,
     rebuildSliceCatalog: null,
-    state: "idle",
+    state: READER_STATUS.IDLE,
   };
 
   function cloneReaderStatus() {
@@ -155,12 +159,12 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
   function failSliceCatalogOverflow(indexId, pageCount) {
     const message =
-      `main-thread slice catalog full while rebuilding index ${indexId}` +
-      ` at page ${pageCount}`;
+      `${RUNTIME_ERRORS.SLICE_CATALOG_FULL_PREFIX}${indexId}` +
+      `${RUNTIME_ERRORS.SLICE_CATALOG_FULL_PAGE_SEPARATOR}${pageCount}`;
 
     readerState.catalogFull = true;
     readerState.error = message;
-    readerState.state = "error";
+    readerState.state = READER_STATUS.ERROR;
     throw new Error(message);
   }
 
@@ -170,11 +174,11 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     }
 
     const loaded = await instantiate(
-      "index",
+      RUNTIME_MODULES.INDEX,
       MAIN_THREAD,
       { env: { memory }, host },
       {
-        baseUrl: options.baseUrl ?? "wasm/",
+        baseUrl: options.baseUrl ?? RUNTIME_MODULES.DEFAULT_BASE_URL,
         compile: options.compile,
         instantiate: options.instantiate,
       },
@@ -276,11 +280,14 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     if (typeof indexName !== "string" || indexName.length === 0) {
       return false;
     }
-    if (readerState.state === "ready" && readerState.indexName === indexName) {
+    if (
+      readerState.state === READER_STATUS.READY &&
+      readerState.indexName === indexName
+    ) {
       return true;
     }
     if (
-      readerState.state === "opening" &&
+      readerState.state === READER_STATUS.OPENING &&
       readerState.indexName === indexName &&
       readerState.openPromise !== null
     ) {
@@ -290,7 +297,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     readerState.error = null;
     readerState.catalogFull = false;
     readerState.indexName = indexName;
-    readerState.state = "opening";
+    readerState.state = READER_STATUS.OPENING;
     readerState.openPromise = (async () => {
       try {
         const index = await loadIndexExports();
@@ -299,7 +306,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
           memory,
           namePtr,
           indexName,
-          "main-thread index name",
+          RUNTIME_ERRORS.MAIN_THREAD_INDEX_NAME_LABEL,
         );
         const indexId = await host[HOST_IMPORT_NAME.OPFS_INDEX_OPEN](
           namePtr,
@@ -313,11 +320,11 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         await loadSliceCatalogRebuild();
         refreshSliceCatalog(index, indexId, { force: true });
         readerState.indexId = indexId;
-        readerState.state = "ready";
+        readerState.state = READER_STATUS.READY;
         return true;
       } catch (error) {
         readerState.error = errorMessage(error);
-        readerState.state = "error";
+        readerState.state = READER_STATUS.ERROR;
         throw error;
       } finally {
         readerState.openPromise = null;
@@ -346,8 +353,11 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       outPtr,
       maxRows = options.queryRowCap ?? DEFAULT_READER_QUERY_ROW_CAP,
     ) {
-      if (readerState.state !== "ready" || readerState.exports === null) {
-        throw new Error("main-thread index reader is not ready");
+      if (
+        readerState.state !== READER_STATUS.READY ||
+        readerState.exports === null
+      ) {
+        throw new Error(RUNTIME_ERRORS.MAIN_THREAD_INDEX_READER_NOT_READY);
       }
 
       refreshSliceCatalog(readerState.exports, readerState.indexId);
@@ -396,7 +406,7 @@ export function createIngestWorkerController(options = {}) {
     ingest: null,
     progress: null,
     result: null,
-    state: "idle",
+    state: WORKER_STATUS.IDLE,
   };
 
   let worker = null;
@@ -416,23 +426,23 @@ export function createIngestWorkerController(options = {}) {
 
     if (message?.type === INGEST_WORKER_MESSAGE.PROGRESS) {
       status.progress = message;
-      status.state = "running";
+      status.state = WORKER_STATUS.RUNNING;
     } else if (message?.type === INGEST_WORKER_MESSAGE.COVERED_RANGE) {
       status.coveredRange = message;
-      status.state = "running";
+      status.state = WORKER_STATUS.RUNNING;
       if (message.valid && typeof status.ingest?.indexName === "string") {
         indexReader?.open(status.ingest.indexName)?.catch((error) => {
           status.error = errorMessage(error);
-          status.state = "error";
+          status.state = WORKER_STATUS.ERROR;
           notifyWorkerStatus(status, options, null);
         });
       }
     } else if (message?.type === INGEST_WORKER_MESSAGE.COMPLETE) {
       status.result = message;
-      status.state = "complete";
+      status.state = WORKER_STATUS.COMPLETE;
     } else if (message?.type === INGEST_WORKER_MESSAGE.ERROR) {
-      status.error = message.message ?? "worker ingest failed";
-      status.state = "error";
+      status.error = message.message ?? RUNTIME_ERRORS.WORKER_INGEST_FAILED;
+      status.state = WORKER_STATUS.ERROR;
     } else {
       return;
     }
@@ -445,8 +455,8 @@ export function createIngestWorkerController(options = {}) {
       return;
     }
 
-    status.state = "error";
-    status.error = event?.message ?? "ingest worker failed";
+    status.state = WORKER_STATUS.ERROR;
+    status.error = event?.message ?? RUNTIME_ERRORS.INGEST_WORKER_FAILED;
     notifyWorkerStatus(status, options, event);
   }
 
@@ -460,16 +470,18 @@ export function createIngestWorkerController(options = {}) {
       return worker;
     }
     if (typeof WorkerCtor !== "function") {
-      status.state = "unavailable";
-      status.error = "module workers are unavailable";
+      status.state = WORKER_STATUS.UNAVAILABLE;
+      status.error = RUNTIME_ERRORS.MODULE_WORKERS_UNAVAILABLE;
       notifyWorkerStatus(status, options, null);
       return null;
     }
 
     try {
-      worker = new WorkerCtor(options.workerUrl ?? RUNTIME_URLS.WORKER_URL, { type: "module" });
+      worker = new WorkerCtor(options.workerUrl ?? RUNTIME_URLS.WORKER_URL, {
+        type: WORKER_CONTRACT.MODULE_TYPE,
+      });
     } catch (error) {
-      status.state = "error";
+      status.state = WORKER_STATUS.ERROR;
       status.error = errorMessage(error);
       notifyWorkerStatus(status, options, null);
       return null;
@@ -477,9 +489,14 @@ export function createIngestWorkerController(options = {}) {
 
     const installedWorker = worker;
     if (typeof worker.addEventListener === "function") {
-      worker.addEventListener("message", handleWorkerMessage);
-      worker.addEventListener("error", (event) => handleWorkerError(event, installedWorker));
-      worker.addEventListener("messageerror", (event) =>
+      worker.addEventListener(
+        WORKER_CONTRACT.EVENT_MESSAGE,
+        handleWorkerMessage,
+      );
+      worker.addEventListener(WORKER_CONTRACT.EVENT_ERROR, (event) =>
+        handleWorkerError(event, installedWorker),
+      );
+      worker.addEventListener(WORKER_CONTRACT.EVENT_MESSAGE_ERROR, (event) =>
         handleWorkerError(event, installedWorker),
       );
     } else {
@@ -492,7 +509,7 @@ export function createIngestWorkerController(options = {}) {
 
   return {
     start(data = {}) {
-      if (status.state === "running") {
+      if (status.state === WORKER_STATUS.RUNNING) {
         cancelActiveWorker();
       }
 
@@ -504,7 +521,7 @@ export function createIngestWorkerController(options = {}) {
       const ingestId = nextIngestId;
       nextIngestId += 1;
       activeIngestId = ingestId;
-      status.state = "running";
+      status.state = WORKER_STATUS.RUNNING;
       status.error = null;
       status.coveredRange = null;
       status.ingest = { ...data, ingestId };
@@ -524,13 +541,13 @@ export function createIngestWorkerController(options = {}) {
     indexReader,
     fail(error) {
       status.error = errorMessage(error);
-      status.state = "error";
+      status.state = WORKER_STATUS.ERROR;
       notifyWorkerStatus(status, options, null);
     },
     terminate() {
       cancelActiveWorker();
       activeIngestId = null;
-      status.state = "terminated";
+      status.state = WORKER_STATUS.TERMINATED;
       notifyWorkerStatus(status, options, null);
     },
     get worker() {
@@ -578,14 +595,20 @@ function sourceNameForId(memory, host, sourceId, options) {
   const nameLen = host[HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN]?.(sourceId);
 
   if (!Number.isInteger(nameLen) || nameLen <= 0) {
-    throw new Error(`OPFS source ${sourceId} did not report a valid name`);
+    throw new Error(
+      `${RUNTIME_ERRORS.OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_PREFIX}` +
+        `${sourceId}${RUNTIME_ERRORS.OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_SUFFIX}`,
+    );
   }
 
   const namePtr = options.ingestNamePtr ?? DEFAULT_INGEST_NAME_PTR;
   const maxNameBytes = options.ingestNameMaxBytes ?? DEFAULT_INGEST_NAME_MAX_BYTES;
 
   if (nameLen > maxNameBytes) {
-    throw new Error(`OPFS source name is too long: ${nameLen} bytes`);
+    throw new Error(
+      `${RUNTIME_ERRORS.OPFS_SOURCE_NAME_TOO_LONG_PREFIX}${nameLen}` +
+        RUNTIME_ERRORS.OPFS_SOURCE_NAME_TOO_LONG_SUFFIX,
+    );
   }
 
   const written = host[HOST_IMPORT_NAME.OPFS_SOURCE_NAME]?.(
@@ -594,7 +617,10 @@ function sourceNameForId(memory, host, sourceId, options) {
     nameLen,
   );
   if (written !== nameLen) {
-    throw new Error(`OPFS source ${sourceId} name read failed`);
+    throw new Error(
+      `${RUNTIME_ERRORS.OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_PREFIX}` +
+        `${sourceId}${RUNTIME_ERRORS.OPFS_SOURCE_NAME_READ_FAILED_SUFFIX}`,
+    );
   }
 
   return readHostString(memory, namePtr, nameLen);
@@ -602,21 +628,27 @@ function sourceNameForId(memory, host, sourceId, options) {
 
 function indexNameForSource(sourceName) {
   const leaf = sourceName
-    .split("/")
+    .split(FILE_SELECTION.PATH_SEPARATOR)
     .filter((part) => part.length > 0)
     .at(-1);
-  const safeLeaf = (leaf ?? "trace").replace(/[^A-Za-z0-9._-]/g, "_");
+  const safeLeaf = (leaf ?? FILE_SELECTION.DEFAULT_TRACE_NAME).replace(
+    new RegExp(FILE_SELECTION.UNSAFE_LEAF_PATTERN, "g"),
+    FILE_SELECTION.UNSAFE_LEAF_REPLACEMENT,
+  );
 
-  return `indexes/${safeLeaf}.idx`;
+  return (
+    `${FILE_SELECTION.INDEX_PREFIX}${safeLeaf}` +
+    FILE_SELECTION.INDEX_SUFFIX
+  );
 }
 
 function sourceNameForSelectedFile(selection) {
   const rawName =
     typeof selection?.file?.name === "string" && selection.file.name.length > 0
       ? selection.file.name
-      : "trace";
+      : FILE_SELECTION.DEFAULT_TRACE_NAME;
 
-  return `sources/${rawName}`;
+  return `${FILE_SELECTION.SOURCE_PREFIX}${rawName}`;
 }
 
 async function startIngestForSelectedFile(selection, context) {
@@ -686,7 +718,7 @@ function shouldLoadProgressiveTraceRenderer(ingestWorker) {
 
   return (
     workerStatus?.coveredRange?.valid === true &&
-    readerStatus?.state === "ready"
+    readerStatus?.state === READER_STATUS.READY
   );
 }
 
@@ -695,7 +727,7 @@ async function loadApp(memory, host, options = {}) {
 
   if (!supportsJSPI()) {
     showError(
-      "tracy needs a browser with WebAssembly JavaScript Promise Integration (JSPI) enabled.",
+      RUNTIME_ERRORS.JSPI_UNAVAILABLE,
     );
     return;
   }
@@ -741,7 +773,7 @@ async function loadApp(memory, host, options = {}) {
   }
 
   async function defaultInstantiateMainWasm(id, thread, baseImports, {
-    baseUrl = "wasm/",
+    baseUrl = RUNTIME_MODULES.DEFAULT_BASE_URL,
     compile = defaultCompileWasm,
     instantiate = defaultInstantiateWasm,
   } = {}) {
@@ -757,11 +789,16 @@ async function loadApp(memory, host, options = {}) {
   const instantiate =
     options.instantiateWasmModuleForThread ?? defaultInstantiateMainWasm;
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
-  const { exports } = await instantiate("app", MAIN_THREAD, imports, {
-    baseUrl: options.baseUrl ?? "wasm/",
-    compile: options.compile,
-    instantiate: options.instantiate,
-  });
+  const { exports } = await instantiate(
+    RUNTIME_MODULES.APP,
+    MAIN_THREAD,
+    imports,
+    {
+      baseUrl: options.baseUrl ?? RUNTIME_MODULES.DEFAULT_BASE_URL,
+      compile: options.compile,
+      instantiate: options.instantiate,
+    },
+  );
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateEnd, options);
   measurePerformance(
     PERFORMANCE_MEASURES.wasmInstantiate,

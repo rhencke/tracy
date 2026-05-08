@@ -183,6 +183,68 @@
       "description": "Minimum worker ingest progress sample age before ETA is surfaced to avoid first-ramp flicker."
     }
   },
+  "runtimeBridge": {
+    "threads": {
+      "MAIN": "main"
+    },
+    "modules": {
+      "APP": "app",
+      "INDEX": "index",
+      "DEFAULT_BASE_URL": "wasm/"
+    },
+    "worker": {
+      "MODULE_TYPE": "module",
+      "EVENT_MESSAGE": "message",
+      "EVENT_ERROR": "error",
+      "EVENT_MESSAGE_ERROR": "messageerror"
+    },
+    "workerMessages": {
+      "COMPLETE": "complete",
+      "COVERED_RANGE": "covered_range",
+      "ERROR": "error",
+      "PROGRESS": "progress",
+      "START": "start"
+    },
+    "workerStatus": {
+      "COMPLETE": "complete",
+      "ERROR": "error",
+      "IDLE": "idle",
+      "RUNNING": "running",
+      "TERMINATED": "terminated",
+      "UNAVAILABLE": "unavailable"
+    },
+    "readerStatus": {
+      "ERROR": "error",
+      "IDLE": "idle",
+      "OPENING": "opening",
+      "READY": "ready"
+    },
+    "fileSelection": {
+      "DEFAULT_TRACE_NAME": "trace",
+      "INDEX_PREFIX": "indexes/",
+      "INDEX_SUFFIX": ".idx",
+      "PATH_SEPARATOR": "/",
+      "SOURCE_PREFIX": "sources/",
+      "UNSAFE_LEAF_PATTERN": "[^A-Za-z0-9._-]",
+      "UNSAFE_LEAF_REPLACEMENT": "_"
+    },
+    "errors": {
+      "APP_LOAD_FAILED": "tracy failed to load the WebAssembly viewer.",
+      "INGEST_WORKER_FAILED": "ingest worker failed",
+      "JSPI_UNAVAILABLE": "tracy needs a browser with WebAssembly JavaScript Promise Integration (JSPI) enabled.",
+      "MAIN_THREAD_INDEX_NAME_LABEL": "main-thread index name",
+      "MAIN_THREAD_INDEX_READER_NOT_READY": "main-thread index reader is not ready",
+      "MODULE_WORKERS_UNAVAILABLE": "module workers are unavailable",
+      "OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_PREFIX": "OPFS source ",
+      "OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_SUFFIX": " did not report a valid name",
+      "OPFS_SOURCE_NAME_READ_FAILED_SUFFIX": " name read failed",
+      "OPFS_SOURCE_NAME_TOO_LONG_PREFIX": "OPFS source name is too long: ",
+      "OPFS_SOURCE_NAME_TOO_LONG_SUFFIX": " bytes",
+      "SLICE_CATALOG_FULL_PREFIX": "main-thread slice catalog full while rebuilding index ",
+      "SLICE_CATALOG_FULL_PAGE_SEPARATOR": " at page ",
+      "WORKER_INGEST_FAILED": "worker ingest failed"
+    }
+  },
   "traceRenderer": {
     "query": {
       "DEFAULT_TRACE_QUERY_OUT_PTR": {

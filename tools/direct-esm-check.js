@@ -309,6 +309,79 @@ function assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, t
   }
 }
 
+function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource) {
+  assert.match(
+    startupSpecSource,
+    /export const RUNTIME_BRIDGE = Object\.freeze/,
+    "startup spec should export the generated runtime bridge contract",
+  );
+  assert.match(
+    runtimeSource,
+    /RUNTIME_BRIDGE,/,
+    "runtime should import the generated runtime bridge contract",
+  );
+  assert.match(
+    runtimeSource,
+    /workerMessages: INGEST_WORKER_MESSAGE/,
+    "runtime worker message names should come from the generated bridge contract",
+  );
+  assert.match(
+    runtimeSource,
+    /workerStatus: WORKER_STATUS/,
+    "runtime worker status states should come from the generated bridge contract",
+  );
+  assert.match(
+    runtimeSource,
+    /readerStatus: READER_STATUS/,
+    "runtime reader status states should come from the generated bridge contract",
+  );
+  assert.match(
+    runtimeSource,
+    /type: WORKER_CONTRACT\.MODULE_TYPE/,
+    "runtime worker module type should come from the generated bridge contract",
+  );
+  assert.match(
+    runtimeSource,
+    /RUNTIME_MODULES\.DEFAULT_BASE_URL/,
+    "runtime Wasm base URL should come from the generated bridge contract",
+  );
+
+  for (const [pattern, message] of [
+    [/const\s+MAIN_THREAD\s*=\s*"main"/, "main thread id"],
+    [/COMPLETE:\s*"complete"/, "worker complete message"],
+    [/COVERED_RANGE:\s*"covered_range"/, "worker covered-range message"],
+    [/state:\s*"idle"/, "idle state"],
+    [/state\s*=\s*"running"/, "running state"],
+    [/state\s*=\s*"complete"/, "complete state"],
+    [/state\s*=\s*"error"/, "error state"],
+    [/state\s*=\s*"terminated"/, "terminated state"],
+    [/state\s*=\s*"unavailable"/, "unavailable state"],
+    [/state\s*===\s*"ready"/, "ready reader state"],
+    [/type:\s*"module"/, "worker module type"],
+    [/options\.baseUrl \?\? "wasm\/"/, "default Wasm base URL"],
+    [/"main-thread index reader is not ready"/, "main-thread reader not-ready message"],
+    [/"module workers are unavailable"/, "module worker unavailable message"],
+    [/"worker ingest failed"/, "worker ingest failure message"],
+    [/"ingest worker failed"/, "ingest worker failure message"],
+    [/"tracy failed to load the WebAssembly viewer\."/,
+      "app-load failure message"],
+    [/"tracy needs a browser with WebAssembly JavaScript Promise Integration/,
+      "JSPI unavailable message"],
+    [/"main-thread index name"/, "main-thread index-name label"],
+    [/`indexes\/\$\{safeLeaf\}\.idx`/, "index name shape"],
+    [/`sources\/\$\{rawName\}`/, "source name shape"],
+    [/leaf \?\? "trace"/, "default trace leaf"],
+    [/:\s*"trace"/, "default selected-file trace name"],
+    [/\/\[\^A-Za-z0-9\._-\]\/g/, "source-name sanitizing pattern"],
+  ]) {
+    assert.doesNotMatch(
+      runtimeSource,
+      pattern,
+      `host/runtime.mjs should read ${message} from RUNTIME_BRIDGE`,
+    );
+  }
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -333,6 +406,7 @@ function main() {
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
   assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
+  assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
 
   assert.match(
     buildScript,
@@ -417,7 +491,7 @@ function main() {
   assert.match(runtimeSource, /RUNTIME_URLS\.WORKER_URL/);
   assert.match(
     runtimeSource,
-    /new WorkerCtor\(options\.workerUrl \?\? RUNTIME_URLS\.WORKER_URL, \{ type: "module" \}\)/,
+    /new WorkerCtor\(options\.workerUrl \?\? RUNTIME_URLS\.WORKER_URL,[\s\S]+WORKER_CONTRACT\.MODULE_TYPE/,
   );
   assert.match(
     workerSource,

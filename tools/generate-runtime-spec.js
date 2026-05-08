@@ -205,6 +205,10 @@ function renderNamedStrings(groupName, entries) {
   return lines.join("\n");
 }
 
+function renderObjectConstant(groupName, value) {
+  return `export const ${groupName} = Object.freeze(${JSON.stringify(value, null, 2)});`;
+}
+
 function renderStartupSpecModule() {
   return [
     [
@@ -221,6 +225,8 @@ function renderStartupSpecModule() {
     renderNumberConstants("BOOTSTRAP_TIMING", spec.bootstrap),
     "",
     renderNumberConstants("RUNTIME_DEFAULTS", spec.runtimeDefaults),
+    "",
+    renderObjectConstant("RUNTIME_BRIDGE", spec.runtimeBridge),
     "",
     renderNamedStrings("PERFORMANCE_MARKS", spec.performanceMarks),
     "",
