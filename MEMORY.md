@@ -68,6 +68,7 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `INDEX_TARGET_ENCODED_BYTES_PER_EVENT` | `12` | Maximum average compact index payload bytes per event. |
 | `INDEX_COLUMN_ENTRY_BYTES` | `16` | Byte length of one compact index column directory entry. |
 | `INDEX_QUERY_RESULT_FIELD_BYTES` | `4` | Byte length of one u32 field in an index query result row. |
+| `INDEX_DECODE_HINT_COMPACT_SLICES` | `1` | Decode-hints bit marking a compact slice page. |
 | `INDEX_DECODE_HINT_PARTIAL` | `4` | Decode-hints bit marking an unfinished page or LOD bucket. |
 | `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
 | `INDEX_PAGE_HEADER_BUCKET_START_OFFSET` | `12` | Index page header byte offset of the inclusive page timestamp start. |

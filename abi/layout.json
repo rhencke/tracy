@@ -190,6 +190,10 @@
       ]
     },
     "decodeHints": {
+      "INDEX_DECODE_HINT_COMPACT_SLICES": {
+        "value": 1,
+        "description": "Decode-hints bit marking a compact slice page."
+      },
       "INDEX_DECODE_HINT_PARTIAL": {
         "value": 4,
         "description": "Decode-hints bit marking an unfinished page or LOD bucket."

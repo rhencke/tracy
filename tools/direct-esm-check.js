@@ -96,6 +96,36 @@ function assertNoInlinePaletteColor(relativePath) {
   }
 }
 
+function assertIndexCatalogUsesGeneratedFormatSpec() {
+  const source = readRepoFile("host/index-reader-catalog.mjs");
+
+  assert.match(
+    source,
+    /from "\.\/index-format-spec\.mjs"/,
+    "index reader catalog should import generated index format values",
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+OPFS_PAGE_SIZE\s*=/,
+    "OPFS page size should live in the generated index format spec",
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+INDEX_DECODE_HINT_[A-Z_]+\s*=/,
+    "index decode hint values should live in the generated index format spec",
+  );
+  assert.doesNotMatch(
+    source,
+    /const\s+INDEX_PAGE_HEADER_[A-Z_]+_OFFSET\s*=/,
+    "index page header offsets should live in the generated index format spec",
+  );
+  assert.doesNotMatch(
+    source,
+    /\b0x00010000\b/,
+    "index reader catalog should not inline OPFS page size",
+  );
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -104,6 +134,7 @@ function main() {
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
+  const indexFormatSpecSource = readRepoFile("host/index-format-spec.mjs");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
   const traceRendererSpecSource = readRepoFile("host/trace-renderer-spec.mjs");
   const workerSource = readRepoFile("worker.js");
@@ -173,6 +204,10 @@ function main() {
   assert.doesNotMatch(bootstrapSource, /runtime-spec\.mjs/);
   assert.match(runtimeSource, /from "\.\/startup-spec\.mjs"/);
   assert.doesNotMatch(runtimeSource, /from "\.\/runtime-spec\.mjs"/);
+  assert.match(indexFormatSpecSource, /Generated from abi\/layout\.json/);
+  assert.match(indexFormatSpecSource, /INDEX_FORMAT/);
+  assert.match(indexFormatSpecSource, /INDEX_DECODE_HINTS/);
+  assert.match(indexFormatSpecSource, /INDEX_PAGE_HEADER_OFFSETS/);
   assert.doesNotMatch(runtimeSource, /preloadTraceRendererSpecModule/);
   assert.doesNotMatch(runtimeSource, /deferredTraceRendererSpecPromise/);
   assert.doesNotMatch(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);
@@ -223,6 +258,7 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
+    "host/index-format-spec.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/startup-spec.mjs",
     "host/trace-renderer-spec.mjs",
@@ -237,6 +273,7 @@ function main() {
     "host/ingest-worker-runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime.mjs",
+    "host/index-format-spec.mjs",
     "host/startup-spec.mjs",
     "host/trace-renderer-spec.mjs",
     "index.html",
@@ -250,6 +287,7 @@ function main() {
     "bootstrap.mjs",
     "worker.js",
     "host/runtime.mjs",
+    "host/index-format-spec.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/startup-spec.mjs",
     "host/trace-renderer-spec.mjs",
@@ -264,6 +302,7 @@ function main() {
   assertNoInlinePaletteColor("bootstrap.mjs");
   assertNoInlinePaletteColor("host/canvas.mjs");
   assertNoInlinePaletteColor("host/runtime.mjs");
+  assertIndexCatalogUsesGeneratedFormatSpec();
 }
 
 try {

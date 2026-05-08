@@ -184,6 +184,10 @@ module.exports = {
     "decodeHints",
     "INDEX_DECODE_HINT_TRACK_ID_SHIFT",
   ),
+  INDEX_DECODE_HINT_COMPACT_SLICES: indexConstantValue(
+    "decodeHints",
+    "INDEX_DECODE_HINT_COMPACT_SLICES",
+  ),
   INDEX_DECODE_HINT_PARTIAL: indexConstantValue(
     "decodeHints",
     "INDEX_DECODE_HINT_PARTIAL",

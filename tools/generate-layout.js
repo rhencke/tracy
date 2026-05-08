@@ -2,7 +2,18 @@
 
 const { readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
-const { assertLayoutSpec, constantEntries, spec } = require("./layout-spec.js");
+const {
+  INDEX_DECODE_HINT_COMPACT_SLICES,
+  INDEX_DECODE_HINT_TRACK_ID_SHIFT,
+  INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+  INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+  INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+  INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+  OPFS_PAGE_SIZE,
+  assertLayoutSpec,
+  constantEntries,
+  spec,
+} = require("./layout-spec.js");
 
 const root = join(__dirname, "..");
 const checkOnly = process.argv.includes("--check");
@@ -33,6 +44,13 @@ function generatedHeader(kind) {
   return [
     `;; Generated from abi/layout.json by tools/generate-layout.js.`,
     `;; Do not edit ${kind} by hand.`,
+  ].join("\n");
+}
+
+function generatedJsHeader(kind) {
+  return [
+    `// Generated from abi/layout.json by tools/generate-layout.js.`,
+    `// Do not edit ${kind} by hand.`,
   ].join("\n");
 }
 
@@ -110,6 +128,29 @@ function renderMemTest() {
 
   lines.push(")");
   return `${lines.join("\n")}\n`;
+}
+
+function renderIndexFormatSpecModule() {
+  return [
+    generatedJsHeader("host/index-format-spec.mjs"),
+    "",
+    "export const INDEX_FORMAT = Object.freeze({",
+    `  OPFS_PAGE_SIZE: ${OPFS_PAGE_SIZE},`,
+    "});",
+    "",
+    "export const INDEX_DECODE_HINTS = Object.freeze({",
+    `  COMPACT_SLICES: ${INDEX_DECODE_HINT_COMPACT_SLICES},`,
+    `  TRACK_ID_SHIFT: ${INDEX_DECODE_HINT_TRACK_ID_SHIFT},`,
+    "});",
+    "",
+    "export const INDEX_PAGE_HEADER_OFFSETS = Object.freeze({",
+    `  BUCKET_START: ${INDEX_PAGE_HEADER_BUCKET_START_OFFSET},`,
+    `  BUCKET_END: ${INDEX_PAGE_HEADER_BUCKET_END_OFFSET},`,
+    `  RECORD_COUNT: ${INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET},`,
+    `  DECODE_HINTS: ${INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET},`,
+    "});",
+    "",
+  ].join("\n");
 }
 
 function renderMemoryLayoutSection() {
@@ -216,7 +257,15 @@ function replaceGeneratedBlock(text, start, end, body) {
 
 function writeIfChanged(path, content) {
   const absolute = join(root, path);
-  const previous = readFileSync(absolute, "utf8");
+  let previous = null;
+
+  try {
+    previous = readFileSync(absolute, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
 
   if (previous === content) {
     return true;
@@ -245,6 +294,7 @@ function updateMarkedFile(path, replacements) {
 const ok = [
   writeIfChanged("wat/std/mem.wat", renderMemWat()),
   writeIfChanged("wat/std/mem.test.wat", renderMemTest()),
+  writeIfChanged("host/index-format-spec.mjs", renderIndexFormatSpecModule()),
   updateMarkedFile("MEMORY.md", [
     {
       start: "<!-- @generated layout:start -->",
