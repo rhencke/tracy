@@ -1250,6 +1250,89 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   });
 }
 
+async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const canvas = {
+    height: 120,
+    width: 240,
+    getContext() {
+      return {
+        clearRect() {},
+        fillRect() {},
+        restore() {},
+        save() {},
+      };
+    },
+  };
+  const workerCoveredRange = {
+    end: 1000,
+    start: 0,
+    type: "covered_range",
+    valid: true,
+  };
+  let sliceCoveredRange = {
+    end: 320,
+    start: 200,
+    valid: true,
+  };
+  const queryCalls = [];
+  const reader = {
+    coveredRange() {
+      return sliceCoveredRange;
+    },
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
+      return 0;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 1;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return { coveredRange: workerCoveredRange, state: "running" };
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    queryOutPtr: 2048,
+    queryWindow: 1000,
+  });
+
+  renderer.draw(1);
+  assert.deepEqual(queryCalls, [
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 320, tsMin: 200 },
+  ]);
+  assert.deepEqual(renderer.status().viewport, {
+    end: 320,
+    start: 200,
+    valid: true,
+  });
+
+  sliceCoveredRange = { end: 0, start: 0, valid: false };
+  queryCalls.length = 0;
+  const emptyRenderer = rendererModule.createProgressiveTraceRenderer(
+    memory,
+    ingestWorker,
+    {
+      canvas,
+      queryOutPtr: 2048,
+      queryWindow: 1000,
+    },
+  );
+
+  const rows = emptyRenderer.draw(2);
+
+  assert.equal(rows.length, 0);
+  assert.deepEqual(queryCalls, []);
+  assert.equal(emptyRenderer.status().viewport, null);
+}
+
 async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -1752,6 +1835,7 @@ async function main() {
   await checkWorkerStatusReportsReaderCatalogOverflow();
   checkWatWriterPropagatesCatalogOverflow();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
+  await checkProgressiveTraceRendererClampsToSliceCatalogCoverage();
   await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererTilesFullVisibleViewport();
   await checkProgressiveTraceRendererBoundsLargeViewportQueries();

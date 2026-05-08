@@ -67,6 +67,21 @@ function normalizeRange(range) {
   };
 }
 
+function intersectRanges(firstRange, secondRange) {
+  const first = normalizeRange(firstRange);
+  const second = normalizeRange(secondRange);
+
+  if (first === null || second === null) {
+    return null;
+  }
+
+  return normalizeRange({
+    end: Math.min(first.end, second.end),
+    start: Math.max(first.start, second.start),
+    valid: true,
+  });
+}
+
 function clampViewportToCovered(viewport, coveredRange, minSpan) {
   const covered = normalizeRange(coveredRange);
 
@@ -339,10 +354,19 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   };
 
   function currentCoveredRange(reader, readerStatus, workerStatus) {
-    return normalizeRange(
-      workerStatus.coveredRange ??
-        (readerStatus.state === "ready" ? reader?.coveredRange?.() : null),
-    );
+    const workerRange = normalizeRange(workerStatus.coveredRange);
+
+    if (readerStatus.state !== "ready" || typeof reader?.coveredRange !== "function") {
+      return workerRange;
+    }
+
+    const sliceRange = normalizeRange(reader.coveredRange());
+
+    if (workerRange === null) {
+      return sliceRange;
+    }
+
+    return intersectRanges(workerRange, sliceRange);
   }
 
   function setViewport(nextViewport, coveredRange) {
