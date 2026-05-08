@@ -336,9 +336,14 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
   return {
     coveredRange() {
-      return readerState.exports === null
-        ? { valid: false, start: 0, end: 0 }
-        : readCoveredRange(readerState.exports);
+      if (readerState.exports === null) {
+        return { valid: false, start: 0, end: 0 };
+      }
+      if (readerState.state === READER_STATUS.READY) {
+        refreshSliceCatalog(readerState.exports, readerState.indexId);
+      }
+
+      return readCoveredRange(readerState.exports);
     },
     exports() {
       return readerState.exports;

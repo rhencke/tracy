@@ -846,6 +846,19 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
           assert.equal(indexId, 70);
           readerInitIds.push(indexId);
         },
+        index_reader_covered_range_end() {
+          return pageCatalog.length === 0
+            ? 0
+            : pageCatalog.at(-1).bucketEnd;
+        },
+        index_reader_covered_range_start() {
+          return pageCatalog.length === 0
+            ? 0
+            : pageCatalog[0].bucketStart;
+        },
+        index_reader_covered_range_valid() {
+          return pageCatalog.length > 0 ? 1 : 0;
+        },
         read_page(level, pageId) {
           assert.equal(level, 0);
           readPages.push(pageId);
@@ -883,19 +896,32 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
 
   await reader.open("indexes/trace.idx");
   assert.deepEqual(readPages, [0]);
-  assert.equal(reader.queryRange(4, 100, 140, 4096).count, 3);
+  assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
   assert.deepEqual(
     readPages,
     [0, 1],
+    "covered-range polling should probe appended pages until a miss",
+  );
+  assert.equal(reader.queryRange(4, 100, 140, 4096).count, 3);
+  assert.deepEqual(
+    readPages,
+    [0, 1, 1],
     "stale-size hosts should probe one appended page until a miss",
   );
   assert.deepEqual(readerInitIds, [70, 70]);
 
   readablePageCount = 2;
+  assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 180 });
+  assert.deepEqual(
+    readPages,
+    [0, 1, 1, 1, 2],
+    "covered-range polling should discover worker-published pages",
+  );
+  assert.deepEqual(readerInitIds, [70, 70, 70]);
   assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
   assert.deepEqual(
     readPages,
-    [0, 1, 1, 2],
+    [0, 1, 1, 1, 2, 2],
     "stale-size hosts should discover worker-published pages by probing",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
@@ -903,7 +929,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
   assert.deepEqual(
     readPages,
-    [0, 1, 1, 2, 2],
+    [0, 1, 1, 1, 2, 2, 2],
     "stale-size hosts should not reset below already discovered pages",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
