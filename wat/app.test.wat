@@ -155,6 +155,89 @@
     call $assert_eq_i32
   )
 
+  (func (export "test_trace_render_branch_edges")
+    i32.const 5
+    i32.const 0
+    call $trace_render_query_ranges_per_track
+    i32.const 1
+    i32.const 32
+    call $assert_eq_i32
+
+    i32.const 10
+    i32.const 20
+    i32.const 2
+    call $trace_render_query_tile_span
+    i32.const 20
+    i32.const 33
+    call $assert_eq_i32
+
+    i32.const 10
+    i32.const 2
+    i32.const 0
+    call $trace_render_query_tile_span
+    i32.const 10
+    i32.const 34
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 100
+    i32.const 1
+    i32.const 4
+    i32.const 10
+    call $trace_render_plan_begin
+
+    call $trace_render_plan_next
+    i32.const 1
+    i32.const 35
+    call $assert_eq_i32
+    call $trace_render_plan_op_start
+    i32.const 0
+    i32.const 36
+    call $assert_eq_i32
+    call $trace_render_plan_op_end
+    i32.const 25
+    i32.const 37
+    call $assert_eq_i32
+
+    i32.const 0
+    i32.const 100
+    i32.const 2
+    i32.const 1
+    i32.const 10
+    call $trace_render_plan_begin
+
+    call $trace_render_plan_next
+    i32.const 1
+    i32.const 38
+    call $assert_eq_i32
+
+    call $trace_render_plan_next
+    i32.const 2
+    i32.const 39
+    call $assert_eq_i32
+    call $trace_render_plan_op_start
+    i32.const 0
+    i32.const 40
+    call $assert_eq_i32
+    call $trace_render_plan_op_end
+    i32.const 100
+    i32.const 41
+    call $assert_eq_i32
+    call $trace_render_plan_op_track_id
+    i32.const 1
+    i32.const 42
+    call $assert_eq_i32
+
+    i32.const 10
+    i32.const 0
+    i32.const 0
+    i32.const 320
+    call $trace_render_slice_x
+    i32.const 0
+    i32.const 43
+    call $assert_eq_i32
+  )
+
   (func (export "test_host_stubs_are_deterministic")
     call $canvas_get_size
     i64.const 0x0000025800000320
