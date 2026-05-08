@@ -1,5 +1,30 @@
-// Generated from abi/palette.json by tools/generate-runtime-spec.js.
+// Generated from abi/runtime.json, abi/layout.json, and abi/palette.json by tools/generate-runtime-spec.js.
 // Do not edit host/trace-renderer-spec.mjs by hand.
+
+export const TRACE_RENDERER_QUERY_DEFAULTS = Object.freeze({
+  DEFAULT_TRACE_QUERY_OUT_PTR: 12288,
+  DEFAULT_TRACE_QUERY_WINDOW: 1000,
+  DEFAULT_TRACE_QUERY_ROW_CAP: 1024,
+  DEFAULT_TRACE_QUERY_RANGE_BUDGET: 64,
+});
+
+export const TRACE_RENDERER_LAYOUT_DEFAULTS = Object.freeze({
+  DEFAULT_MIN_VIEWPORT_SPAN: 1,
+  DEFAULT_UNKNOWN_AFFORDANCE_WIDTH: 72,
+  DEFAULT_UNKNOWN_STRIPE_SPACING: 8,
+  DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING: 10,
+});
+
+export const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({
+  BYTES: 28,
+  START: 0,
+  DUR: 4,
+  NAME: 8,
+  DEPTH: 12,
+  CAT: 16,
+  COLOR: 20,
+  PARTIAL: 24,
+});
 
 export const TRACE_RENDERER_COLORS = Object.freeze({
   DEFAULT_SLICE_FILL: "#3f6ea8",

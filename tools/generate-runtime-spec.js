@@ -8,6 +8,7 @@ const checkOnly = process.argv.includes("--check");
 const sourcePath = join(root, "abi/runtime.json");
 const spec = JSON.parse(readFileSync(sourcePath, "utf8"));
 const paletteSpec = JSON.parse(readFileSync(join(root, "abi/palette.json"), "utf8"));
+const layoutSpec = require("./layout-spec.js");
 
 function pathKey(paths) {
   return [...paths].sort().join("\n");
@@ -128,6 +129,49 @@ function renderLocalStringConstants(groupName, entries) {
   return lines.join("\n");
 }
 
+function renderLocalNumberConstants(groupName, entries) {
+  const lines = [`const ${groupName} = Object.freeze({`];
+
+  for (const [name, entry] of Object.entries(entries)) {
+    lines.push(`  ${name}: ${entry.value},`);
+  }
+
+  lines.push("});");
+  return lines.join("\n");
+}
+
+function renderIndexQueryResultLayout(groupName) {
+  const lines = [`const ${groupName} = Object.freeze({`];
+
+  lines.push(
+    `  BYTES: ${layoutSpec.INDEX_QUERY_RESULT_FIELD_BYTES * layoutSpec.INDEX_QUERY_RESULT_FIELDS.length},`,
+  );
+  for (const field of layoutSpec.INDEX_QUERY_RESULT_FIELDS) {
+    lines.push(`  ${field.property.toUpperCase()}: ${field.offset},`);
+  }
+
+  lines.push("});");
+  return lines.join("\n");
+}
+
+function renderTraceRendererContractBlock({ local }) {
+  const renderNumbers = local ? renderLocalNumberConstants : renderNumberConstants;
+  const indexLayout = local
+    ? renderIndexQueryResultLayout("INDEX_QUERY_RESULT_LAYOUT")
+    : renderIndexQueryResultLayout("INDEX_QUERY_RESULT_LAYOUT").replace(
+      "const INDEX_QUERY_RESULT_LAYOUT",
+      "export const INDEX_QUERY_RESULT_LAYOUT",
+    );
+
+  return [
+    renderNumbers("TRACE_RENDERER_QUERY_DEFAULTS", spec.traceRenderer.query),
+    "",
+    renderNumbers("TRACE_RENDERER_LAYOUT_DEFAULTS", spec.traceRenderer.layout),
+    "",
+    indexLayout,
+  ].join("\n");
+}
+
 function renderNamedStrings(groupName, entries) {
   const lines = [`export const ${groupName} = Object.freeze({`];
 
@@ -166,9 +210,11 @@ function renderStartupSpecModule() {
 function renderTraceRendererSpecModule() {
   return [
     [
-      "// Generated from abi/palette.json by tools/generate-runtime-spec.js.",
+      "// Generated from abi/runtime.json, abi/layout.json, and abi/palette.json by tools/generate-runtime-spec.js.",
       "// Do not edit host/trace-renderer-spec.mjs by hand.",
     ].join("\n"),
+    "",
+    renderTraceRendererContractBlock({ local: false }),
     "",
     renderStringConstants("TRACE_RENDERER_COLORS", paletteSpec.palettes.default.traceRenderer),
     "",
@@ -186,6 +232,18 @@ function assertTraceRendererInlinePalette() {
   if (!renderer.includes(expected)) {
     throw new Error(
       "host/progressive-trace-renderer.mjs inline TRACE_RENDERER_COLORS is out of date with abi/palette.json",
+    );
+  }
+}
+
+function assertTraceRendererInlineContract() {
+  const rendererPath = join(root, "host/progressive-trace-renderer.mjs");
+  const renderer = readFileSync(rendererPath, "utf8");
+  const expected = renderTraceRendererContractBlock({ local: true });
+
+  if (!renderer.includes(expected)) {
+    throw new Error(
+      "host/progressive-trace-renderer.mjs inline renderer contract is out of date with abi/runtime.json and abi/layout.json",
     );
   }
 }
@@ -216,6 +274,7 @@ function writeIfChanged(path, content) {
 }
 
 assertDuplicateNumericValuesAudited();
+assertTraceRendererInlineContract();
 assertTraceRendererInlinePalette();
 
 const ok = [

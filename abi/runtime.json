@@ -74,6 +74,14 @@
         "description": "These are intentionally distinct timing boundaries: service-worker registration delay after full readiness and cold core interactivity budget."
       },
       {
+        "numericValue": 1000,
+        "paths": [
+          "appLoadBench.budgets.cold.fullLoadMs",
+          "traceRenderer.query.DEFAULT_TRACE_QUERY_WINDOW"
+        ],
+        "description": "Cold full-load readiness and the default renderer query time window are intentionally distinct budgets that happen to share a value."
+      },
+      {
         "numericValue": 25,
         "paths": [
           "appLoadBench.budgets.warmHttp.coreTtiMs",
@@ -99,6 +107,14 @@
           "runtimeDefaults.DEFAULT_INGEST_NAME_MAX_BYTES"
         ],
         "description": "The ingest source-name pointer and source-name byte capacity are intentionally equal today but describe different parts of the scratch-memory layout."
+      },
+      {
+        "numericValue": 1024,
+        "paths": [
+          "runtimeDefaults.DEFAULT_READER_QUERY_ROW_CAP",
+          "traceRenderer.query.DEFAULT_TRACE_QUERY_ROW_CAP"
+        ],
+        "description": "The main-thread reader query cap and progressive renderer query cap both limit rows today, but they belong to separate call-site contracts."
       }
     ]
   },
@@ -130,6 +146,44 @@
     "DEFAULT_INGEST_ETA_STABLE_MS": {
       "value": 3000,
       "description": "Minimum worker ingest progress sample age before ETA is surfaced to avoid first-ramp flicker."
+    }
+  },
+  "traceRenderer": {
+    "query": {
+      "DEFAULT_TRACE_QUERY_OUT_PTR": {
+        "value": 12288,
+        "description": "Default scratch pointer for index query result rows decoded by the progressive trace renderer."
+      },
+      "DEFAULT_TRACE_QUERY_WINDOW": {
+        "value": 1000,
+        "description": "Default minimum time span for one progressive trace renderer query tile."
+      },
+      "DEFAULT_TRACE_QUERY_ROW_CAP": {
+        "value": 1024,
+        "description": "Default maximum index query rows decoded from one progressive trace renderer query."
+      },
+      "DEFAULT_TRACE_QUERY_RANGE_BUDGET": {
+        "value": 64,
+        "description": "Default maximum number of index query ranges the renderer may issue per draw."
+      }
+    },
+    "layout": {
+      "DEFAULT_MIN_VIEWPORT_SPAN": {
+        "value": 1,
+        "description": "Minimum visible time span after pan/zoom clamping."
+      },
+      "DEFAULT_UNKNOWN_AFFORDANCE_WIDTH": {
+        "value": 72,
+        "description": "Default width in CSS pixels for the unknown leading-edge progress affordance."
+      },
+      "DEFAULT_UNKNOWN_STRIPE_SPACING": {
+        "value": 8,
+        "description": "Default stripe spacing in CSS pixels for the unknown leading-edge progress affordance."
+      },
+      "DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING": {
+        "value": 10,
+        "description": "Default stripe spacing in CSS pixels for incomplete query affordances."
+      }
     }
   },
   "performanceMarks": {

@@ -1,16 +1,41 @@
-const DEFAULT_TRACE_QUERY_OUT_PTR = 12288;
-const DEFAULT_TRACE_QUERY_WINDOW = 1000;
-const DEFAULT_TRACE_QUERY_ROW_CAP = 1024;
-const DEFAULT_TRACE_QUERY_RANGE_BUDGET = 64;
-const INDEX_QUERY_RESULT_BYTES = 28;
-const INDEX_QUERY_RESULT_START_TS_OFFSET = 0;
-const INDEX_QUERY_RESULT_DUR_OFFSET = 4;
-const INDEX_QUERY_RESULT_DEPTH_OFFSET = 12;
-const INDEX_QUERY_RESULT_COLOR_OFFSET = 20;
-const INDEX_QUERY_RESULT_PARTIAL_OFFSET = 24;
-const DEFAULT_MIN_VIEWPORT_SPAN = 1;
-const DEFAULT_UNKNOWN_AFFORDANCE_WIDTH = 72;
-const DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING = 10;
+// @generated trace-renderer-contract:start
+const TRACE_RENDERER_QUERY_DEFAULTS = Object.freeze({
+  DEFAULT_TRACE_QUERY_OUT_PTR: 12288,
+  DEFAULT_TRACE_QUERY_WINDOW: 1000,
+  DEFAULT_TRACE_QUERY_ROW_CAP: 1024,
+  DEFAULT_TRACE_QUERY_RANGE_BUDGET: 64,
+});
+
+const TRACE_RENDERER_LAYOUT_DEFAULTS = Object.freeze({
+  DEFAULT_MIN_VIEWPORT_SPAN: 1,
+  DEFAULT_UNKNOWN_AFFORDANCE_WIDTH: 72,
+  DEFAULT_UNKNOWN_STRIPE_SPACING: 8,
+  DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING: 10,
+});
+
+const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({
+  BYTES: 28,
+  START: 0,
+  DUR: 4,
+  NAME: 8,
+  DEPTH: 12,
+  CAT: 16,
+  COLOR: 20,
+  PARTIAL: 24,
+});
+// @generated trace-renderer-contract:end
+const {
+  DEFAULT_TRACE_QUERY_OUT_PTR,
+  DEFAULT_TRACE_QUERY_RANGE_BUDGET,
+  DEFAULT_TRACE_QUERY_ROW_CAP,
+  DEFAULT_TRACE_QUERY_WINDOW,
+} = TRACE_RENDERER_QUERY_DEFAULTS;
+const {
+  DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING,
+  DEFAULT_MIN_VIEWPORT_SPAN,
+  DEFAULT_UNKNOWN_AFFORDANCE_WIDTH,
+  DEFAULT_UNKNOWN_STRIPE_SPACING,
+} = TRACE_RENDERER_LAYOUT_DEFAULTS;
 // Keep renderer colors inline so cold app-ready does not pay a second module
 // fetch; tools/generate-runtime-spec.js checks this block against abi/palette.json.
 const TRACE_RENDERER_COLORS = Object.freeze({
@@ -62,7 +87,10 @@ function colorForSlice(color) {
 
 function readerQueryResultBytes(reader) {
   return Number(
-    globalValue(reader?.exports?.()?.INDEX_QUERY_RESULT_BYTES ?? INDEX_QUERY_RESULT_BYTES),
+    globalValue(
+      reader?.exports?.()?.INDEX_QUERY_RESULT_BYTES ??
+        INDEX_QUERY_RESULT_LAYOUT.BYTES,
+    ),
   );
 }
 
@@ -134,12 +162,12 @@ function readQueryRows(memory, reader, outPtr, count, trackId, options) {
     const ptr = outPtr + i * rowBytes;
 
     rows.push({
-      color: view.getUint32(ptr + INDEX_QUERY_RESULT_COLOR_OFFSET, true),
-      dur: view.getUint32(ptr + INDEX_QUERY_RESULT_DUR_OFFSET, true),
-      depth: view.getUint32(ptr + INDEX_QUERY_RESULT_DEPTH_OFFSET, true),
+      color: view.getUint32(ptr + INDEX_QUERY_RESULT_LAYOUT.COLOR, true),
+      dur: view.getUint32(ptr + INDEX_QUERY_RESULT_LAYOUT.DUR, true),
+      depth: view.getUint32(ptr + INDEX_QUERY_RESULT_LAYOUT.DEPTH, true),
       partial:
-        view.getUint32(ptr + INDEX_QUERY_RESULT_PARTIAL_OFFSET, true) !== 0,
-      start: view.getUint32(ptr + INDEX_QUERY_RESULT_START_TS_OFFSET, true),
+        view.getUint32(ptr + INDEX_QUERY_RESULT_LAYOUT.PARTIAL, true) !== 0,
+      start: view.getUint32(ptr + INDEX_QUERY_RESULT_LAYOUT.START, true),
       trackId,
     });
   }
@@ -227,7 +255,7 @@ function drawUnknownRangeAffordance(context, width, bandHeight, options) {
     options.unknownAffordanceWidth ?? DEFAULT_UNKNOWN_AFFORDANCE_WIDTH,
   );
   const x = width - affordanceWidth;
-  const spacing = options.unknownStripeSpacing ?? 8;
+  const spacing = options.unknownStripeSpacing ?? DEFAULT_UNKNOWN_STRIPE_SPACING;
 
   context.save?.();
   context.fillStyle =

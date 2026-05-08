@@ -965,7 +965,10 @@ function runSelfTest() {
   assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
   assert.match(startupSpec, /Generated from abi\/runtime\.json and abi\/palette\.json/);
-  assert.match(traceRendererSpec, /Generated from abi\/palette\.json/);
+  assert.match(
+    traceRendererSpec,
+    /Generated from abi\/runtime\.json, abi\/layout\.json, and abi\/palette\.json/,
+  );
   assert.match(bootstrap, /from "\.\/host\/startup-spec\.mjs"/);
   assert.doesNotMatch(bootstrap, /runtime-spec\.mjs/);
   assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
