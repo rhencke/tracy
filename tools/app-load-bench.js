@@ -1034,7 +1034,13 @@ function runSelfTest() {
     indexHtml,
     /<link rel="modulepreload" href="bootstrap\.mjs">/,
   );
-  assert.match(
+  assert.deepEqual(
+    [...indexHtml.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(
+      (match) => match[1],
+    ),
+    ["bootstrap.mjs"],
+  );
+  assert.doesNotMatch(
     indexHtml,
     /<link rel="modulepreload" href="host\/wasm-modules\.mjs">/,
   );
