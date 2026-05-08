@@ -666,7 +666,7 @@ async function checkInteractiveIngestGate() {
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_first_events",
-    [canvasHarness.firstTraceDrawAt() ?? -1, rendererInstance.status().lastRows.length],
+    [canvasHarness.firstTraceDrawAt() ?? -1, rendererInstance.status().rows],
   );
 
   await runFrame(frames, canvasHarness, nextFrameAt);
