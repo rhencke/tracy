@@ -418,6 +418,15 @@ async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
   assert.ok(callback(), label);
 }
 
+async function runIngestFrame(frames, canvasHarness, ts) {
+  await waitForAsyncCondition(
+    () => frames.length > 0,
+    `expected a frame callback at ${ts} ms`,
+  );
+  await flushAsyncWork();
+  await runFrame(frames, canvasHarness, ts);
+}
+
 async function checkInteractiveIngestGate() {
   await loadGeneratedInteractiveIngestCheckSpec();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
@@ -657,6 +666,20 @@ async function checkInteractiveIngestGate() {
     wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
     "interactive ingest gate should instantiate the real main-thread index reader module",
   );
+  await waitForAsyncCondition(
+    () => {
+      const workerRange = controller.status().coveredRange;
+      const readerRange = controller.indexReader.coveredRange();
+
+      return (
+        workerRange?.valid === true &&
+        readerRange.valid === true &&
+        Math.min(workerRange.end, readerRange.end) >
+          Math.max(workerRange.start, readerRange.start)
+      );
+    },
+    "main-thread reader should expose queryable covered slices before first draw",
+  );
 
   let nextFrameAt = 16;
   while (
@@ -667,8 +690,7 @@ async function checkInteractiveIngestGate() {
     ) &&
     controller.status().state !== "error"
   ) {
-    await flushAsyncWork();
-    await runFrame(frames, canvasHarness, nextFrameAt);
+    await runIngestFrame(frames, canvasHarness, nextFrameAt);
     nextFrameAt += 16;
   }
   if (
@@ -678,8 +700,7 @@ async function checkInteractiveIngestGate() {
     ) &&
     controller.status().state !== "error"
   ) {
-    await flushAsyncWork();
-    await runFrame(frames, canvasHarness, 100);
+    await runIngestFrame(frames, canvasHarness, 100);
     nextFrameAt = 116;
   }
   await flushAsyncWork();
