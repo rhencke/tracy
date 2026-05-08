@@ -714,11 +714,20 @@ function installFileSelectionIngest(memory, host, ingestWorker, options) {
 
 function shouldLoadProgressiveTraceRenderer(ingestWorker) {
   const workerStatus = ingestWorker?.status?.();
-  const readerStatus = ingestWorker?.indexReader?.status?.();
+  const reader = ingestWorker?.indexReader;
+  const readerStatus = reader?.status?.();
+  const readerCoveredRange =
+    readerStatus?.state === READER_STATUS.READY &&
+      typeof reader?.coveredRange === "function"
+      ? reader.coveredRange()
+      : null;
 
   return (
-    workerStatus?.coveredRange?.valid === true &&
-    readerStatus?.state === READER_STATUS.READY
+    readerStatus?.state === READER_STATUS.READY &&
+    (
+      workerStatus?.coveredRange?.valid === true ||
+      readerCoveredRange?.valid === true
+    )
   );
 }
 

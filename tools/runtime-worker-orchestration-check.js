@@ -2050,11 +2050,15 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
   let coveredRange = null;
+  let readerCoveredRange = null;
   let readerState = "idle";
   let importCalls = 0;
   let drawCalls = 0;
   const ingestWorker = {
     indexReader: {
+      coveredRange() {
+        return readerCoveredRange;
+      },
       status() {
         return { state: readerState };
       },
@@ -2101,9 +2105,25 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   assert.equal(importCalls, 1, "renderer implementation module should be imported once");
   assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
-  coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
+  readerCoveredRange = { end: 120, start: 100, valid: true };
   readerState = "ready";
   frames[1](2);
+  await flushMicrotasks();
+  assert.equal(
+    drawCalls,
+    0,
+    "renderer should wait a frame for creation after the reader becomes queryable",
+  );
+
+  frames[2](3);
+  assert.equal(
+    drawCalls,
+    1,
+    "renderer should draw from reader coverage before the next worker covered range message",
+  );
+
+  coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
+  frames[3](4);
   assert.equal(
     importCalls,
     1,
@@ -2111,9 +2131,9 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   );
 
   await flushMicrotasks();
-  frames[2](3);
+  frames[4](5);
   assert.equal(importCalls, 1);
-  assert.equal(drawCalls, 1);
+  assert.equal(drawCalls, 3);
 }
 
 async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
