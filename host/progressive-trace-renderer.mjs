@@ -294,8 +294,36 @@ function appendSkippedQueryRanges(ranges, viewport, trackId, queryStart, trackCo
   }
 }
 
-function createWasmCanvasOpPlanner(exports = null) {
+const REQUIRED_TRACE_RENDER_EXPORTS = Object.freeze([
+  "trace_render_plan_begin",
+  "trace_render_plan_next",
+  "trace_render_plan_op_end",
+  "trace_render_plan_op_start",
+  "trace_render_plan_op_track_id",
+  "trace_render_query_ranges_per_track",
+  "trace_render_query_tile_span",
+  "trace_render_slice_end_x",
+  "trace_render_slice_x",
+  "trace_render_slice_y",
+]);
+
+function requireTraceRenderExports(plannerExports) {
+  const missing = REQUIRED_TRACE_RENDER_EXPORTS.filter(
+    (name) => typeof plannerExports?.[name] !== "function",
+  );
+
+  if (missing.length > 0) {
+    throw new Error(`renderer planner missing required Wasm exports: ${missing.join(", ")}`);
+  }
+}
+
+function createWasmCanvasOpPlanner(exports = null, options = {}) {
   const plannerExports = exports ?? {};
+  const requireExports = options.requireExports === true;
+
+  if (requireExports) {
+    requireTraceRenderExports(plannerExports);
+  }
 
   function queryRangesPerTrack(queryRangeBudget, trackCount) {
     const fallback = Math.max(1, Math.floor(queryRangeBudget / trackCount));
@@ -655,7 +683,10 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   );
   const minViewportSpan = options.minViewportSpan ?? DEFAULT_MIN_VIEWPORT_SPAN;
   const renderPlanner = options.renderPlanner ??
-    createWasmCanvasOpPlanner(options.renderPlannerExports);
+    createWasmCanvasOpPlanner(
+      options.renderPlannerExports,
+      { requireExports: true },
+    );
   const state = {
     cappedQueries: [],
     drag: null,

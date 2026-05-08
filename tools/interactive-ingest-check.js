@@ -404,6 +404,101 @@ async function flushAsyncWork() {
   await flushMicrotasks();
 }
 
+function makeTraceRenderPlannerExports() {
+  const state = {
+    ops: [],
+    viewportEnd: 0,
+    viewportStart: 0,
+  };
+
+  return {
+    trace_render_plan_begin(viewportStart, viewportEnd, trackCount, queryRangeBudget, queryWindow) {
+      state.viewportStart = viewportStart;
+      state.viewportEnd = viewportEnd;
+      const rangesPerTrack = Math.max(1, Math.floor(queryRangeBudget / trackCount));
+      const tileSpan = Math.max(
+        1,
+        queryWindow,
+        Math.ceil((viewportEnd - viewportStart) / rangesPerTrack),
+      );
+      const ops = [];
+      let queryRangeCount = 0;
+
+      queryLoop:
+      for (let trackId = 0; trackId < trackCount; trackId += 1) {
+        for (
+          let queryStart = viewportStart;
+          queryStart < viewportEnd;
+          queryStart = Math.min(viewportEnd, queryStart + tileSpan)
+        ) {
+          if (queryRangeCount >= queryRangeBudget) {
+            if (queryStart < viewportEnd) {
+              ops.push({ end: viewportEnd, start: queryStart, tag: 2, trackId });
+            }
+            for (
+              let skippedTrackId = trackId + 1;
+              skippedTrackId < trackCount;
+              skippedTrackId += 1
+            ) {
+              ops.push({
+                end: viewportEnd,
+                start: viewportStart,
+                tag: 2,
+                trackId: skippedTrackId,
+              });
+            }
+            break queryLoop;
+          }
+
+          ops.push({
+            end: Math.min(viewportEnd, queryStart + tileSpan),
+            start: queryStart,
+            tag: 1,
+            trackId,
+          });
+          queryRangeCount += 1;
+        }
+      }
+
+      state.ops = ops;
+    },
+    trace_render_plan_next() {
+      const op = state.ops.shift();
+
+      if (op === undefined) {
+        return 0;
+      }
+
+      state.currentOp = op;
+      return op.tag;
+    },
+    trace_render_plan_op_end() {
+      return state.currentOp?.end ?? state.viewportEnd;
+    },
+    trace_render_plan_op_start() {
+      return state.currentOp?.start ?? state.viewportStart;
+    },
+    trace_render_plan_op_track_id() {
+      return state.currentOp?.trackId ?? 0;
+    },
+    trace_render_query_ranges_per_track(queryRangeBudget, trackCount) {
+      return Math.max(1, Math.floor(queryRangeBudget / trackCount));
+    },
+    trace_render_query_tile_span(viewportSpan, queryWindow, rangesPerTrack) {
+      return Math.max(1, queryWindow, Math.ceil(viewportSpan / rangesPerTrack));
+    },
+    trace_render_slice_end_x(sliceEnd, viewportStart, viewportSpan, canvasWidth) {
+      return Math.min(canvasWidth, ((sliceEnd - viewportStart) / viewportSpan) * canvasWidth);
+    },
+    trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
+      return Math.max(0, ((sliceStart - viewportStart) / viewportSpan) * canvasWidth);
+    },
+    trace_render_slice_y(depth, top, laneHeight, laneGap) {
+      return top + depth * (laneHeight + laneGap);
+    },
+  };
+}
+
 async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
   const deadline = Date.now() + timeoutMs;
 
@@ -544,6 +639,7 @@ async function checkInteractiveIngestGate() {
       return {
         exports: {
           ...interactiveContract,
+          ...makeTraceRenderPlannerExports(),
           tracy_main() {
             ticks.push("main");
           },

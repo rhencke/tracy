@@ -916,6 +916,7 @@ async function loadApp(memory, host, options = {}) {
           {
             ...options.progressiveTraceRendererOptions,
             document: options.document,
+            renderPlannerExports: exports,
           },
         );
         if (shouldDrawProgressiveTraceRenderer(options.ingestWorker)) {

@@ -97,6 +97,136 @@ async function flushMicrotasks(count = 8) {
   }
 }
 
+function makeTraceRenderPlannerExports(observed = {}) {
+  const state = {
+    ops: [],
+    viewportEnd: 0,
+    viewportStart: 0,
+  };
+
+  return {
+    trace_render_plan_begin(
+      viewportStart,
+      viewportEnd,
+      trackCount,
+      queryRangeBudget,
+      queryWindow,
+    ) {
+      observed.planBegin?.({
+        queryRangeBudget,
+        queryWindow,
+        trackCount,
+        viewportEnd,
+        viewportStart,
+      });
+      state.viewportStart = viewportStart;
+      state.viewportEnd = viewportEnd;
+      const rangesPerTrack = Math.max(1, Math.floor(queryRangeBudget / trackCount));
+      const tileSpan = Math.max(
+        1,
+        queryWindow,
+        Math.ceil((viewportEnd - viewportStart) / rangesPerTrack),
+      );
+      const ops = [];
+      let queryRangeCount = 0;
+
+      queryLoop:
+      for (let trackId = 0; trackId < trackCount; trackId += 1) {
+        for (
+          let queryStart = viewportStart;
+          queryStart < viewportEnd;
+          queryStart = Math.min(viewportEnd, queryStart + tileSpan)
+        ) {
+          if (queryRangeCount >= queryRangeBudget) {
+            if (queryStart < viewportEnd) {
+              ops.push({
+                end: viewportEnd,
+                start: Math.max(viewportStart, queryStart),
+                tag: 2,
+                trackId,
+              });
+            }
+            for (
+              let skippedTrackId = trackId + 1;
+              skippedTrackId < trackCount;
+              skippedTrackId += 1
+            ) {
+              ops.push({
+                end: viewportEnd,
+                start: viewportStart,
+                tag: 2,
+                trackId: skippedTrackId,
+              });
+            }
+            break queryLoop;
+          }
+
+          ops.push({
+            end: Math.min(viewportEnd, queryStart + tileSpan),
+            start: queryStart,
+            tag: 1,
+            trackId,
+          });
+          queryRangeCount += 1;
+        }
+      }
+
+      state.ops = ops;
+    },
+    trace_render_plan_next() {
+      const op = state.ops.shift();
+
+      if (op === undefined) {
+        return 0;
+      }
+
+      state.currentOp = op;
+      return op.tag;
+    },
+    trace_render_plan_op_end() {
+      return state.currentOp?.end ?? state.viewportEnd;
+    },
+    trace_render_plan_op_start() {
+      return state.currentOp?.start ?? state.viewportStart;
+    },
+    trace_render_plan_op_track_id() {
+      return state.currentOp?.trackId ?? 0;
+    },
+    trace_render_query_ranges_per_track(queryRangeBudget, trackCount) {
+      observed.queryRangesPerTrack?.({ queryRangeBudget, trackCount });
+      return Math.max(1, Math.floor(queryRangeBudget / trackCount));
+    },
+    trace_render_query_tile_span(viewportSpan, queryWindow, rangesPerTrack) {
+      observed.queryTileSpan?.({ queryWindow, rangesPerTrack, viewportSpan });
+      return Math.max(1, queryWindow, Math.ceil(viewportSpan / rangesPerTrack));
+    },
+    trace_render_slice_end_x(sliceEnd, viewportStart, viewportSpan, canvasWidth) {
+      observed.sliceEndX?.({ canvasWidth, sliceEnd, viewportSpan, viewportStart });
+      return Math.min(
+        canvasWidth,
+        ((sliceEnd - viewportStart) / viewportSpan) * canvasWidth,
+      );
+    },
+    trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
+      observed.sliceX?.({ canvasWidth, sliceStart, viewportSpan, viewportStart });
+      return Math.max(0, ((sliceStart - viewportStart) / viewportSpan) * canvasWidth);
+    },
+    trace_render_slice_y(depth, top, laneHeight, laneGap) {
+      observed.sliceY?.({ depth, laneGap, laneHeight, top });
+      return top + depth * (laneHeight + laneGap);
+    },
+  };
+}
+
+function makeAppExports(extra = {}) {
+  return {
+    ...makeTraceRenderPlannerExports(),
+    tracy_main() {},
+    tracy_tick() {},
+    ...extra,
+  };
+}
+
 async function checkRuntimeOrchestratesWorker() {
   const { frames } = installBrowserStubs();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
@@ -140,14 +270,14 @@ async function checkRuntimeOrchestratesWorker() {
         thread,
       });
       return {
-        exports: {
+        exports: makeAppExports({
           tracy_main() {
             ticks.push("main");
           },
           tracy_tick(ts) {
             ticks.push(ts);
           },
-        },
+        }),
       };
     },
     importProgressiveTraceRenderer: async () => ({
@@ -299,10 +429,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   const controller = runtime.runApp(memory, host, {
     indexReader: false,
     instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {},
-        tracy_tick() {},
-      },
+      exports: makeAppExports(),
     }),
     worker: {
       Worker: FakeWorker,
@@ -485,10 +612,7 @@ async function checkFileSelectionSetupErrorsReportStatus() {
   const controller = runtime.runApp(memory, host, {
     indexReader: false,
     instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {},
-        tracy_tick() {},
-      },
+      exports: makeAppExports(),
     }),
     worker: {
       Worker: FakeWorker,
@@ -1358,6 +1482,7 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
     canvas,
     queryOutPtr: 2048,
     queryWindow: 100,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   const rows = renderer.draw(123);
@@ -1493,6 +1618,7 @@ async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
     canvas,
     queryOutPtr: 2048,
     queryWindow: 1000,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   renderer.draw(1);
@@ -1514,6 +1640,7 @@ async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
       canvas,
       queryOutPtr: 2048,
       queryWindow: 1000,
+      renderPlannerExports: makeTraceRenderPlannerExports(),
     },
   );
 
@@ -1617,6 +1744,7 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
     queryOutPtr: 2048,
     queryRowCap: 1,
     queryWindow: 100,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   const rows = renderer.draw(123);
@@ -1701,6 +1829,7 @@ async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
   const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
     canvas,
     queryOutPtr: 2048,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   const rows = renderer.draw(123);
@@ -1772,6 +1901,7 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
     queryOutPtr: 2048,
     queryRangeBudget: 8,
     queryWindow: 1000,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   const rows = renderer.draw(123);
@@ -1878,6 +2008,7 @@ async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhauste
     queryOutPtr: 2048,
     queryRangeBudget: 2,
     queryWindow: 100,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   const rows = renderer.draw(123);
@@ -1915,6 +2046,21 @@ async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhauste
 
 async function checkProgressiveTraceRendererUsesWasmCanvasOpPlanner() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  assert.throws(
+    () => rendererModule.createProgressiveTraceRenderer(
+      new WebAssembly.Memory({ initial: 1 }),
+      { status: () => ({ state: "idle" }) },
+      {
+        canvas: {
+          getContext() {
+            return {};
+          },
+        },
+      },
+    ),
+    /renderer planner missing required Wasm exports/,
+    "production renderer construction should fail closed without trace_render_* Wasm exports",
+  );
   const calls = [];
   const planner = rendererModule.__test.createWasmCanvasOpPlanner({
     trace_render_query_ranges_per_track(queryRangeBudget, trackCount) {
@@ -2119,6 +2265,7 @@ async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() 
     minViewportSpan: 10,
     queryOutPtr: 2048,
     queryWindow: 1000,
+    renderPlannerExports: makeTraceRenderPlannerExports(),
   });
 
   renderer.draw(1);
@@ -2196,6 +2343,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   let readerState = "idle";
   let importCalls = 0;
   let drawCalls = 0;
+  let rendererOptions = null;
   const ingestWorker = {
     indexReader: {
       coveredRange() {
@@ -2214,7 +2362,10 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     importProgressiveTraceRenderer: async () => {
       importCalls += 1;
       return {
-        createProgressiveTraceRenderer() {
+        createProgressiveTraceRenderer(nextMemory, nextIngestWorker, options) {
+          assert.equal(nextMemory, memory);
+          assert.equal(nextIngestWorker, ingestWorker);
+          rendererOptions = options;
           return {
             draw() {
               drawCalls += 1;
@@ -2225,10 +2376,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     },
     ingestWorker,
     instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {},
-        tracy_tick() {},
-      },
+      exports: makeAppExports(),
     }),
     worker: {
       Worker: FakeWorker,
@@ -2262,6 +2410,11 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     drawCalls,
     1,
     "renderer should be created after the reader is ready and a worker handoff exists",
+  );
+  assert.equal(
+    typeof rendererOptions?.renderPlannerExports?.trace_render_plan_begin,
+    "function",
+    "production runtime should pass app Wasm trace_render_* exports into the renderer",
   );
 
   readerCoveredRange = { end: 120, start: 100, valid: true };
@@ -2311,10 +2464,7 @@ async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
     }),
     ingestWorker,
     instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {},
-        tracy_tick() {},
-      },
+      exports: makeAppExports(),
     }),
     worker: {
       Worker: FakeWorker,
@@ -2358,10 +2508,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
       return rendererImport;
     },
     instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {},
-        tracy_tick() {},
-      },
+      exports: makeAppExports(),
     }),
     performance,
     worker: {
@@ -2436,10 +2583,7 @@ async function checkAppReadyFailsWhenDeferredRendererFails() {
       throw new Error("deferred renderer unavailable");
     },
     instantiateWasmModuleForThread: async () => ({
-      exports: {
-        tracy_main() {},
-        tracy_tick() {},
-      },
+      exports: makeAppExports(),
     }),
     performance,
     worker: {
