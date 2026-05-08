@@ -8,6 +8,7 @@ const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
@@ -38,6 +39,15 @@ const MIME_TYPES = Object.freeze({
   ".wasm": "application/wasm",
   ".webmanifest": "application/manifest+json",
 });
+const GZIP_EXTENSIONS = new Set([
+  ".html",
+  ".js",
+  ".json",
+  ".mjs",
+  ".svg",
+  ".wasm",
+  ".webmanifest",
+]);
 const REQUIRED_DIST_FILES = Object.freeze([
   "bootstrap.mjs",
   "build-info.js",
@@ -127,6 +137,14 @@ function contentType(file) {
   return MIME_TYPES[path.extname(file)] ?? "application/octet-stream";
 }
 
+function acceptsGzip(request) {
+  return /\bgzip\b/.test(request.headers["accept-encoding"] ?? "");
+}
+
+function shouldGzip(file) {
+  return GZIP_EXTENSIONS.has(path.extname(file));
+}
+
 function sendNotFound(response) {
   response.writeHead(404);
   response.end("not found");
@@ -211,14 +229,26 @@ async function createServer(distDir) {
       return;
     }
 
-    const stream = fs.createReadStream(file);
-    stream.on("error", (error) => response.destroy(error));
-    response.writeHead(200, {
+    const source = await fs.promises.readFile(file);
+    const body =
+      acceptsGzip(request) && shouldGzip(file)
+        ? zlib.gzipSync(source)
+        : source;
+    const headers = {
       "Cache-Control": "public, max-age=31536000, immutable",
-      "Content-Length": stat.size,
+      "Content-Length": body.byteLength,
       "Content-Type": contentType(file),
+    };
+
+    if (body !== source) {
+      headers["Content-Encoding"] = "gzip";
+      headers.Vary = "Accept-Encoding";
+    }
+
+    response.writeHead(200, {
+      ...headers,
     });
-    stream.pipe(response);
+    response.end(body);
   });
   const port = await listen(server);
 
@@ -839,7 +869,9 @@ function runSelfTest() {
   );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /fs\.promises\.stat/);
-  assert.match(staticServerSource, /fs\.createReadStream/);
+  assert.match(staticServerSource, /fs\.promises\.readFile/);
+  assert.match(staticServerSource, /Content-Encoding"\] = "gzip"/);
+  assert.match(staticServerSource, /Content-Length": body\.byteLength/);
   assert.doesNotMatch(staticServerSource, /fs\.(existsSync|statSync|readFileSync)/);
 
   const tmpDist = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-app-load-dist-"));
