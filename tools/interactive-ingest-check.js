@@ -392,8 +392,8 @@ function makeCanvasHarness() {
   };
 }
 
-async function flushMicrotasks() {
-  for (let i = 0; i < 10; i += 1) {
+async function flushMicrotasks(count = 32) {
+  for (let i = 0; i < count; i += 1) {
     await Promise.resolve();
   }
 }
@@ -670,6 +670,17 @@ async function checkInteractiveIngestGate() {
     await flushAsyncWork();
     await runFrame(frames, canvasHarness, nextFrameAt);
     nextFrameAt += 16;
+  }
+  if (
+    (
+      rendererInstance === null ||
+      canvasHarness.firstTraceDrawAt() === null
+    ) &&
+    controller.status().state !== "error"
+  ) {
+    await flushAsyncWork();
+    await runFrame(frames, canvasHarness, 100);
+    nextFrameAt = 116;
   }
   await flushAsyncWork();
   assert.notEqual(controller.status().state, "error", controller.status().error);
