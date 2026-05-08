@@ -5,16 +5,9 @@ const warmProgressiveTraceRendererPromise =
   serviceWorkerController === null
     ? null
     : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
-const afterProtectedStartupBoundary = () => new Promise((resolve) => {
-  const channel = new MessageChannel();
-  channel.port1.onmessage = resolve;
-  channel.port2.postMessage(undefined);
-});
 const importProgressiveTraceRenderer = () =>
   warmProgressiveTraceRendererPromise ??
-  afterProtectedStartupBoundary().then(() =>
-    import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`),
-  );
+  import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const instantiateWasmModuleForThread = async (id, thread, imports, options = {}) => {
   if (id !== "app" || thread !== "main") {
     const { instantiateWasmModuleForThread: instantiateWasmGraph } = await import("./host/wasm-modules.mjs");

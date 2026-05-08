@@ -490,9 +490,10 @@ function main() {
   assert.match(bootstrapSource, /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/);
   assert.match(
     bootstrapSource,
-    /const afterProtectedStartupBoundary = \(\) =>[\s\S]+new MessageChannel\(\)/,
+    /const importProgressiveTraceRenderer = \(\) =>\s+warmProgressiveTraceRendererPromise \?\?\s+import/,
   );
-  assert.match(bootstrapSource, /afterProtectedStartupBoundary\(\)\.then\(\(\) =>[\s\S]+import/);
+  assert.doesNotMatch(bootstrapSource, /afterProtectedStartupBoundary/);
+  assert.doesNotMatch(bootstrapSource, /new MessageChannel\(\)/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(resolve/);
   assert.doesNotMatch(
     bootstrapSource,

@@ -1106,8 +1106,12 @@ function runSelfTest() {
     bootstrap,
     /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/,
   );
-  assert.match(bootstrap, /const afterProtectedStartupBoundary = \(\) =>[\s\S]+new MessageChannel\(\)/);
-  assert.match(bootstrap, /afterProtectedStartupBoundary\(\)\.then\(\(\) =>[\s\S]+import/);
+  assert.match(
+    bootstrap,
+    /const importProgressiveTraceRenderer = \(\) =>\s+warmProgressiveTraceRendererPromise \?\?\s+import/,
+  );
+  assert.doesNotMatch(bootstrap, /afterProtectedStartupBoundary/);
+  assert.doesNotMatch(bootstrap, /new MessageChannel\(\)/);
   assert.doesNotMatch(bootstrap, /setTimeout\(resolve/);
   assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(
