@@ -781,6 +781,10 @@ function runSelfTest() {
   assert.ok(runtimeCoreReadyOffset < appReadyOffset);
   assert.match(
     indexHtml,
+    /<link rel="modulepreload" href="bootstrap\.js">/,
+  );
+  assert.match(
+    indexHtml,
     /<link rel="modulepreload" href="host\/wasm-modules\.mjs">/,
   );
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
