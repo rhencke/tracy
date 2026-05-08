@@ -1082,6 +1082,7 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   assert.deepEqual(renderer.status(), {
     cappedQueries: [],
     error: null,
+    incompleteQueryRanges: [],
     rows: 2,
     unknownRange: { pending: true, start: 180 },
     userInteracted: false,
@@ -1113,6 +1114,7 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
   assert.deepEqual(renderer.status(), {
     cappedQueries: [],
     error: null,
+    incompleteQueryRanges: [],
     rows: 2,
     unknownRange: null,
     userInteracted: false,
@@ -1125,15 +1127,49 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   const memory = new WebAssembly.Memory({ initial: 1 });
   const queryCalls = [];
   const decoded = [];
+  const operations = [];
   const canvas = {
     height: 120,
     width: 240,
     getContext() {
       return {
-        clearRect() {},
-        fillRect() {},
-        restore() {},
-        save() {},
+        beginPath() {
+          operations.push({ op: "beginPath" });
+        },
+        clearRect(x, y, width, height) {
+          operations.push({ height, op: "clearRect", width, x, y });
+        },
+        clip() {
+          operations.push({ op: "clip" });
+        },
+        fillRect(x, y, width, height) {
+          operations.push({
+            fillStyle: this.fillStyle,
+            height,
+            op: "fillRect",
+            width,
+            x,
+            y,
+          });
+        },
+        lineTo(x, y) {
+          operations.push({ op: "lineTo", x, y });
+        },
+        moveTo(x, y) {
+          operations.push({ op: "moveTo", x, y });
+        },
+        rect(x, y, width, height) {
+          operations.push({ height, op: "rect", width, x, y });
+        },
+        restore() {
+          operations.push({ op: "restore" });
+        },
+        save() {
+          operations.push({ op: "save" });
+        },
+        stroke() {
+          operations.push({ op: "stroke", strokeStyle: this.strokeStyle });
+        },
       };
     },
   };
@@ -1174,7 +1210,7 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
     canvas,
     decodeQueryRows({ count, outPtr, trackId }) {
       decoded.push({ count, outPtr, trackId });
-      return [{ dur: 8, start: 110, trackId }];
+      return [{ dur: 8, depth: 0, start: 110, trackId }];
     },
     queryOutPtr: 2048,
     queryRowCap: 1,
@@ -1191,6 +1227,29 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   assert.deepEqual(renderer.status().cappedQueries, [
     { matchedRows: 4096, trackId: 0, writtenRows: 1 },
   ]);
+  assert.deepEqual(renderer.status().incompleteQueryRanges, [
+    { end: 200, start: 100, trackId: 0 },
+  ]);
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "fillRect" &&
+        operation.fillStyle === "rgba(180, 83, 9, 0.16)" &&
+        operation.x === 0 &&
+        operation.width === 240,
+    ),
+    true,
+    "capped query ranges should be visibly marked incomplete",
+  );
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.op === "stroke" &&
+        operation.strokeStyle === "rgba(146, 64, 14, 0.42)",
+    ),
+    true,
+    "capped query ranges should include an incomplete-range stripe overlay",
+  );
 }
 
 async function checkProgressiveTraceRendererTilesFullVisibleViewport() {

@@ -10,6 +10,7 @@ const INDEX_QUERY_RESULT_COLOR_OFFSET = 20;
 const INDEX_QUERY_RESULT_PARTIAL_OFFSET = 24;
 const DEFAULT_MIN_VIEWPORT_SPAN = 1;
 const DEFAULT_UNKNOWN_AFFORDANCE_WIDTH = 72;
+const DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING = 10;
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;
@@ -200,11 +201,68 @@ function drawUnknownRangeAffordance(context, width, bandHeight, options) {
   context.restore?.();
 }
 
+function drawIncompleteQueryAffordances(context, width, bandHeight, viewport, ranges, options) {
+  if (ranges.length === 0) {
+    return;
+  }
+
+  const span = Math.max(1, viewport.end - viewport.start);
+  const spacing = options.incompleteQueryStripeSpacing ??
+    DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING;
+
+  context.save?.();
+  context.fillStyle =
+    options.incompleteQueryFillStyle ?? "rgba(180, 83, 9, 0.16)";
+  context.strokeStyle =
+    options.incompleteQueryStripeStyle ?? "rgba(146, 64, 14, 0.42)";
+  context.lineWidth = 1;
+
+  for (const range of ranges) {
+    const start = Math.max(viewport.start, range.start);
+    const end = Math.min(viewport.end, range.end);
+
+    if (end <= start) {
+      continue;
+    }
+
+    const x = Math.max(0, ((start - viewport.start) / span) * width);
+    const endX = Math.min(width, ((end - viewport.start) / span) * width);
+    const rangeWidth = Math.max(1, endX - x);
+
+    context.fillRect?.(x, 0, rangeWidth, bandHeight);
+    context.save?.();
+    context.beginPath?.();
+    if (typeof context.rect === "function" && typeof context.clip === "function") {
+      context.rect(x, 0, rangeWidth, bandHeight);
+      context.clip();
+    }
+
+    for (let sx = x - bandHeight; sx < x + rangeWidth + bandHeight; sx += spacing) {
+      context.beginPath?.();
+      context.moveTo?.(sx, bandHeight);
+      context.lineTo?.(sx + bandHeight, 0);
+      context.stroke?.();
+    }
+    context.restore?.();
+  }
+
+  context.restore?.();
+}
+
 function isIngestActive(workerStatus) {
   return workerStatus?.state !== "complete" && workerStatus?.state !== "idle";
 }
 
-function drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStatus, options) {
+function drawTraceRows(
+  context,
+  canvas,
+  rows,
+  viewport,
+  coveredRange,
+  workerStatus,
+  incompleteQueryRanges,
+  options,
+) {
   const width = canvasDimension(canvas, "width", 800);
   const height = canvasDimension(canvas, "height", 400);
   const laneHeight = options.laneHeight ?? 10;
@@ -238,6 +296,15 @@ function drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStat
     }
   }
 
+  drawIncompleteQueryAffordances(
+    context,
+    width,
+    bandHeight,
+    viewport,
+    incompleteQueryRanges,
+    options,
+  );
+
   if (coveredRange.end <= viewport.end && ingestActive) {
     drawUnknownRangeAffordance(context, width, bandHeight, options);
   }
@@ -264,6 +331,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     cappedQueries: [],
     drag: null,
     error: null,
+    incompleteQueryRanges: [],
     lastRows: [],
     unknownRange: null,
     userInteracted: false,
@@ -418,6 +486,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       Math.ceil(viewportSpan / queryRangesPerTrack),
     );
     const cappedQueries = [];
+    const incompleteQueryRanges = [];
     const rows = [];
     let queryRangeCount = 0;
 
@@ -453,17 +522,32 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
               trackId,
               writtenRows: result.writtenRows,
             });
+            incompleteQueryRanges.push({
+              end: queryEnd,
+              start: queryStart,
+              trackId,
+            });
           }
         }
       }
 
       state.error = null;
       state.cappedQueries = cappedQueries;
+      state.incompleteQueryRanges = incompleteQueryRanges;
       state.lastRows = rows;
       state.unknownRange = isIngestActive(workerStatus)
         ? { pending: true, start: coveredRange.end }
         : null;
-      drawTraceRows(context, canvas, rows, viewport, coveredRange, workerStatus, options);
+      drawTraceRows(
+        context,
+        canvas,
+        rows,
+        viewport,
+        coveredRange,
+        workerStatus,
+        incompleteQueryRanges,
+        options,
+      );
     } catch (error) {
       state.error = errorMessage(error);
       options.onError?.(error);
@@ -479,6 +563,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       return {
         cappedQueries: state.cappedQueries,
         error: state.error,
+        incompleteQueryRanges: state.incompleteQueryRanges,
         rows: state.lastRows.length,
         unknownRange: state.unknownRange,
         userInteracted: state.userInteracted,
