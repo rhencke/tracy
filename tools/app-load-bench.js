@@ -719,14 +719,15 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
-      const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? 0;
+      const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime;
+      const shellPaint = performance.getEntriesByName("tracy.app.shell.paint")[0]?.startTime;
       const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
       const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
         coreTtiMs: coreReady - coreStart,
-        fcpMs: fcp,
+        fcpMs: shellPaint ?? fcp ?? 0,
         fullLoadMs: appLoad,
         wasmInstantiateMs: wasm,
       };
@@ -918,6 +919,7 @@ function runSelfTest() {
   const startupSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "startup-spec.mjs"), "utf8");
   const traceRendererSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "trace-renderer-spec.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
+  const bootstrapShellPaintOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.appShellPaint)");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
   const bootstrapRendererPreloadOffset = bootstrap.indexOf(
     "const importProgressiveTraceRenderer = () =>",
@@ -951,7 +953,12 @@ function runSelfTest() {
   );
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.notEqual(bootstrapStartOffset, -1);
+  assert.notEqual(bootstrapShellPaintOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.ok(
+    bootstrapStartOffset < bootstrapShellPaintOffset,
+    "bootstrap should mark app shell paint after startup begins",
+  );
   assert.notEqual(bootstrapRendererPreloadOffset, -1);
   assert.notEqual(bootstrapRuntimeImportOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
@@ -1067,6 +1074,14 @@ function runSelfTest() {
   assert.match(
     navigateAndMeasure.toString(),
     /metrics\.transferBytes = coreTransferBytes/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /performance\.getEntriesByName\("tracy\.app\.shell\.paint"\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /fcpMs: shellPaint \?\? fcp \?\? 0/,
   );
   assert.match(
     navigateAndMeasure.toString(),

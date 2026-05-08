@@ -34,6 +34,7 @@ export const RUNTIME_DEFAULTS = Object.freeze({
 
 export const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
+  appShellPaint: "tracy.app.shell.paint",
   bootstrapStart: "tracy.bootstrap.start",
   coreReady: "tracy.core.ready",
   coreStart: "tracy.core.start",
