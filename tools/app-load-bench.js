@@ -573,6 +573,47 @@ function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackReq
   return requestIds;
 }
 
+function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPaths) {
+  const paths = new Set(protectedPaths);
+  const violations = [];
+
+  for (const requestId of requestIds) {
+    const requestUrl = requestUrls.get(requestId);
+    if (requestUrl === undefined) {
+      continue;
+    }
+
+    let pathname;
+    try {
+      pathname = new URL(requestUrl).pathname.replace(/^\//, "");
+    } catch {
+      pathname = requestUrl.replace(/^\//, "");
+    }
+
+    if (paths.has(pathname)) {
+      violations.push(pathname);
+    }
+  }
+
+  return violations;
+}
+
+function assertNoProtectedStartupBoundaryRequests(requestIds, requestUrls, protectedPaths) {
+  const violations = protectedStartupBoundaryViolations(
+    requestIds,
+    requestUrls,
+    protectedPaths,
+  );
+
+  if (violations.length > 0) {
+    throw new Error(
+      `protected startup boundary fetched broad modules before coreReady: ${[
+        ...new Set(violations),
+      ].join(", ")}`,
+    );
+  }
+}
+
 async function performanceMarkWallMs(cdp, page, markName) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
@@ -613,6 +654,7 @@ async function createPage(cdp) {
 async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
   const requestStartWallMs = new Map();
+  const requestUrls = new Map();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
   let coreRequestIds = null;
@@ -622,6 +664,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
+    requestUrls.set(event.requestId, event.request.url);
     if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
       requestStartWallMs.set(event.requestId, event.wallTime * 1000);
     }
@@ -689,6 +732,11 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     requestStartWallMs,
     coreReadyWallMs,
     requestIds,
+  );
+  assertNoProtectedStartupBoundaryRequests(
+    coreRequestIds,
+    requestUrls,
+    ["host/wasm-modules.mjs"],
   );
   await waitUntil(async () => {
     const result = await cdp.send("Runtime.evaluate", {
@@ -871,6 +919,34 @@ function runSelfTest() {
       new Set(["bootstrap", "renderer"]),
     ),
     new Set(["bootstrap", "renderer"]),
+  );
+  const requestUrls = new Map([
+    ["bootstrap", "http://127.0.0.1/bootstrap.mjs"],
+    ["wasm-graph", "http://127.0.0.1/host/wasm-modules.mjs"],
+  ]);
+  assert.deepEqual(
+    protectedStartupBoundaryViolations(
+      new Set(["bootstrap", "wasm-graph"]),
+      requestUrls,
+      ["host/wasm-modules.mjs"],
+    ),
+    ["host/wasm-modules.mjs"],
+  );
+  assert.doesNotThrow(() =>
+    assertNoProtectedStartupBoundaryRequests(
+      new Set(["bootstrap"]),
+      requestUrls,
+      ["host/wasm-modules.mjs"],
+    ),
+  );
+  assert.throws(
+    () =>
+      assertNoProtectedStartupBoundaryRequests(
+        new Set(["wasm-graph"]),
+        requestUrls,
+        ["host/wasm-modules.mjs"],
+      ),
+    /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
   );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /fs\.promises\.stat/);
@@ -1085,6 +1161,14 @@ function runSelfTest() {
   assert.match(
     navigateAndMeasure.toString(),
     /requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestUrls\.set\(event\.requestId, event\.request\.url\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /assertNoProtectedStartupBoundaryRequests\([\s\S]+coreRequestIds,[\s\S]+requestUrls,[\s\S]+\["host\/wasm-modules\.mjs"\]/,
   );
   assert.match(
     navigateAndMeasure.toString(),
