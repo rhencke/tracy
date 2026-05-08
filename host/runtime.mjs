@@ -126,6 +126,18 @@ function writeHostString(memory, ptr, value, label) {
   return encoded.byteLength;
 }
 
+function requireIndexReaderExport(exports, name) {
+  if (typeof exports?.[name] !== "function") {
+    throw new Error(`index reader module missing required export ${name}`);
+  }
+}
+
+function assertIndexReaderCappedQueryMetadataAbi(exports) {
+  requireIndexReaderExport(exports, "index_query_range_capped");
+  requireIndexReaderExport(exports, "index_query_range_matched_rows");
+  requireIndexReaderExport(exports, "index_query_range_written_rows");
+}
+
 export function createMainThreadIndexReaderController(memory, host, options = {}) {
   async function defaultInstantiateIndexWasm(...args) {
     const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
@@ -183,6 +195,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         instantiate: options.instantiate,
       },
     );
+    assertIndexReaderCappedQueryMetadataAbi(loaded.exports);
     readerState.exports = loaded.exports;
     return readerState.exports;
   }
@@ -391,17 +404,13 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
       return {
         capped:
-          globalValue(readerState.exports.index_query_range_capped?.() ?? 0) !== 0,
+          globalValue(readerState.exports.index_query_range_capped()) !== 0,
         count,
         matchedRows: Number(
-          globalValue(
-            readerState.exports.index_query_range_matched_rows?.() ?? count,
-          ),
+          globalValue(readerState.exports.index_query_range_matched_rows()),
         ),
         writtenRows: Number(
-          globalValue(
-            readerState.exports.index_query_range_written_rows?.() ?? count,
-          ),
+          globalValue(readerState.exports.index_query_range_written_rows()),
         ),
       };
     },

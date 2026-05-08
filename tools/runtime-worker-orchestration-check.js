@@ -667,6 +667,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   const calls = [];
   const readerInitIds = [];
   const readPages = [];
+  let lastQueryRangeCount = 0;
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
       openedNames.push(
@@ -704,7 +705,8 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
                   trackId: 4,
                 },
               ]);
-              return 3;
+              lastQueryRangeCount = 3;
+              return lastQueryRangeCount;
             }
 
             if (tsMax === 180) {
@@ -724,7 +726,8 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
                   trackId: 4,
                 },
               ]);
-              return 5;
+              lastQueryRangeCount = 5;
+              return lastQueryRangeCount;
             }
 
             assert.equal(tsMax, 220);
@@ -751,7 +754,17 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
                 trackId: 4,
               },
             ]);
-            return 9;
+            lastQueryRangeCount = 9;
+            return lastQueryRangeCount;
+          },
+          index_query_range_capped() {
+            return 0;
+          },
+          index_query_range_matched_rows() {
+            return lastQueryRangeCount;
+          },
+          index_query_range_written_rows() {
+            return lastQueryRangeCount;
           },
           INDEX_STATUS_OK: 0,
           INDEX_WRITER_STATUS_CATALOG_FULL: 23,
@@ -874,6 +887,47 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.deepEqual(openedNames, ["indexes/trace.idx"]);
 }
 
+async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let opened = false;
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN]() {
+      opened = true;
+      return 70;
+    },
+  };
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        index_query_range() {
+          return 0;
+        },
+        index_query_range_matched_rows() {
+          return 0;
+        },
+        index_query_range_written_rows() {
+          return 0;
+        },
+      },
+    }),
+  });
+
+  await assert.rejects(
+    reader.open("indexes/trace.idx"),
+    /index reader module missing required export index_query_range_capped/,
+  );
+  assert.equal(opened, false);
+  assert.deepEqual(reader.status(), {
+    catalogFull: false,
+    error: "index reader module missing required export index_query_range_capped",
+    indexId: null,
+    indexName: "indexes/trace.idx",
+    state: "error",
+  });
+}
+
 async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
@@ -898,6 +952,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   let readablePageCount = 1;
   const readPages = [];
   const readerInitIds = [];
+  let lastQueryRangeCount = 0;
   const host = {
     "tracy.opfsIndexSizeMayBeStale": true,
     [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN]() {
@@ -926,7 +981,8 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
                 trackId: 4,
               },
             ]);
-            return 3;
+            lastQueryRangeCount = 3;
+            return lastQueryRangeCount;
           }
 
           assert.equal(tsMax, 180);
@@ -946,7 +1002,17 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
               trackId: 4,
             },
           ]);
-          return 5;
+          lastQueryRangeCount = 5;
+          return lastQueryRangeCount;
+        },
+        index_query_range_capped() {
+          return 0;
+        },
+        index_query_range_matched_rows() {
+          return lastQueryRangeCount;
+        },
+        index_query_range_written_rows() {
+          return lastQueryRangeCount;
         },
         INDEX_STATUS_OK: 0,
         INDEX_WRITER_STATUS_CATALOG_FULL: 23,
@@ -1083,6 +1149,15 @@ async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
       exports: {
         INDEX_STATUS_OK: 0,
         INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+        index_query_range_capped() {
+          return 0;
+        },
+        index_query_range_matched_rows() {
+          return 0;
+        },
+        index_query_range_written_rows() {
+          return 0;
+        },
         index_page_catalog_add_page(ptr, len, pageId) {
           assert.equal(ptr, pagePtr);
           assert.equal(len, OPFS_PAGE_SIZE);
@@ -1257,6 +1332,15 @@ async function checkMainThreadIndexReaderFailsOnCatalogOverflow() {
       exports: {
         INDEX_STATUS_OK: 0,
         INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+        index_query_range_capped() {
+          return 0;
+        },
+        index_query_range_matched_rows() {
+          return 0;
+        },
+        index_query_range_written_rows() {
+          return 0;
+        },
         index_page_catalog_add_page(ptr, len, pageId) {
           assert.equal(ptr, pagePtr);
           assert.equal(len, OPFS_PAGE_SIZE);
@@ -2612,6 +2696,7 @@ async function main() {
   await checkRuntimeIgnoresStaleIngestWorkerMessages();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
+  await checkMainThreadIndexReaderRequiresCappedQueryMetadataExports();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkMainThreadCoveredRangeRereadsUnqueryablePartialPage();
   await checkMainThreadSliceCatalogReportsCapacityOverflow();
