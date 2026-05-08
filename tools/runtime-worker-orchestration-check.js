@@ -1257,6 +1257,83 @@ async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
   );
 }
 
+async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const queryCalls = [];
+  const canvas = {
+    height: 120,
+    width: 240,
+    getContext() {
+      return {
+        clearRect() {},
+        fillRect() {},
+        restore() {},
+        save() {},
+      };
+    },
+  };
+  const reader = {
+    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
+      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
+      const view = new DataView(memory.buffer);
+
+      view.setUint32(outPtr, Math.floor(tsMin), true);
+      view.setUint32(outPtr + 4, 8, true);
+      view.setUint32(outPtr + 12, trackId, true);
+      view.setUint32(outPtr + 20, 0x2d74da, true);
+      view.setUint32(outPtr + 24, 0, true);
+      return 1;
+    },
+    status() {
+      return { state: "ready" };
+    },
+    trackCount() {
+      return 2;
+    },
+  };
+  const ingestWorker = {
+    indexReader: reader,
+    status() {
+      return {
+        coveredRange: {
+          end: 10_000_000,
+          start: 0,
+          type: "covered_range",
+          valid: true,
+        },
+        state: "running",
+      };
+    },
+  };
+  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
+    canvas,
+    queryOutPtr: 2048,
+    queryRangeBudget: 8,
+    queryWindow: 1000,
+  });
+
+  const rows = renderer.draw(123);
+
+  assert.equal(queryCalls.length, 8);
+  assert.deepEqual(queryCalls, [
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2500000, tsMin: 0 },
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 5000000, tsMin: 2500000 },
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 7500000, tsMin: 5000000 },
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 10000000, tsMin: 7500000 },
+    { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 2500000, tsMin: 0 },
+    { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 5000000, tsMin: 2500000 },
+    { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 7500000, tsMin: 5000000 },
+    { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 10000000, tsMin: 7500000 },
+  ]);
+  assert.equal(rows.length, 8);
+  assert.equal(
+    rows.some((row) => row.start === 7500000 && row.trackId === 1),
+    true,
+    "large viewports should still represent later visible data within the query budget",
+  );
+}
+
 async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -1487,6 +1564,7 @@ async function main() {
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererSurfacesCappedQueries();
   await checkProgressiveTraceRendererTilesFullVisibleViewport();
+  await checkProgressiveTraceRendererBoundsLargeViewportQueries();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimeLoadsProgressiveTraceRendererLazily();
 }

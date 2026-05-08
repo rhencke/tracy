@@ -1,6 +1,7 @@
 const DEFAULT_TRACE_QUERY_OUT_PTR = 12288;
 const DEFAULT_TRACE_QUERY_WINDOW = 1000;
 const DEFAULT_TRACE_QUERY_ROW_CAP = 1024;
+const DEFAULT_TRACE_QUERY_RANGE_BUDGET = 64;
 const INDEX_QUERY_RESULT_BYTES = 28;
 const INDEX_QUERY_RESULT_START_TS_OFFSET = 0;
 const INDEX_QUERY_RESULT_DUR_OFFSET = 4;
@@ -142,6 +143,14 @@ function normalizedRowCap(value, fallback) {
     : fallback;
 }
 
+function normalizedPositiveInteger(value, fallback) {
+  const numeric = Number(value);
+
+  return Number.isFinite(numeric) && numeric > 0
+    ? Math.floor(numeric)
+    : fallback;
+}
+
 function drawPartialHatch(context, x, y, width, height, spacing) {
   context.save?.();
   context.beginPath?.();
@@ -245,6 +254,10 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   const queryRowCap = normalizedRowCap(
     options.queryRowCap,
     DEFAULT_TRACE_QUERY_ROW_CAP,
+  );
+  const queryRangeBudget = normalizedPositiveInteger(
+    options.queryRangeBudget,
+    DEFAULT_TRACE_QUERY_RANGE_BUDGET,
   );
   const minViewportSpan = options.minViewportSpan ?? DEFAULT_MIN_VIEWPORT_SPAN;
   const state = {
@@ -390,21 +403,35 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       state.userInteracted ? state.viewport : coveredRange,
       coveredRange,
     );
-    const queryTileSpan = Math.max(1, queryWindow);
     const trackCount = Math.max(
       1,
       Number(options.trackCount ?? reader.trackCount?.() ?? 0),
     );
+    const viewportSpan = viewport.end - viewport.start;
+    const queryRangesPerTrack = Math.max(
+      1,
+      Math.floor(queryRangeBudget / trackCount),
+    );
+    const queryTileSpan = Math.max(
+      1,
+      queryWindow,
+      Math.ceil(viewportSpan / queryRangesPerTrack),
+    );
     const cappedQueries = [];
     const rows = [];
+    let queryRangeCount = 0;
 
     try {
+      queryLoop:
       for (let trackId = 0; trackId < trackCount; trackId += 1) {
         for (
           let queryStart = viewport.start;
           queryStart < viewport.end;
           queryStart = Math.min(viewport.end, queryStart + queryTileSpan)
         ) {
+          if (queryRangeCount >= queryRangeBudget) {
+            break queryLoop;
+          }
           const queryEnd = Math.min(viewport.end, queryStart + queryTileSpan);
           const result = normalizeQueryResult(
             reader.queryRange(
@@ -416,6 +443,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
             ),
           );
 
+          queryRangeCount += 1;
           rows.push(
             ...readQueryRows(memory, reader, queryOutPtr, result.count, trackId, options),
           );
