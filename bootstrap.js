@@ -15,10 +15,6 @@ if (context !== undefined) {
   context.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-const progressiveTraceRendererModulePromise =
-  import("./host/progressive-trace-renderer-loader.mjs");
-progressiveTraceRendererModulePromise.catch(() => {});
-
 if ("serviceWorker" in (globalThis.navigator ?? {})) {
   const registerServiceWorker = () =>
     navigator.serviceWorker.register(RUNTIME_URLS.SERVICE_WORKER_URL).catch(() => {});
@@ -44,6 +40,4 @@ const memory = new WebAssembly.Memory({
   shared: false,
 });
 
-runApp(memory, makeMainThreadHost(memory), {
-  importProgressiveTraceRenderer: () => progressiveTraceRendererModulePromise,
-});
+runApp(memory, makeMainThreadHost(memory));

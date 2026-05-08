@@ -116,13 +116,8 @@ function main() {
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
-  assert.match(bootstrapSource, /import\("\.\/host\/progressive-trace-renderer-loader\.mjs"\)/);
-  assert.match(bootstrapSource, /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/);
-  assert.match(
-    bootstrapSource,
-    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
-  );
-  assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer-loader\.mjs"/);
+  assert.doesNotMatch(bootstrapSource, /progressive-trace-renderer/);
+  assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer\.mjs"/);
   assert.match(runtimeSpecSource, /Generated from abi\/runtime\.json and abi\/palette\.json/);
   assert.match(runtimeSpecSource, /APP_SHELL_COLORS/);
   assert.match(runtimeSpecSource, /TRACE_RENDERER_COLORS/);

@@ -824,16 +824,12 @@ function runSelfTest() {
     runtime,
     /preloadDefaultProgressiveTraceRendererModule\(\)\.catch\(\(\) => \{\}\)/,
   );
-  assert.match(runtimeSpec, /progressive-trace-renderer-loader\.mjs/);
+  assert.match(runtimeSpec, /progressive-trace-renderer\.mjs/);
+  assert.doesNotMatch(runtimeSpec, /progressive-trace-renderer-loader\.mjs/);
   assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpec, /Generated from abi\/runtime\.json and abi\/palette\.json/);
   assert.match(bootstrap, /from "\.\/host\/runtime-spec\.mjs"/);
-  assert.match(bootstrap, /import\("\.\/host\/progressive-trace-renderer-loader\.mjs"\)/);
-  assert.match(bootstrap, /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/);
-  assert.match(
-    bootstrap,
-    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
-  );
+  assert.doesNotMatch(bootstrap, /progressive-trace-renderer/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
   assert.match(runtimeSpec, /APP_SHELL_COLORS/);
   assert.match(runtimeSpec, /TRACE_RENDERER_COLORS/);
