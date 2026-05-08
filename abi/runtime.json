@@ -1,0 +1,103 @@
+{
+  "urls": {
+    "WORKER_URL": {
+      "value": "worker.js",
+      "description": "Module worker entrypoint used by the main-thread runtime."
+    },
+    "SERVICE_WORKER_URL": {
+      "value": "service-worker.js",
+      "description": "Service worker entrypoint registered after the app reaches full readiness."
+    },
+    "PROGRESSIVE_TRACE_RENDERER_URL": {
+      "value": "./progressive-trace-renderer.mjs",
+      "description": "Deferred progressive trace renderer module URL, relative to host/runtime.mjs."
+    }
+  },
+  "wasmMemory": {
+    "BOOTSTRAP_MEMORY_INITIAL_PAGES": {
+      "value": 256,
+      "description": "Initial WebAssembly memory pages allocated by the bootstrap module."
+    },
+    "BOOTSTRAP_MEMORY_MAXIMUM_PAGES": {
+      "value": 32768,
+      "description": "Maximum WebAssembly memory pages allowed by the bootstrap module."
+    }
+  },
+  "bootstrap": {
+    "SERVICE_WORKER_READY_POLL_MS": {
+      "value": 16,
+      "description": "Polling interval while waiting for the full app-ready performance mark before service-worker registration."
+    },
+    "SERVICE_WORKER_READY_DELAY_MS": {
+      "value": 250,
+      "description": "Delay before registering the service worker after the app reaches full readiness."
+    }
+  },
+  "appLoadBench": {
+    "fast3g": {
+      "downloadThroughputBytesPerSecond": 209715,
+      "latencyMs": 150,
+      "uploadThroughputBytesPerSecond": 96000
+    },
+    "budgets": {
+      "cold": {
+        "coreTtiMs": 250,
+        "fcpMs": 1100,
+        "fullLoadMs": 1000,
+        "transferBytes": 75000,
+        "wasmInstantiateMs": 200
+      },
+      "warmHttp": {
+        "coreTtiMs": 25,
+        "fcpMs": 50,
+        "fullLoadMs": 25,
+        "transferBytes": 0,
+        "wasmInstantiateMs": 25
+      },
+      "warmSw": {
+        "coreTtiMs": 25,
+        "fcpMs": 45,
+        "fullLoadMs": 25,
+        "transferBytes": 0,
+        "wasmInstantiateMs": 15
+      }
+    }
+  },
+  "runtimeDefaults": {
+    "DEFAULT_INGEST_NAME_PTR": {
+      "value": 4096,
+      "description": "Default memory pointer for host-written ingest source names."
+    },
+    "DEFAULT_INGEST_NAME_MAX_BYTES": {
+      "value": 4096,
+      "description": "Maximum encoded byte length for host-written ingest source names."
+    },
+    "DEFAULT_READER_NAME_PTR": {
+      "value": 8192,
+      "description": "Default memory pointer for main-thread reader index names."
+    },
+    "DEFAULT_READER_CACHE_SLOTS": {
+      "value": 4,
+      "description": "Default number of main-thread index reader cache slots."
+    },
+    "DEFAULT_READER_QUERY_ROW_CAP": {
+      "value": 1024,
+      "description": "Default row cap for main-thread index reader queries."
+    }
+  },
+  "performanceMarks": {
+    "appReady": "tracy.app.ready",
+    "bootstrapStart": "tracy.bootstrap.start",
+    "coreReady": "tracy.core.ready",
+    "coreStart": "tracy.core.start",
+    "tracyMainEnd": "tracy.main.end",
+    "tracyMainStart": "tracy.main.start",
+    "wasmInstantiateEnd": "tracy.wasm.instantiate.end",
+    "wasmInstantiateStart": "tracy.wasm.instantiate.start"
+  },
+  "performanceMeasures": {
+    "appLoad": "tracy.app.load",
+    "tracyMain": "tracy.main",
+    "wasmInstantiate": "tracy.wasm.instantiate"
+  }
+}
