@@ -633,7 +633,6 @@ async function checkInteractiveIngestGate() {
           call[1] === "indexes/throttled-100mb.json.idx",
       ) || controller.status().state === "error",
     "main-thread reader should open the worker-written OPFS index",
-    10000,
   );
   assert.notEqual(controller.status().state, "error", controller.status().error);
   assert.ok(

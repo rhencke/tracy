@@ -430,7 +430,7 @@ export function createIngestWorkerController(options = {}) {
     } else if (message?.type === INGEST_WORKER_MESSAGE.COVERED_RANGE) {
       status.coveredRange = message;
       status.state = WORKER_STATUS.RUNNING;
-      if (message.valid && typeof status.ingest?.indexName === "string") {
+      if (typeof status.ingest?.indexName === "string") {
         indexReader?.open(status.ingest.indexName)?.catch((error) => {
           status.error = errorMessage(error);
           status.state = WORKER_STATUS.ERROR;

@@ -1076,6 +1076,48 @@ async function checkWorkerStatusReportsReaderCatalogOverflow() {
   assert.equal(workerStatus.at(-1).status.state, "error");
 }
 
+async function checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const indexReaderOpenCalls = [];
+  const controller = runtime.createIngestWorkerController({
+    Worker: FakeWorker,
+    indexReader: {
+      open(indexName) {
+        indexReaderOpenCalls.push(indexName);
+        return Promise.resolve(true);
+      },
+    },
+  });
+
+  assert.equal(
+    controller.start({
+      indexName: "indexes/trace.idx",
+      sourceName: "sources/trace.json",
+    }),
+    true,
+  );
+  const worker = FakeWorker.instances.at(-1);
+  const ingestId = worker.posted.at(-1).ingestId;
+
+  worker.emit("message", {
+    end: 0,
+    ingestId,
+    start: 0,
+    type: "covered_range",
+    valid: false,
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(indexReaderOpenCalls, ["indexes/trace.idx"]);
+  assert.deepEqual(controller.status().coveredRange, {
+    end: 0,
+    ingestId,
+    start: 0,
+    type: "covered_range",
+    valid: false,
+  });
+}
+
 function checkWatWriterPropagatesCatalogOverflow() {
   const constants = fs.readFileSync(
     path.resolve(__dirname, "../wat/index/constants-and-helpers.wat.inc"),
@@ -2213,6 +2255,7 @@ async function main() {
   await checkMainThreadSliceCatalogReportsCapacityOverflow();
   await checkMainThreadIndexReaderFailsOnCatalogOverflow();
   await checkWorkerStatusReportsReaderCatalogOverflow();
+  await checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid();
   checkWatWriterPropagatesCatalogOverflow();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererClampsToSliceCatalogCoverage();
