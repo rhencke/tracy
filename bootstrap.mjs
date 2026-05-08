@@ -8,6 +8,11 @@ import {
 
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
+const progressiveTraceRendererModulePromise = import(
+  `./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`
+);
+progressiveTraceRendererModulePromise.catch(() => {});
+
 const canvas = globalThis.document?.getElementById?.("tracy");
 const context = canvas?.getContext?.("2d");
 if (context !== undefined) {
@@ -40,4 +45,6 @@ const memory = new WebAssembly.Memory({
   shared: false,
 });
 
-runApp(memory, makeMainThreadHost(memory));
+runApp(memory, makeMainThreadHost(memory), {
+  importProgressiveTraceRenderer: () => progressiveTraceRendererModulePromise,
+});

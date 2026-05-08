@@ -767,6 +767,10 @@ function runSelfTest() {
   const traceRendererSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "trace-renderer-spec.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
+  const bootstrapRendererPreloadOffset = bootstrap.indexOf(
+    "const progressiveTraceRendererModulePromise = import",
+  );
+  const bootstrapRuntimeImportOffset = bootstrap.indexOf('import("./host/runtime.mjs")');
   const runtimeCoreStartOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreStart",
   );
@@ -796,6 +800,8 @@ function runSelfTest() {
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.notEqual(bootstrapStartOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.notEqual(bootstrapRendererPreloadOffset, -1);
+  assert.notEqual(bootstrapRuntimeImportOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeWasmStartOffset, -1);
   assert.notEqual(defaultRendererPreloadOffset, -1);
@@ -811,6 +817,10 @@ function runSelfTest() {
   assert.ok(
     defaultRendererPreloadOffset < runtimeCoreStartOffset,
     "default deferred renderer import should start during runtime module evaluation",
+  );
+  assert.ok(
+    bootstrapRendererPreloadOffset < bootstrapRuntimeImportOffset,
+    "bootstrap should start the renderer implementation import before waiting on runtime import",
   );
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
@@ -842,7 +852,12 @@ function runSelfTest() {
   assert.match(traceRendererSpec, /Generated from abi\/palette\.json/);
   assert.match(bootstrap, /from "\.\/host\/startup-spec\.mjs"/);
   assert.doesNotMatch(bootstrap, /runtime-spec\.mjs/);
-  assert.doesNotMatch(bootstrap, /progressive-trace-renderer/);
+  assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(
+    bootstrap,
+    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
+  );
+  assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
   assert.match(startupSpec, /APP_SHELL_COLORS/);
   assert.doesNotMatch(startupSpec, /TRACE_RENDERER_COLORS/);
