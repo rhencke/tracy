@@ -145,7 +145,7 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /const importColdProgressiveTraceRenderer = \(\) =>[\s\S]+setTimeout\(resolve, 0\)[\s\S]+import/,
+    /const importColdProgressiveTraceRenderer = \(\) =>[\s\S]+setTimeout\(resolve, BOOTSTRAP_TIMING\.COLD_RENDERER_READY_DELAY_MS\)[\s\S]+import/,
   );
   assert.match(
     bootstrapSource,

@@ -9,7 +9,7 @@ const warmProgressiveTraceRendererPromise =
     ? null
     : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const importColdProgressiveTraceRenderer = () =>
-  new Promise((resolve) => setTimeout(resolve, 0)).then(() =>
+  new Promise((resolve) => setTimeout(resolve, BOOTSTRAP_TIMING.COLD_RENDERER_READY_DELAY_MS)).then(() =>
     import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`),
   );
 const importProgressiveTraceRenderer = () =>
