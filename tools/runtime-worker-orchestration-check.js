@@ -2106,7 +2106,6 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
   coveredRange = { end: 0, start: 0, type: "covered_range", valid: false };
-  readerCoveredRange = { end: 120, start: 100, valid: true };
   readerState = "ready";
   frames[1](2);
   await flushMicrotasks();
@@ -2120,9 +2119,10 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   assert.equal(
     drawCalls,
     1,
-    "renderer should draw from reader coverage before the next worker covered range message",
+    "renderer should be created after the reader is ready and a worker handoff exists",
   );
 
+  readerCoveredRange = { end: 120, start: 100, valid: true };
   coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
   frames[3](4);
   assert.equal(

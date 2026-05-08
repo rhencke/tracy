@@ -720,14 +720,7 @@ function shouldLoadProgressiveTraceRenderer(ingestWorker) {
 
   return (
     readerStatus?.state === READER_STATUS.READY &&
-    (
-      workerCoveredRange?.valid === true ||
-      (
-        workerCoveredRange != null &&
-        typeof reader?.coveredRange === "function" &&
-        reader.coveredRange()?.valid === true
-      )
-    )
+    workerCoveredRange != null
   );
 }
 
