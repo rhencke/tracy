@@ -931,8 +931,12 @@ function runSelfTest() {
   assert.notEqual(tracyMainOffset, -1);
   assert.notEqual(appReadyOffset, -1);
   assert.ok(
-    runtimeCoreReadyOffset < defaultRendererPreloadOffset,
-    "default deferred renderer import should start after core readiness",
+    runtimeCoreStartOffset < defaultRendererPreloadOffset,
+    "default deferred renderer import should start inside loadApp",
+  );
+  assert.ok(
+    defaultRendererPreloadOffset < runtimeWasmStartOffset,
+    "default deferred renderer import should overlap Wasm startup",
   );
   assert.ok(
     bootstrapRendererPreloadOffset < bootstrapRuntimeImportOffset,
