@@ -220,6 +220,7 @@ async function checkRuntimeOrchestratesWorker() {
   });
 
   frames[0](123);
+  await import(moduleUrl("host/trace-renderer-spec.mjs"));
   await flushMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
@@ -2034,6 +2035,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
       throw new Error("not expected before queryable pages");
     },
   });
+  await import(moduleUrl("host/trace-renderer-spec.mjs"));
   await flushMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },

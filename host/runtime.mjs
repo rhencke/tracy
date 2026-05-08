@@ -24,6 +24,7 @@ const {
 } = RUNTIME_DEFAULTS;
 
 let defaultProgressiveTraceRendererModulePromise = null;
+let traceRendererSpecModulePromise = null;
 
 function preloadDefaultProgressiveTraceRendererModule() {
   if (defaultProgressiveTraceRendererModulePromise === null) {
@@ -32,6 +33,14 @@ function preloadDefaultProgressiveTraceRendererModule() {
   }
 
   return defaultProgressiveTraceRendererModulePromise;
+}
+
+function preloadTraceRendererSpecModule() {
+  if (traceRendererSpecModulePromise === null) {
+    traceRendererSpecModulePromise = import("./trace-renderer-spec.mjs");
+  }
+
+  return traceRendererSpecModulePromise;
 }
 
 function markPerformance(name, options) {
@@ -773,9 +782,16 @@ async function loadApp(memory, host, options = {}) {
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
 
+  const deferredTraceRendererSpecPromise =
+    progressiveTraceRenderer === null
+      ? preloadTraceRendererSpecModule()
+      : Promise.resolve(null);
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
-      ? loadProgressiveTraceRendererModule()
+      ? Promise.all([
+          loadProgressiveTraceRendererModule(),
+          deferredTraceRendererSpecPromise,
+        ]).then(([module]) => module)
       : Promise.resolve(null);
 
   let firstFrameResolve = null;

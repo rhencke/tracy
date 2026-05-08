@@ -826,6 +826,9 @@ function runSelfTest() {
   const defaultRendererPreloadOffset = runtime.indexOf(
     "const deferredRendererReadyPromise",
   );
+  const traceRendererSpecPreloadOffset = runtime.indexOf(
+    "const deferredTraceRendererSpecPromise",
+  );
   const runtimeCoreReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreReady",
   );
@@ -851,6 +854,7 @@ function runSelfTest() {
   assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeWasmStartOffset, -1);
   assert.notEqual(defaultRendererPreloadOffset, -1);
+  assert.notEqual(traceRendererSpecPreloadOffset, -1);
   assert.notEqual(runtimeCoreReadyOffset, -1);
   assert.notEqual(firstFramePromiseOffset, -1);
   assert.notEqual(rendererModuleLoadOffset, -1);
@@ -859,6 +863,14 @@ function runSelfTest() {
   assert.ok(
     runtimeCoreReadyOffset < defaultRendererPreloadOffset,
     "default deferred renderer import should start after core readiness",
+  );
+  assert.ok(
+    runtimeCoreReadyOffset < traceRendererSpecPreloadOffset,
+    "trace renderer spec preload should start after core readiness",
+  );
+  assert.ok(
+    traceRendererSpecPreloadOffset < defaultRendererPreloadOffset,
+    "trace renderer spec preload should overlap the renderer implementation import",
   );
   assert.ok(
     bootstrapRendererPreloadOffset < bootstrapRuntimeImportOffset,
@@ -872,6 +884,14 @@ function runSelfTest() {
   assert.match(
     runtime,
     /const deferredRendererReadyPromise =[\s\S]+loadProgressiveTraceRendererModule\(\)/,
+  );
+  assert.match(
+    runtime,
+    /const deferredTraceRendererSpecPromise =[\s\S]+preloadTraceRendererSpecModule\(\)/,
+  );
+  assert.match(
+    runtime,
+    /Promise\.all\(\[[\s\S]+loadProgressiveTraceRendererModule\(\),[\s\S]+deferredTraceRendererSpecPromise,[\s\S]+\]\)\.then/,
   );
   assert.match(
     runtime,
