@@ -1,7 +1,5 @@
 import { APP_SHELL_COLORS, BOOTSTRAP_TIMING, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_MARKS, RUNTIME_URLS } from "./host/startup-spec.mjs";
-
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
-
 const wasmModulesPromise = import("./host/wasm-modules.mjs");
 const serviceWorkerController =
   globalThis.navigator?.serviceWorker?.controller ?? null;
@@ -9,12 +7,19 @@ const warmProgressiveTraceRendererPromise =
   serviceWorkerController === null
     ? null
     : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+const afterProtectedStartupBoundary = () =>
+  new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = resolve;
+    channel.port2.postMessage(undefined);
+  });
 const importProgressiveTraceRenderer = () =>
   warmProgressiveTraceRendererPromise ??
-  import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+  afterProtectedStartupBoundary().then(() =>
+    import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`),
+  );
 const instantiateWasmModuleForThread = async (...args) =>
   (await wasmModulesPromise).instantiateWasmModuleForThread(...args);
-
 const canvas = globalThis.document?.getElementById?.("tracy");
 const context = canvas?.getContext?.("2d");
 if (context !== undefined) {
@@ -35,9 +40,7 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
 
   globalThis.addEventListener?.("load", registerAfterReady);
 }
-
 const [{ makeMainThreadHost }, { runApp }] = await Promise.all([import("./host/shim.mjs"), import("./host/runtime.mjs")]);
-
 const memory = new WebAssembly.Memory({
   initial: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_INITIAL_PAGES,
   maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES, shared: false,

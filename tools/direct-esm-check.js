@@ -175,6 +175,11 @@ function main() {
     /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
   );
   assert.match(bootstrapSource, /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/);
+  assert.match(
+    bootstrapSource,
+    /const afterProtectedStartupBoundary = \(\) =>[\s\S]+new MessageChannel\(\)/,
+  );
+  assert.match(bootstrapSource, /afterProtectedStartupBoundary\(\)\.then\(\(\) =>[\s\S]+import/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(resolve/);
   assert.match(
     bootstrapSource,
