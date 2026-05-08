@@ -117,6 +117,17 @@ function renderStringConstants(groupName, entries) {
   return lines.join("\n");
 }
 
+function renderLocalStringConstants(groupName, entries) {
+  const lines = [`const ${groupName} = Object.freeze({`];
+
+  for (const [name, entry] of Object.entries(entries)) {
+    lines.push(`  ${name}: ${JSON.stringify(entry.value)},`);
+  }
+
+  lines.push("});");
+  return lines.join("\n");
+}
+
 function renderNamedStrings(groupName, entries) {
   const lines = [`export const ${groupName} = Object.freeze({`];
 
@@ -164,6 +175,21 @@ function renderTraceRendererSpecModule() {
   ].join("\n");
 }
 
+function assertTraceRendererInlinePalette() {
+  const rendererPath = join(root, "host/progressive-trace-renderer.mjs");
+  const renderer = readFileSync(rendererPath, "utf8");
+  const expected = renderLocalStringConstants(
+    "TRACE_RENDERER_COLORS",
+    paletteSpec.palettes.default.traceRenderer,
+  );
+
+  if (!renderer.includes(expected)) {
+    throw new Error(
+      "host/progressive-trace-renderer.mjs inline TRACE_RENDERER_COLORS is out of date with abi/palette.json",
+    );
+  }
+}
+
 function writeIfChanged(path, content) {
   const absolute = join(root, path);
   let previous = null;
@@ -190,6 +216,7 @@ function writeIfChanged(path, content) {
 }
 
 assertDuplicateNumericValuesAudited();
+assertTraceRendererInlinePalette();
 
 const ok = [
   writeIfChanged("host/startup-spec.mjs", renderStartupSpecModule()),

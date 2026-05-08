@@ -747,11 +747,6 @@ async function loadApp(memory, host, options = {}) {
 
   const instantiate =
     options.instantiateWasmModuleForThread ?? defaultInstantiateMainWasm;
-  const deferredRendererReadyPromise =
-    progressiveTraceRenderer === null
-      ? loadProgressiveTraceRendererModule()
-      : Promise.resolve(null);
-
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
   const { exports } = await instantiate("app", MAIN_THREAD, imports, {
     baseUrl: options.baseUrl ?? "wasm/",
@@ -777,6 +772,11 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
+
+  const deferredRendererReadyPromise =
+    progressiveTraceRenderer === null
+      ? loadProgressiveTraceRendererModule()
+      : Promise.resolve(null);
 
   let firstFrameResolve = null;
   let firstFrameSeen = false;

@@ -1,5 +1,3 @@
-import { TRACE_RENDERER_COLORS } from "./trace-renderer-spec.mjs";
-
 const DEFAULT_TRACE_QUERY_OUT_PTR = 12288;
 const DEFAULT_TRACE_QUERY_WINDOW = 1000;
 const DEFAULT_TRACE_QUERY_ROW_CAP = 1024;
@@ -13,6 +11,18 @@ const INDEX_QUERY_RESULT_PARTIAL_OFFSET = 24;
 const DEFAULT_MIN_VIEWPORT_SPAN = 1;
 const DEFAULT_UNKNOWN_AFFORDANCE_WIDTH = 72;
 const DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING = 10;
+// Keep renderer colors inline so cold app-ready does not pay a second module
+// fetch; tools/generate-runtime-spec.js checks this block against abi/palette.json.
+const TRACE_RENDERER_COLORS = Object.freeze({
+  DEFAULT_SLICE_FILL: "#3f6ea8",
+  TRACE_BACKGROUND_FILL: "rgba(251, 248, 244, 0.92)",
+  PARTIAL_SLICE_FILL: "rgba(92, 109, 130, 0.58)",
+  PARTIAL_HATCH_STROKE: "rgba(40, 45, 52, 0.35)",
+  UNKNOWN_RANGE_FILL: "rgba(126, 134, 146, 0.18)",
+  UNKNOWN_RANGE_STRIPE: "rgba(76, 85, 99, 0.38)",
+  INCOMPLETE_QUERY_FILL: "rgba(180, 83, 9, 0.16)",
+  INCOMPLETE_QUERY_STRIPE: "rgba(146, 64, 14, 0.42)",
+});
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;

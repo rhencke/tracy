@@ -159,7 +159,8 @@ function main() {
   assert.doesNotMatch(runtimeSource, /from "\.\/runtime-spec\.mjs"/);
   assert.doesNotMatch(runtimeSource, /preloadTraceRendererSpecModule/);
   assert.doesNotMatch(runtimeSource, /deferredTraceRendererSpecPromise/);
-  assert.match(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);
+  assert.doesNotMatch(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);
+  assert.match(rendererSource, /const TRACE_RENDERER_COLORS = Object\.freeze/);
   assert.doesNotMatch(rendererSource, /from "\.\/runtime-spec\.mjs"/);
   assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
   assert.match(startupSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer\.mjs"/);
@@ -247,7 +248,6 @@ function main() {
   assertNoInlinePaletteColor("bootstrap.mjs");
   assertNoInlinePaletteColor("host/canvas.mjs");
   assertNoInlinePaletteColor("host/runtime.mjs");
-  assertNoInlinePaletteColor("host/progressive-trace-renderer.mjs");
 }
 
 try {
