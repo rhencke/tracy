@@ -343,7 +343,18 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         refreshSliceCatalog(readerState.exports, readerState.indexId);
       }
 
-      return readCoveredRange(readerState.exports);
+      const coveredRange = readCoveredRange(readerState.exports);
+      if (
+        coveredRange.valid === false &&
+        readerState.state === READER_STATUS.READY
+      ) {
+        refreshSliceCatalog(readerState.exports, readerState.indexId, {
+          force: true,
+        });
+        return readCoveredRange(readerState.exports);
+      }
+
+      return coveredRange;
     },
     exports() {
       return readerState.exports;

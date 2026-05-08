@@ -935,6 +935,122 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   assert.deepEqual(readerInitIds, [70, 70, 70]);
 }
 
+async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const abi = await import(moduleUrl("host/abi.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const view = new DataView(memory.buffer);
+  const pagePtr = 32768;
+  const pageCatalog = [];
+  const readPages = [];
+  const readerInitIds = [];
+  let pageIsQueryable = false;
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN]() {
+      return 70;
+    },
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
+      assert.equal(indexId, 70);
+      return BigInt(OPFS_PAGE_SIZE);
+    },
+  };
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        INDEX_STATUS_OK: 0,
+        INDEX_WRITER_STATUS_CATALOG_FULL: 23,
+        index_page_catalog_add_page(ptr, len, pageId) {
+          assert.equal(ptr, pagePtr);
+          assert.equal(len, OPFS_PAGE_SIZE);
+          const hints = view.getUint32(
+            pagePtr + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+            true,
+          );
+          if ((hints & INDEX_DECODE_HINT_COMPACT_SLICES) === 0) {
+            return 0;
+          }
+
+          pageCatalog.push({
+            bucketEnd: view.getUint32(
+              pagePtr + INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+              true,
+            ),
+            bucketStart: view.getUint32(
+              pagePtr + INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+              true,
+            ),
+            pageId,
+          });
+          return 0;
+        },
+        index_page_catalog_reset() {
+          pageCatalog.length = 0;
+        },
+        index_reader_covered_range_end() {
+          return pageCatalog.length === 0
+            ? 0
+            : pageCatalog.at(-1).bucketEnd;
+        },
+        index_reader_covered_range_start() {
+          return pageCatalog.length === 0
+            ? 0
+            : pageCatalog[0].bucketStart;
+        },
+        index_reader_covered_range_valid() {
+          return pageCatalog.length > 0 ? 1 : 0;
+        },
+        index_reader_init(indexId) {
+          assert.equal(indexId, 70);
+          readerInitIds.push(indexId);
+        },
+        read_page(level, pageId) {
+          assert.equal(level, 0);
+          assert.equal(pageId, 0);
+          readPages.push(pageId);
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_BUCKET_START_OFFSET,
+            100,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_BUCKET_END_OFFSET,
+            140,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET,
+            3,
+            true,
+          );
+          view.setUint32(
+            pagePtr + INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET,
+            pageIsQueryable
+              ? INDEX_DECODE_HINT_COMPACT_SLICES |
+                (4 << INDEX_DECODE_HINT_TRACK_ID_SHIFT)
+              : 0,
+            true,
+          );
+          return pagePtr;
+        },
+      },
+    }),
+  });
+
+  await reader.open("indexes/trace.idx");
+  assert.deepEqual(readPages, [0]);
+  assert.deepEqual(reader.coveredRange(), { valid: false, start: 0, end: 0 });
+  assert.deepEqual(readPages, [0, 0]);
+
+  pageIsQueryable = true;
+  assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
+  assert.deepEqual(
+    readPages,
+    [0, 0, 0],
+    "covered-range polling should reread an unqueryable partial page whose page count did not change",
+  );
+  assert.deepEqual(readerInitIds, [70, 70, 70, 70]);
+}
+
 async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
   const catalog = await import(moduleUrl("host/index-reader-catalog.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
@@ -2353,6 +2469,7 @@ async function main() {
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
+  await checkMainThreadCoveredRangeRereadsUnqueryablePartialPage();
   await checkMainThreadSliceCatalogReportsCapacityOverflow();
   await checkMainThreadIndexReaderFailsOnCatalogOverflow();
   await checkWorkerStatusReportsReaderCatalogOverflow();
