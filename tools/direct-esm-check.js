@@ -193,6 +193,59 @@ function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
   );
 }
 
+function stripGeneratedTraceRendererContract(source) {
+  return source.replace(
+    /\/\/ @generated trace-renderer-contract:start[\s\S]*?\/\/ @generated trace-renderer-contract:end/g,
+    "",
+  );
+}
+
+function assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource) {
+  const handMaintainedRendererSource = stripGeneratedTraceRendererContract(rendererSource);
+
+  for (const groupName of [
+    "TRACE_RENDERER_CANVAS_OPS",
+    "TRACE_RENDERER_DRAW_DEFAULTS",
+    "TRACE_RENDERER_INTERACTION_DEFAULTS",
+    "TRACE_RENDERER_COLOR_DEFAULTS",
+  ]) {
+    assert.match(
+      rendererSource,
+      new RegExp(`const ${groupName} = Object\\.freeze`),
+      `progressive trace renderer should inline generated ${groupName}`,
+    );
+    assert.match(
+      traceRendererSpecSource,
+      new RegExp(`export const ${groupName} = Object\\.freeze`),
+      `trace renderer spec should export generated ${groupName}`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/canvasDimension\(canvas, "width", 800\)/, "canvas width fallback"],
+    [/canvasDimension\(canvas, "height", 400\)/, "canvas height fallback"],
+    [/options\.laneHeight \?\? 10/, "lane height default"],
+    [/options\.laneGap \?\? 3/, "lane gap default"],
+    [/options\.top \?\? 18/, "trace top default"],
+    [/options\.hatchSpacing \?\? 6/, "partial hatch spacing default"],
+    [/lineWidth\s*=\s*1/, "affordance stroke width"],
+    [/Math\.max\(-500,/, "wheel delta minimum"],
+    [/Math\.min\(500, deltaY\)/, "wheel delta maximum"],
+    [/\*\s*0\.001/, "wheel delta scale"],
+    [/\b0xffffff\b/, "packed RGB mask"],
+    [/padStart\(6, "0"\)/, "RGB hex width"],
+    [/END:\s*0,/, "canvas-op end tag"],
+    [/QUERY_RANGE_TAG:\s*1,/, "canvas-op query-range tag"],
+    [/INCOMPLETE_QUERY_RANGE_TAG:\s*2,/, "canvas-op incomplete-range tag"],
+  ]) {
+    assert.doesNotMatch(
+      handMaintainedRendererSource,
+      pattern,
+      `host/progressive-trace-renderer.mjs should read ${message} from generated renderer contracts`,
+    );
+  }
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -212,6 +265,7 @@ function main() {
   const serviceWorkerCheckSource = readRepoFile("tools/service-worker-check.js");
 
   assertIngestWorkerProgressPolicyUsesGeneratedSpec();
+  assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
 
   assert.match(
     buildScript,

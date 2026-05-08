@@ -96,9 +96,44 @@
         "numericValue": 0,
         "paths": [
           "appLoadBench.budgets.warmHttp.transferBytes",
-          "appLoadBench.budgets.warmSw.transferBytes"
+          "appLoadBench.budgets.warmSw.transferBytes",
+          "traceRenderer.canvasOps.END_TAG"
         ],
-        "description": "Warm HTTP cache and warm service-worker paths both require no protected-path network transfer, but they are separate cache-mode gates."
+        "description": "Warm HTTP cache and warm service-worker paths both require no protected-path network transfer, while the renderer canvas-op end tag is a separate Wasm planner sentinel."
+      },
+      {
+        "numericValue": 1,
+        "paths": [
+          "traceRenderer.canvasOps.QUERY_RANGE_TAG",
+          "traceRenderer.canvasOps.TERMINATOR_OP_BUDGET",
+          "traceRenderer.draw.DEFAULT_STROKE_WIDTH",
+          "traceRenderer.layout.DEFAULT_MIN_VIEWPORT_SPAN"
+        ],
+        "description": "These renderer constants are intentionally distinct: viewport clamp span, Wasm query-range tag, planner terminator budget, and canvas stroke width."
+      },
+      {
+        "numericValue": 8,
+        "paths": [
+          "traceRenderer.draw.DEFAULT_BAND_PADDING",
+          "traceRenderer.layout.DEFAULT_UNKNOWN_STRIPE_SPACING"
+        ],
+        "description": "Band padding and unknown-range stripe spacing are separate renderer layout values that happen to match today."
+      },
+      {
+        "numericValue": 6,
+        "paths": [
+          "traceRenderer.color.RGB_HEX_WIDTH",
+          "traceRenderer.draw.DEFAULT_PARTIAL_HATCH_SPACING"
+        ],
+        "description": "Hex color width and partial-slice hatch spacing are unrelated renderer values that happen to match today."
+      },
+      {
+        "numericValue": 10,
+        "paths": [
+          "traceRenderer.draw.DEFAULT_LANE_HEIGHT",
+          "traceRenderer.layout.DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING"
+        ],
+        "description": "Lane height and incomplete-query stripe spacing are separate visual defaults and may move independently."
       },
       {
         "numericValue": 4096,
@@ -183,6 +218,82 @@
       "DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING": {
         "value": 10,
         "description": "Default stripe spacing in CSS pixels for incomplete query affordances."
+      }
+    },
+    "canvasOps": {
+      "END_TAG": {
+        "value": 0,
+        "description": "Wasm trace renderer planner sentinel tag indicating no more canvas operations."
+      },
+      "QUERY_RANGE_TAG": {
+        "value": 1,
+        "description": "Wasm trace renderer planner tag for an index query-range canvas operation."
+      },
+      "INCOMPLETE_QUERY_RANGE_TAG": {
+        "value": 2,
+        "description": "Wasm trace renderer planner tag for a visible incomplete query-range affordance."
+      },
+      "TERMINATOR_OP_BUDGET": {
+        "value": 1,
+        "description": "Extra planner iteration budget reserved for the required terminating canvas operation."
+      }
+    },
+    "draw": {
+      "DEFAULT_CANVAS_WIDTH": {
+        "value": 800,
+        "description": "Fallback canvas width used by the trace renderer when the browser has not reported dimensions."
+      },
+      "DEFAULT_CANVAS_HEIGHT": {
+        "value": 400,
+        "description": "Fallback canvas height used by the trace renderer when the browser has not reported dimensions."
+      },
+      "DEFAULT_LANE_HEIGHT": {
+        "value": 10,
+        "description": "Default slice lane height in CSS pixels."
+      },
+      "DEFAULT_LANE_GAP": {
+        "value": 3,
+        "description": "Default vertical gap between slice lanes in CSS pixels."
+      },
+      "DEFAULT_TRACE_TOP": {
+        "value": 18,
+        "description": "Default top offset for the first slice lane in CSS pixels."
+      },
+      "DEFAULT_BAND_PADDING": {
+        "value": 8,
+        "description": "Default bottom padding for the rendered trace band in CSS pixels."
+      },
+      "DEFAULT_PARTIAL_HATCH_SPACING": {
+        "value": 6,
+        "description": "Default hatch spacing in CSS pixels for partial slice affordances."
+      },
+      "DEFAULT_STROKE_WIDTH": {
+        "value": 1,
+        "description": "Default line width for trace renderer affordance strokes."
+      }
+    },
+    "interaction": {
+      "WHEEL_DELTA_MIN": {
+        "value": -500,
+        "description": "Minimum wheel delta used by trace viewport zoom clamping."
+      },
+      "WHEEL_DELTA_MAX": {
+        "value": 500,
+        "description": "Maximum wheel delta used by trace viewport zoom clamping."
+      },
+      "WHEEL_DELTA_SCALE": {
+        "value": 0.001,
+        "description": "Scale factor applied to clamped wheel deltas before exponential zoom."
+      }
+    },
+    "color": {
+      "RGB_COLOR_MASK": {
+        "value": 16777215,
+        "description": "Mask for converting packed slice colors to six-digit CSS RGB hex values."
+      },
+      "RGB_HEX_WIDTH": {
+        "value": 6,
+        "description": "Minimum hex digit count for packed slice colors rendered as CSS RGB values."
       }
     }
   },

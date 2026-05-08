@@ -168,6 +168,14 @@ function renderTraceRendererContractBlock({ local }) {
     "",
     renderNumbers("TRACE_RENDERER_LAYOUT_DEFAULTS", spec.traceRenderer.layout),
     "",
+    renderNumbers("TRACE_RENDERER_CANVAS_OPS", spec.traceRenderer.canvasOps),
+    "",
+    renderNumbers("TRACE_RENDERER_DRAW_DEFAULTS", spec.traceRenderer.draw),
+    "",
+    renderNumbers("TRACE_RENDERER_INTERACTION_DEFAULTS", spec.traceRenderer.interaction),
+    "",
+    renderNumbers("TRACE_RENDERER_COLOR_DEFAULTS", spec.traceRenderer.color),
+    "",
     indexLayout,
   ].join("\n");
 }

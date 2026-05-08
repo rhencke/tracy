@@ -13,6 +13,35 @@ const TRACE_RENDERER_LAYOUT_DEFAULTS = Object.freeze({
   DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING: 10,
 });
 
+const TRACE_RENDERER_CANVAS_OPS = Object.freeze({
+  END_TAG: 0,
+  QUERY_RANGE_TAG: 1,
+  INCOMPLETE_QUERY_RANGE_TAG: 2,
+  TERMINATOR_OP_BUDGET: 1,
+});
+
+const TRACE_RENDERER_DRAW_DEFAULTS = Object.freeze({
+  DEFAULT_CANVAS_WIDTH: 800,
+  DEFAULT_CANVAS_HEIGHT: 400,
+  DEFAULT_LANE_HEIGHT: 10,
+  DEFAULT_LANE_GAP: 3,
+  DEFAULT_TRACE_TOP: 18,
+  DEFAULT_BAND_PADDING: 8,
+  DEFAULT_PARTIAL_HATCH_SPACING: 6,
+  DEFAULT_STROKE_WIDTH: 1,
+});
+
+const TRACE_RENDERER_INTERACTION_DEFAULTS = Object.freeze({
+  WHEEL_DELTA_MIN: -500,
+  WHEEL_DELTA_MAX: 500,
+  WHEEL_DELTA_SCALE: 0.001,
+});
+
+const TRACE_RENDERER_COLOR_DEFAULTS = Object.freeze({
+  RGB_COLOR_MASK: 16777215,
+  RGB_HEX_WIDTH: 6,
+});
+
 const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({
   BYTES: 28,
   START: 0,
@@ -36,12 +65,34 @@ const {
   DEFAULT_UNKNOWN_AFFORDANCE_WIDTH,
   DEFAULT_UNKNOWN_STRIPE_SPACING,
 } = TRACE_RENDERER_LAYOUT_DEFAULTS;
+const {
+  DEFAULT_CANVAS_HEIGHT,
+  DEFAULT_CANVAS_WIDTH,
+  DEFAULT_BAND_PADDING,
+  DEFAULT_LANE_GAP,
+  DEFAULT_LANE_HEIGHT,
+  DEFAULT_PARTIAL_HATCH_SPACING,
+  DEFAULT_STROKE_WIDTH,
+  DEFAULT_TRACE_TOP,
+} = TRACE_RENDERER_DRAW_DEFAULTS;
+const {
+  RGB_COLOR_MASK,
+  RGB_HEX_WIDTH,
+} = TRACE_RENDERER_COLOR_DEFAULTS;
+const {
+  TERMINATOR_OP_BUDGET,
+} = TRACE_RENDERER_CANVAS_OPS;
+const {
+  WHEEL_DELTA_MAX,
+  WHEEL_DELTA_MIN,
+  WHEEL_DELTA_SCALE,
+} = TRACE_RENDERER_INTERACTION_DEFAULTS;
 const CANVAS_OP = Object.freeze({
-  END: 0,
+  END: TRACE_RENDERER_CANVAS_OPS.END_TAG,
   INCOMPLETE_QUERY_RANGE: "incomplete_query_range",
-  INCOMPLETE_QUERY_RANGE_TAG: 2,
+  INCOMPLETE_QUERY_RANGE_TAG: TRACE_RENDERER_CANVAS_OPS.INCOMPLETE_QUERY_RANGE_TAG,
   QUERY_RANGE: "query_range",
-  QUERY_RANGE_TAG: 1,
+  QUERY_RANGE_TAG: TRACE_RENDERER_CANVAS_OPS.QUERY_RANGE_TAG,
   SLICE_RECT: "slice_rect",
 });
 // Keep renderer colors inline so cold app-ready does not pay a second module
@@ -96,7 +147,7 @@ function colorForSlice(color) {
 
   return rgb === 0
     ? TRACE_RENDERER_COLORS.DEFAULT_SLICE_FILL
-    : `#${(rgb & 0xffffff).toString(16).padStart(6, "0")}`;
+    : `#${(rgb & RGB_COLOR_MASK).toString(16).padStart(RGB_HEX_WIDTH, "0")}`;
 }
 
 function readerQueryResultBytes(reader) {
@@ -292,7 +343,7 @@ function createWasmCanvasOpPlanner(exports = null) {
       typeof plannerExports.trace_render_plan_next === "function"
     ) {
       const ops = [];
-      const maxOps = queryRangeBudget + trackCount + 1;
+      const maxOps = queryRangeBudget + trackCount + TERMINATOR_OP_BUDGET;
 
       plannerExports.trace_render_plan_begin(
         viewport.start,
@@ -416,7 +467,7 @@ function drawPartialHatch(context, x, y, width, height, spacing) {
     context.clip();
   }
   context.strokeStyle = TRACE_RENDERER_COLORS.PARTIAL_HATCH_STROKE;
-  context.lineWidth = 1;
+  context.lineWidth = DEFAULT_STROKE_WIDTH;
 
   for (let sx = x - height; sx < x + width + height; sx += spacing) {
     context.beginPath?.();
@@ -447,7 +498,7 @@ function drawUnknownRangeAffordance(context, width, bandHeight, options) {
   }
   context.strokeStyle =
     options.unknownStripeStyle ?? TRACE_RENDERER_COLORS.UNKNOWN_RANGE_STRIPE;
-  context.lineWidth = 1;
+  context.lineWidth = DEFAULT_STROKE_WIDTH;
 
   for (let sx = x - bandHeight; sx < width + bandHeight; sx += spacing) {
     context.beginPath?.();
@@ -474,7 +525,7 @@ function drawIncompleteQueryAffordances(context, width, bandHeight, viewport, ra
   context.strokeStyle =
     options.incompleteQueryStripeStyle ??
     TRACE_RENDERER_COLORS.INCOMPLETE_QUERY_STRIPE;
-  context.lineWidth = 1;
+  context.lineWidth = DEFAULT_STROKE_WIDTH;
 
   for (const range of ranges) {
     const start = Math.max(viewport.start, range.start);
@@ -523,13 +574,16 @@ function drawTraceRows(
   renderPlanner,
   options,
 ) {
-  const width = canvasDimension(canvas, "width", 800);
-  const height = canvasDimension(canvas, "height", 400);
-  const laneHeight = options.laneHeight ?? 10;
-  const laneGap = options.laneGap ?? 3;
-  const top = options.top ?? 18;
+  const width = canvasDimension(canvas, "width", DEFAULT_CANVAS_WIDTH);
+  const height = canvasDimension(canvas, "height", DEFAULT_CANVAS_HEIGHT);
+  const laneHeight = options.laneHeight ?? DEFAULT_LANE_HEIGHT;
+  const laneGap = options.laneGap ?? DEFAULT_LANE_GAP;
+  const top = options.top ?? DEFAULT_TRACE_TOP;
   const maxDepth = rows.reduce((max, row) => Math.max(max, row.depth), 0);
-  const bandHeight = Math.min(height, top + (maxDepth + 1) * (laneHeight + laneGap) + 8);
+  const bandHeight = Math.min(
+    height,
+    top + (maxDepth + 1) * (laneHeight + laneGap) + DEFAULT_BAND_PADDING,
+  );
   const span = Math.max(1, viewport.end - viewport.start);
   const ingestActive = isIngestActive(workerStatus);
 
@@ -564,7 +618,7 @@ function drawTraceRows(
         sliceRect.y,
         sliceRect.width,
         sliceRect.height,
-        options.hatchSpacing ?? 6,
+        options.hatchSpacing ?? DEFAULT_PARTIAL_HATCH_SPACING,
       );
     }
   }
@@ -641,7 +695,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   function panByPixels(deltaX, coveredRange) {
     state.userInteracted = true;
     const viewport = setViewport(state.viewport, coveredRange);
-    const width = canvasDimension(canvas, "width", 800);
+    const width = canvasDimension(canvas, "width", DEFAULT_CANVAS_WIDTH);
     const span = viewport.end - viewport.start;
     const timeDelta = (deltaX / Math.max(1, width)) * span;
 
@@ -655,10 +709,13 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
   function zoomAtPixel(pixelX, deltaY, coveredRange) {
     state.userInteracted = true;
     const viewport = setViewport(state.viewport, coveredRange);
-    const width = canvasDimension(canvas, "width", 800);
+    const width = canvasDimension(canvas, "width", DEFAULT_CANVAS_WIDTH);
     const ratio = Math.min(1, Math.max(0, pixelX / Math.max(1, width)));
     const span = viewport.end - viewport.start;
-    const factor = Math.exp(Math.max(-500, Math.min(500, deltaY)) * 0.001);
+    const factor = Math.exp(
+      Math.max(WHEEL_DELTA_MIN, Math.min(WHEEL_DELTA_MAX, deltaY)) *
+        WHEEL_DELTA_SCALE,
+    );
     const nextSpan = Math.max(minViewportSpan, span * factor);
     const focus = viewport.start + ratio * span;
 
@@ -726,7 +783,11 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       }
 
       zoomAtPixel(
-        eventCanvasX(canvas, event, canvasDimension(canvas, "width", 800)),
+        eventCanvasX(
+          canvas,
+          event,
+          canvasDimension(canvas, "width", DEFAULT_CANVAS_WIDTH),
+        ),
         event.deltaY ?? 0,
         coveredRange,
       );
