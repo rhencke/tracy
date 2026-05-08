@@ -1,19 +1,11 @@
 #!/usr/bin/env node
 
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
 
 const root = dirname(__dirname);
-const checkOnly = process.argv.includes("--check");
 const sourcePath = join(root, "abi/palette.json");
 const spec = JSON.parse(readFileSync(sourcePath, "utf8"));
-
-function generatedHeader(kind) {
-  return [
-    "// Generated from abi/palette.json by tools/generate-palette-spec.js.",
-    `// Do not edit ${kind} by hand.`,
-  ].join("\n");
-}
 
 function assertObject(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
@@ -138,81 +130,4 @@ function validatePaletteSpec() {
   }
 }
 
-function renderColorConstants(groupName, entries) {
-  const lines = [`export const ${groupName} = Object.freeze({`];
-
-  for (const [name, entry] of Object.entries(entries)) {
-    lines.push(`  ${name}: ${JSON.stringify(entry.value)},`);
-  }
-
-  lines.push("});");
-  return lines.join("\n");
-}
-
-function renderContrastChecks() {
-  return [
-    "export const PALETTE_CONTRAST_REQUIREMENTS = Object.freeze(",
-    `  ${JSON.stringify(spec.contrastChecks, null, 2).replace(/\n/g, "\n  ")},`,
-    ");",
-  ].join("\n");
-}
-
-function renderPaletteModule() {
-  const palette = spec.palettes.default;
-
-  return [
-    generatedHeader("host/palette.mjs"),
-    "",
-    renderColorConstants("APP_SHELL_COLORS", palette.appShell),
-    "",
-    renderColorConstants("TRACE_RENDERER_COLORS", palette.traceRenderer),
-    "",
-    renderContrastChecks(),
-    "",
-  ].join("\n");
-}
-
-function renderStartupPaletteModule() {
-  return [
-    generatedHeader("host/startup-palette.mjs"),
-    "",
-    renderColorConstants("APP_SHELL_COLORS", spec.palettes.default.appShell),
-    "",
-  ].join("\n");
-}
-
-function writeIfChanged(path, content) {
-  const absolute = join(root, path);
-  let previous = null;
-
-  try {
-    previous = readFileSync(absolute, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  if (previous === content) {
-    return true;
-  }
-
-  if (checkOnly) {
-    console.error(`${path} is out of date; run node tools/generate-palette-spec.js`);
-    return false;
-  }
-
-  writeFileSync(absolute, content);
-  return true;
-}
-
 validatePaletteSpec();
-
-const ok = [
-  writeIfChanged("host/palette.mjs", renderPaletteModule()),
-  writeIfChanged("host/startup-palette.mjs", renderStartupPaletteModule()),
-].every(Boolean);
-
-if (!ok) {
-  process.exitCode = 1;
-}

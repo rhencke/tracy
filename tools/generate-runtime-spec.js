@@ -7,6 +7,7 @@ const root = dirname(__dirname);
 const checkOnly = process.argv.includes("--check");
 const sourcePath = join(root, "abi/runtime.json");
 const spec = JSON.parse(readFileSync(sourcePath, "utf8"));
+const paletteSpec = JSON.parse(readFileSync(join(root, "abi/palette.json"), "utf8"));
 
 function generatedHeader(kind) {
   return [
@@ -50,9 +51,16 @@ function renderNamedStrings(groupName, entries) {
 
 function renderRuntimeSpecModule() {
   return [
-    generatedHeader("host/runtime-spec.mjs"),
+    [
+      "// Generated from abi/runtime.json and abi/palette.json by tools/generate-runtime-spec.js.",
+      "// Do not edit host/runtime-spec.mjs by hand.",
+    ].join("\n"),
     "",
     renderStringConstants("RUNTIME_URLS", spec.urls),
+    "",
+    renderStringConstants("APP_SHELL_COLORS", paletteSpec.palettes.default.appShell),
+    "",
+    renderStringConstants("TRACE_RENDERER_COLORS", paletteSpec.palettes.default.traceRenderer),
     "",
     renderNumberConstants("BOOTSTRAP_WASM_MEMORY", spec.wasmMemory),
     "",

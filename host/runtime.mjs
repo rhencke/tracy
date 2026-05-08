@@ -1,11 +1,11 @@
 import { HOST_IMPORT_NAME } from "./abi.mjs";
 import {
+  APP_SHELL_COLORS,
   PERFORMANCE_MARKS,
   PERFORMANCE_MEASURES,
   RUNTIME_DEFAULTS,
   RUNTIME_URLS,
 } from "./runtime-spec.mjs";
-import { APP_SHELL_COLORS } from "./startup-palette.mjs";
 
 const MAIN_THREAD = "main";
 const INGEST_WORKER_MESSAGE = Object.freeze({

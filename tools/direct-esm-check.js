@@ -99,10 +99,9 @@ function main() {
   const makefile = readRepoFile("Makefile");
   const indexHtml = readRepoFile("index.html");
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
+  const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
   const runtimeSpecSource = readRepoFile("host/runtime-spec.mjs");
-  const paletteSpecSource = readRepoFile("host/palette.mjs");
-  const startupPaletteSource = readRepoFile("host/startup-palette.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
 
@@ -116,9 +115,11 @@ function main() {
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
   assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer-loader\.mjs"/);
-  assert.match(paletteSpecSource, /Generated from abi\/palette\.json/);
-  assert.match(startupPaletteSource, /Generated from abi\/palette\.json/);
-  assert.match(startupPaletteSource, /APP_SHELL_COLORS/);
+  assert.match(runtimeSpecSource, /Generated from abi\/runtime\.json and abi\/palette\.json/);
+  assert.match(runtimeSpecSource, /APP_SHELL_COLORS/);
+  assert.match(runtimeSpecSource, /TRACE_RENDERER_COLORS/);
+  assert.match(rendererSource, /from "\.\/runtime-spec\.mjs"/);
+  assert.doesNotMatch(rendererSource, /from "\.\/palette\.mjs"/);
   assert.match(rendererLoaderSource, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpecSource, /WORKER_URL: "worker\.js"/);
   assert.match(runtimeSource, /RUNTIME_URLS\.WORKER_URL/);
@@ -157,10 +158,8 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
-    "host/palette.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime-spec.mjs",
-    "host/startup-palette.mjs",
     "index.html",
     "package.json",
   ]) {
@@ -183,10 +182,8 @@ function main() {
     "bootstrap.js",
     "worker.js",
     "host/runtime.mjs",
-    "host/palette.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime-spec.mjs",
-    "host/startup-palette.mjs",
     "host/ingest-worker-runtime.mjs",
   ]) {
     if (fs.existsSync(path.join(ROOT_DIR, "dist", relativePath))) {

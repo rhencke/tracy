@@ -4,7 +4,7 @@ import {
   HOST_CANVAS_SIZE_OFFSET,
   HOST_IMPORT_NAME,
 } from "./abi.mjs";
-import { APP_SHELL_COLORS } from "./startup-palette.mjs";
+import { APP_SHELL_COLORS } from "./runtime-spec.mjs";
 
 export function makeCanvasHost(canvas, memoryView) {
   const context = canvas.getContext("2d", { alpha: false });

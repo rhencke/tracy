@@ -1,10 +1,10 @@
 import {
+  APP_SHELL_COLORS,
   BOOTSTRAP_TIMING,
   BOOTSTRAP_WASM_MEMORY,
   PERFORMANCE_MARKS,
   RUNTIME_URLS,
 } from "./host/runtime-spec.mjs";
-import { APP_SHELL_COLORS } from "./host/startup-palette.mjs";
 
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
