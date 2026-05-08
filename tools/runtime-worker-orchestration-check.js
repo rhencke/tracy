@@ -1740,6 +1740,122 @@ async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhauste
   );
 }
 
+async function checkProgressiveTraceRendererUsesWasmCanvasOpPlanner() {
+  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const calls = [];
+  const planner = rendererModule.__test.createWasmCanvasOpPlanner({
+    trace_render_query_ranges_per_track(queryRangeBudget, trackCount) {
+      calls.push(["ranges", queryRangeBudget, trackCount]);
+      return 2;
+    },
+    trace_render_query_tile_span(viewportSpan, queryWindow, rangesPerTrack) {
+      calls.push(["tile", viewportSpan, queryWindow, rangesPerTrack]);
+      return 50;
+    },
+    trace_render_slice_end_x(sliceEnd, viewportStart, viewportSpan, canvasWidth) {
+      calls.push(["end-x", sliceEnd, viewportStart, viewportSpan, canvasWidth]);
+      return 80;
+    },
+    trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
+      calls.push(["x", sliceStart, viewportStart, viewportSpan, canvasWidth]);
+      return 32;
+    },
+    trace_render_slice_y(depth, top, laneHeight, laneGap) {
+      calls.push(["y", depth, top, laneHeight, laneGap]);
+      return 24;
+    },
+  });
+
+  assert.deepEqual(
+    planner.queryOps({
+      queryRangeBudget: 3,
+      queryWindow: 1000,
+      trackCount: 2,
+      viewport: { end: 100, start: 0, valid: true },
+    }),
+    [
+      { end: 50, op: "query_range", start: 0, trackId: 0 },
+      { end: 100, op: "query_range", start: 50, trackId: 0 },
+      { end: 50, op: "query_range", start: 0, trackId: 1 },
+      { end: 100, op: "incomplete_query_range", start: 50, trackId: 1 },
+    ],
+  );
+  assert.deepEqual(
+    planner.rowCanvasOp({
+      height: 10,
+      laneGap: 3,
+      laneHeight: 10,
+      row: { depth: 1, dur: 20, start: 10 },
+      span: 100,
+      top: 18,
+      viewport: { end: 100, start: 0, valid: true },
+      width: 320,
+    }),
+    { height: 10, op: "slice_rect", width: 48, x: 32, y: 24 },
+  );
+  assert.deepEqual(calls, [
+    ["ranges", 3, 2],
+    ["tile", 100, 1000, 2],
+    ["x", 10, 0, 100, 320],
+    ["end-x", 30, 0, 100, 320],
+    ["y", 1, 18, 10, 3],
+  ]);
+
+  const streamCalls = [];
+  const streamOps = [
+    { end: 50, start: 0, tag: 1, trackId: 0 },
+    { end: 100, start: 50, tag: 2, trackId: 1 },
+    { tag: 0 },
+  ];
+  let streamIndex = -1;
+  const streamPlanner = rendererModule.__test.createWasmCanvasOpPlanner({
+    trace_render_plan_begin(viewportStart, viewportEnd, trackCount, queryRangeBudget, queryWindow) {
+      streamCalls.push([
+        "begin",
+        viewportStart,
+        viewportEnd,
+        trackCount,
+        queryRangeBudget,
+        queryWindow,
+      ]);
+      streamIndex = -1;
+    },
+    trace_render_plan_next() {
+      streamIndex += 1;
+      streamCalls.push(["next", streamOps[streamIndex].tag]);
+      return streamOps[streamIndex].tag;
+    },
+    trace_render_plan_op_end() {
+      return streamOps[streamIndex].end;
+    },
+    trace_render_plan_op_start() {
+      return streamOps[streamIndex].start;
+    },
+    trace_render_plan_op_track_id() {
+      return streamOps[streamIndex].trackId;
+    },
+  });
+
+  assert.deepEqual(
+    streamPlanner.queryOps({
+      queryRangeBudget: 3,
+      queryWindow: 1000,
+      trackCount: 2,
+      viewport: { end: 100, start: 0, valid: true },
+    }),
+    [
+      { end: 50, op: "query_range", start: 0, trackId: 0 },
+      { end: 100, op: "incomplete_query_range", start: 50, trackId: 1 },
+    ],
+  );
+  assert.deepEqual(streamCalls, [
+    ["begin", 0, 100, 2, 3, 1000],
+    ["next", 1],
+    ["next", 2],
+    ["next", 0],
+  ]);
+}
+
 async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -2114,6 +2230,7 @@ async function main() {
   await checkProgressiveTraceRendererTilesFullVisibleViewport();
   await checkProgressiveTraceRendererBoundsLargeViewportQueries();
   await checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhausted();
+  await checkProgressiveTraceRendererUsesWasmCanvasOpPlanner();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimePreloadsProgressiveTraceRendererImplementation();
   await checkAppReadyWaitsForFirstFrameAndDeferredRenderer();

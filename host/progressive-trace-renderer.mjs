@@ -36,6 +36,14 @@ const {
   DEFAULT_UNKNOWN_AFFORDANCE_WIDTH,
   DEFAULT_UNKNOWN_STRIPE_SPACING,
 } = TRACE_RENDERER_LAYOUT_DEFAULTS;
+const CANVAS_OP = Object.freeze({
+  END: 0,
+  INCOMPLETE_QUERY_RANGE: "incomplete_query_range",
+  INCOMPLETE_QUERY_RANGE_TAG: 2,
+  QUERY_RANGE: "query_range",
+  QUERY_RANGE_TAG: 1,
+  SLICE_RECT: "slice_rect",
+});
 // Keep renderer colors inline so cold app-ready does not pay a second module
 // fetch; tools/generate-runtime-spec.js checks this block against abi/palette.json.
 const TRACE_RENDERER_COLORS = Object.freeze({
@@ -51,6 +59,12 @@ const TRACE_RENDERER_COLORS = Object.freeze({
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;
+}
+
+function wasmNumber(value, fallback) {
+  const numeric = Number(globalValue(value));
+
+  return Number.isFinite(numeric) ? numeric : fallback;
 }
 
 function errorMessage(error) {
@@ -229,6 +243,171 @@ function appendSkippedQueryRanges(ranges, viewport, trackId, queryStart, trackCo
   }
 }
 
+function createWasmCanvasOpPlanner(exports = null) {
+  const plannerExports = exports ?? {};
+
+  function queryRangesPerTrack(queryRangeBudget, trackCount) {
+    const fallback = Math.max(1, Math.floor(queryRangeBudget / trackCount));
+
+    if (typeof plannerExports.trace_render_query_ranges_per_track !== "function") {
+      return fallback;
+    }
+
+    return normalizedPositiveInteger(
+      plannerExports.trace_render_query_ranges_per_track(
+        queryRangeBudget,
+        trackCount,
+      ),
+      fallback,
+    );
+  }
+
+  function queryTileSpan(viewportSpan, queryWindow, rangesPerTrack) {
+    const fallback = Math.max(
+      1,
+      queryWindow,
+      Math.ceil(viewportSpan / rangesPerTrack),
+    );
+
+    if (typeof plannerExports.trace_render_query_tile_span !== "function") {
+      return fallback;
+    }
+
+    return Math.max(
+      1,
+      wasmNumber(
+        plannerExports.trace_render_query_tile_span(
+          viewportSpan,
+          queryWindow,
+          rangesPerTrack,
+        ),
+        fallback,
+      ),
+    );
+  }
+
+  function queryOps({ queryRangeBudget, queryWindow, trackCount, viewport }) {
+    if (
+      typeof plannerExports.trace_render_plan_begin === "function" &&
+      typeof plannerExports.trace_render_plan_next === "function"
+    ) {
+      const ops = [];
+      const maxOps = queryRangeBudget + trackCount + 1;
+
+      plannerExports.trace_render_plan_begin(
+        viewport.start,
+        viewport.end,
+        trackCount,
+        queryRangeBudget,
+        queryWindow,
+      );
+      for (let i = 0; i < maxOps; i += 1) {
+        const tag = Number(plannerExports.trace_render_plan_next());
+
+        if (tag === CANVAS_OP.END) {
+          return ops;
+        }
+
+        const op = {
+          end: wasmNumber(plannerExports.trace_render_plan_op_end?.(), viewport.end),
+          start: wasmNumber(plannerExports.trace_render_plan_op_start?.(), viewport.start),
+          trackId: normalizedRowCap(
+            plannerExports.trace_render_plan_op_track_id?.(),
+            0,
+          ),
+        };
+
+        if (tag === CANVAS_OP.QUERY_RANGE_TAG) {
+          ops.push({ ...op, op: CANVAS_OP.QUERY_RANGE });
+        } else if (tag === CANVAS_OP.INCOMPLETE_QUERY_RANGE_TAG) {
+          ops.push({ ...op, op: CANVAS_OP.INCOMPLETE_QUERY_RANGE });
+        }
+      }
+
+      throw new Error("wasm trace render planner did not terminate");
+    }
+
+    const viewportSpan = viewport.end - viewport.start;
+    const rangesPerTrack = queryRangesPerTrack(queryRangeBudget, trackCount);
+    const tileSpan = queryTileSpan(viewportSpan, queryWindow, rangesPerTrack);
+    const ops = [];
+    let queryRangeCount = 0;
+
+    queryLoop:
+    for (let trackId = 0; trackId < trackCount; trackId += 1) {
+      for (
+        let queryStart = viewport.start;
+        queryStart < viewport.end;
+        queryStart = Math.min(viewport.end, queryStart + tileSpan)
+      ) {
+        if (queryRangeCount >= queryRangeBudget) {
+          const skipped = [];
+          appendSkippedQueryRanges(
+            skipped,
+            viewport,
+            trackId,
+            queryStart,
+            trackCount,
+          );
+          for (const range of skipped) {
+            ops.push({ ...range, op: CANVAS_OP.INCOMPLETE_QUERY_RANGE });
+          }
+          break queryLoop;
+        }
+
+        const queryEnd = Math.min(viewport.end, queryStart + tileSpan);
+        ops.push({
+          end: queryEnd,
+          op: CANVAS_OP.QUERY_RANGE,
+          start: queryStart,
+          trackId,
+        });
+        queryRangeCount += 1;
+      }
+    }
+
+    return ops;
+  }
+
+  function rowCanvasOp({ height, laneGap, laneHeight, row, span, top, viewport, width }) {
+    const sliceEnd = Math.min(viewport.end, row.start + Math.max(1, row.dur));
+    const fallbackX = Math.max(0, ((row.start - viewport.start) / span) * width);
+    const fallbackEndX = Math.min(width, ((sliceEnd - viewport.start) / span) * width);
+    const fallbackY = top + row.depth * (laneHeight + laneGap);
+    const x = typeof plannerExports.trace_render_slice_x === "function"
+      ? wasmNumber(
+        plannerExports.trace_render_slice_x(row.start, viewport.start, span, width),
+        fallbackX,
+      )
+      : fallbackX;
+    const endX = typeof plannerExports.trace_render_slice_end_x === "function"
+      ? wasmNumber(
+        plannerExports.trace_render_slice_end_x(sliceEnd, viewport.start, span, width),
+        fallbackEndX,
+      )
+      : fallbackEndX;
+    const y = typeof plannerExports.trace_render_slice_y === "function"
+      ? wasmNumber(
+        plannerExports.trace_render_slice_y(row.depth, top, laneHeight, laneGap),
+        fallbackY,
+      )
+      : fallbackY;
+
+    return {
+      height,
+      op: CANVAS_OP.SLICE_RECT,
+      width: Math.max(1, endX - x),
+      x: Math.max(0, x),
+      y,
+    };
+  }
+
+  return {
+    queryOps,
+    rowCanvasOp,
+  };
+}
+
 function drawPartialHatch(context, x, y, width, height, spacing) {
   context.save?.();
   context.beginPath?.();
@@ -341,6 +520,7 @@ function drawTraceRows(
   coveredRange,
   workerStatus,
   incompleteQueryRanges,
+  renderPlanner,
   options,
 ) {
   const width = canvasDimension(canvas, "width", 800);
@@ -360,20 +540,32 @@ function drawTraceRows(
   context.fillRect?.(0, 0, width, bandHeight);
 
   for (const row of rows) {
-    const sliceEnd = Math.min(viewport.end, row.start + Math.max(1, row.dur));
-    const x = Math.max(0, ((row.start - viewport.start) / span) * width);
-    const endX = Math.min(width, ((sliceEnd - viewport.start) / span) * width);
-    const sliceWidth = Math.max(1, endX - x);
-    const y = top + row.depth * (laneHeight + laneGap);
+    const sliceRect = renderPlanner.rowCanvasOp({
+      height: laneHeight,
+      laneGap,
+      laneHeight,
+      row,
+      span,
+      top,
+      viewport,
+      width,
+    });
     const showPartial = row.partial && ingestActive;
 
     context.fillStyle = showPartial
       ? (options.partialFillStyle ?? TRACE_RENDERER_COLORS.PARTIAL_SLICE_FILL)
       : colorForSlice(row.color);
-    context.fillRect?.(x, y, sliceWidth, laneHeight);
+    context.fillRect?.(sliceRect.x, sliceRect.y, sliceRect.width, sliceRect.height);
 
     if (showPartial) {
-      drawPartialHatch(context, x, y, sliceWidth, laneHeight, options.hatchSpacing ?? 6);
+      drawPartialHatch(
+        context,
+        sliceRect.x,
+        sliceRect.y,
+        sliceRect.width,
+        sliceRect.height,
+        options.hatchSpacing ?? 6,
+      );
     }
   }
 
@@ -408,6 +600,8 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     DEFAULT_TRACE_QUERY_RANGE_BUDGET,
   );
   const minViewportSpan = options.minViewportSpan ?? DEFAULT_MIN_VIEWPORT_SPAN;
+  const renderPlanner = options.renderPlanner ??
+    createWasmCanvasOpPlanner(options.renderPlannerExports);
   const state = {
     cappedQueries: [],
     drag: null,
@@ -565,64 +759,56 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
       1,
       Number(options.trackCount ?? reader.trackCount?.() ?? 0),
     );
-    const viewportSpan = viewport.end - viewport.start;
-    const queryRangesPerTrack = Math.max(
-      1,
-      Math.floor(queryRangeBudget / trackCount),
-    );
-    const queryTileSpan = Math.max(
-      1,
-      queryWindow,
-      Math.ceil(viewportSpan / queryRangesPerTrack),
-    );
     const cappedQueries = [];
     const incompleteQueryRanges = [];
     const rows = [];
-    let queryRangeCount = 0;
 
     try {
-      queryLoop:
-      for (let trackId = 0; trackId < trackCount; trackId += 1) {
-        for (
-          let queryStart = viewport.start;
-          queryStart < viewport.end;
-          queryStart = Math.min(viewport.end, queryStart + queryTileSpan)
-        ) {
-          if (queryRangeCount >= queryRangeBudget) {
-            appendSkippedQueryRanges(
-              incompleteQueryRanges,
-              viewport,
-              trackId,
-              queryStart,
-              trackCount,
-            );
-            break queryLoop;
-          }
-          const queryEnd = Math.min(viewport.end, queryStart + queryTileSpan);
+      for (const op of renderPlanner.queryOps({
+        queryRangeBudget,
+        queryWindow,
+        trackCount,
+        viewport,
+      })) {
+        if (op.op === CANVAS_OP.INCOMPLETE_QUERY_RANGE) {
+          incompleteQueryRanges.push({
+            end: op.end,
+            start: op.start,
+            trackId: op.trackId,
+          });
+          continue;
+        }
+        if (op.op === CANVAS_OP.QUERY_RANGE) {
           const result = normalizeQueryResult(
             reader.queryRange(
-              trackId,
-              queryStart,
-              queryEnd,
+              op.trackId,
+              op.start,
+              op.end,
               queryOutPtr,
               queryRowCap,
             ),
           );
 
-          queryRangeCount += 1;
           rows.push(
-            ...readQueryRows(memory, reader, queryOutPtr, result.count, trackId, options),
+            ...readQueryRows(
+              memory,
+              reader,
+              queryOutPtr,
+              result.count,
+              op.trackId,
+              options,
+            ),
           );
           if (result.capped || result.matchedRows > result.writtenRows) {
             cappedQueries.push({
               matchedRows: result.matchedRows,
-              trackId,
+              trackId: op.trackId,
               writtenRows: result.writtenRows,
             });
             incompleteQueryRanges.push({
-              end: queryEnd,
-              start: queryStart,
-              trackId,
+              end: op.end,
+              start: op.start,
+              trackId: op.trackId,
             });
           }
         }
@@ -643,6 +829,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
         coveredRange,
         workerStatus,
         incompleteQueryRanges,
+        renderPlanner,
         options,
       );
     } catch (error) {
@@ -670,3 +857,8 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     zoomAtPixel,
   };
 }
+
+export const __test = Object.freeze({
+  CANVAS_OP,
+  createWasmCanvasOpPlanner,
+});
