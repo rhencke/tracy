@@ -55,6 +55,13 @@ export const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({
   PARTIAL: 24,
 });
 
+export const TRACE_RENDERER_LOADER_BRIDGE = Object.freeze({
+  API_METHODS: Object.freeze(["draw","panByPixels","zoomAtPixel"]),
+  STATUS_METHOD: "status",
+  LOADING_STATUS_FIELD: "loading",
+  ERROR_STATUS_FIELD: "error",
+});
+
 export const TRACE_RENDERER_COLORS = Object.freeze({
   DEFAULT_SLICE_FILL: "#3f6ea8",
   TRACE_BACKGROUND_FILL: "rgba(251, 248, 244, 0.92)",

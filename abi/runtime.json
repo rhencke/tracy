@@ -295,6 +295,16 @@
         "value": 6,
         "description": "Minimum hex digit count for packed slice colors rendered as CSS RGB values."
       }
+    },
+    "loaderBridge": {
+      "apiMethods": [
+        "draw",
+        "panByPixels",
+        "zoomAtPixel"
+      ],
+      "statusMethod": "status",
+      "loadingStatusField": "loading",
+      "errorStatusField": "error"
     }
   },
   "performanceMarks": {

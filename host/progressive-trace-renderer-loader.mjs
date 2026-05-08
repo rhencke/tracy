@@ -1,3 +1,12 @@
+import { TRACE_RENDERER_LOADER_BRIDGE } from "./trace-renderer-spec.mjs";
+
+const {
+  API_METHODS,
+  ERROR_STATUS_FIELD,
+  LOADING_STATUS_FIELD,
+  STATUS_METHOD,
+} = TRACE_RENDERER_LOADER_BRIDGE;
+
 let progressiveTraceRendererModulePromise = null;
 
 function loadProgressiveTraceRendererImplementation(options) {
@@ -8,6 +17,26 @@ function loadProgressiveTraceRendererImplementation(options) {
   }
 
   return progressiveTraceRendererModulePromise;
+}
+
+function pendingStatus(error) {
+  return {
+    [ERROR_STATUS_FIELD]: error,
+    [LOADING_STATUS_FIELD]: error === null,
+  };
+}
+
+function createRendererBridge(getRenderer, getError) {
+  const bridge = {};
+
+  for (const methodName of API_METHODS) {
+    bridge[methodName] = (...args) => getRenderer()?.[methodName]?.(...args);
+  }
+
+  bridge[STATUS_METHOD] = () =>
+    getRenderer()?.[STATUS_METHOD]?.() ?? pendingStatus(getError());
+
+  return bridge;
 }
 
 export function createProgressiveTraceRenderer(memory, ingestWorker, options = {}) {
@@ -22,21 +51,8 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     options.onError?.(loadError);
   });
 
-  return {
-    draw(ts) {
-      return renderer?.draw?.(ts);
-    },
-    panByPixels(...args) {
-      return renderer?.panByPixels?.(...args);
-    },
-    status() {
-      return renderer?.status?.() ?? {
-        error,
-        loading: error === null,
-      };
-    },
-    zoomAtPixel(...args) {
-      return renderer?.zoomAtPixel?.(...args);
-    },
-  };
+  return createRendererBridge(
+    () => renderer,
+    () => error,
+  );
 }

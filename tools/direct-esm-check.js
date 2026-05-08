@@ -276,6 +276,39 @@ function assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSo
   }
 }
 
+function assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource) {
+  assert.match(
+    traceRendererSpecSource,
+    /export const TRACE_RENDERER_LOADER_BRIDGE = Object\.freeze/,
+    "trace renderer spec should export the generated loader bridge contract",
+  );
+  assert.match(
+    rendererLoaderSource,
+    /import \{ TRACE_RENDERER_LOADER_BRIDGE \} from "\.\/trace-renderer-spec\.mjs"/,
+    "progressive trace renderer loader should consume the generated loader bridge contract",
+  );
+  assert.match(
+    rendererLoaderSource,
+    /for \(const methodName of API_METHODS\)/,
+    "progressive trace renderer loader should bridge generated renderer API methods generically",
+  );
+
+  for (const [pattern, message] of [
+    [/draw\(ts\)/, "draw method wrapper"],
+    [/panByPixels\(\.\.\.args\)/, "pan method wrapper"],
+    [/zoomAtPixel\(\.\.\.args\)/, "zoom method wrapper"],
+    [/status\(\)\s*\{/, "status method wrapper"],
+    [/loading:\s*error === null/, "loading status shape"],
+    [/error,\s*\n\s*loading/, "pending error/loading status object"],
+  ]) {
+    assert.doesNotMatch(
+      rendererLoaderSource,
+      pattern,
+      `host/progressive-trace-renderer-loader.mjs should read ${message} from TRACE_RENDERER_LOADER_BRIDGE`,
+    );
+  }
+}
+
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
@@ -299,6 +332,7 @@ function main() {
   assertIngestWorkerProgressPolicyUsesGeneratedSpec();
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
   assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
+  assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
 
   assert.match(
     buildScript,

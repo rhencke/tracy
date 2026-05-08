@@ -180,6 +180,20 @@ function renderTraceRendererContractBlock({ local }) {
   ].join("\n");
 }
 
+function renderTraceRendererLoaderBridge({ local }) {
+  const keyword = local ? "const" : "export const";
+  const bridge = spec.traceRenderer.loaderBridge;
+
+  return [
+    `${keyword} TRACE_RENDERER_LOADER_BRIDGE = Object.freeze({`,
+    `  API_METHODS: Object.freeze(${JSON.stringify(bridge.apiMethods)}),`,
+    `  STATUS_METHOD: ${JSON.stringify(bridge.statusMethod)},`,
+    `  LOADING_STATUS_FIELD: ${JSON.stringify(bridge.loadingStatusField)},`,
+    `  ERROR_STATUS_FIELD: ${JSON.stringify(bridge.errorStatusField)},`,
+    "});",
+  ].join("\n");
+}
+
 function renderNamedStrings(groupName, entries) {
   const lines = [`export const ${groupName} = Object.freeze({`];
 
@@ -223,6 +237,8 @@ function renderTraceRendererSpecModule() {
     ].join("\n"),
     "",
     renderTraceRendererContractBlock({ local: false }),
+    "",
+    renderTraceRendererLoaderBridge({ local: false }),
     "",
     renderStringConstants("TRACE_RENDERER_COLORS", paletteSpec.palettes.default.traceRenderer),
     "",
