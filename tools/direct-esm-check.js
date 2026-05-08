@@ -97,6 +97,7 @@ function assertNoInlinePaletteColor(relativePath) {
 function main() {
   const buildScript = readRepoFile("tools/build.sh");
   const makefile = readRepoFile("Makefile");
+  const bootstrapSource = readRepoFile("bootstrap.js");
   const indexHtml = readRepoFile("index.html");
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
@@ -115,6 +116,12 @@ function main() {
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
+  assert.match(bootstrapSource, /import\("\.\/host\/progressive-trace-renderer-loader\.mjs"\)/);
+  assert.match(bootstrapSource, /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/);
+  assert.match(
+    bootstrapSource,
+    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
+  );
   assert.match(runtimeSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer-loader\.mjs"/);
   assert.match(runtimeSpecSource, /Generated from abi\/runtime\.json and abi\/palette\.json/);
   assert.match(runtimeSpecSource, /APP_SHELL_COLORS/);

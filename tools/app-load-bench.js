@@ -768,6 +768,9 @@ function runSelfTest() {
   const runtimeWasmStartOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart",
   );
+  const defaultRendererPreloadOffset = runtime.indexOf(
+    "preloadDefaultProgressiveTraceRendererModule().catch(() => {})",
+  );
   const runtimeCoreReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreReady",
   );
@@ -786,6 +789,7 @@ function runSelfTest() {
   assert.equal(bootstrapCoreReadyOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeWasmStartOffset, -1);
+  assert.notEqual(defaultRendererPreloadOffset, -1);
   assert.notEqual(runtimeCoreReadyOffset, -1);
   assert.notEqual(firstFramePromiseOffset, -1);
   assert.notEqual(rendererModuleLoadOffset, -1);
@@ -794,6 +798,10 @@ function runSelfTest() {
   assert.ok(
     rendererModuleLoadOffset < runtimeWasmStartOffset,
     "deferred renderer import should overlap WASM startup",
+  );
+  assert.ok(
+    defaultRendererPreloadOffset < runtimeCoreStartOffset,
+    "default deferred renderer import should start during runtime module evaluation",
   );
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
@@ -812,10 +820,20 @@ function runSelfTest() {
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);
   assert.match(runtime, /from "\.\/runtime-spec\.mjs"/);
   assert.match(runtime, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(
+    runtime,
+    /preloadDefaultProgressiveTraceRendererModule\(\)\.catch\(\(\) => \{\}\)/,
+  );
   assert.match(runtimeSpec, /progressive-trace-renderer-loader\.mjs/);
   assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
   assert.match(runtimeSpec, /Generated from abi\/runtime\.json and abi\/palette\.json/);
   assert.match(bootstrap, /from "\.\/host\/runtime-spec\.mjs"/);
+  assert.match(bootstrap, /import\("\.\/host\/progressive-trace-renderer-loader\.mjs"\)/);
+  assert.match(bootstrap, /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/);
+  assert.match(
+    bootstrap,
+    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
+  );
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
   assert.match(runtimeSpec, /APP_SHELL_COLORS/);
   assert.match(runtimeSpec, /TRACE_RENDERER_COLORS/);

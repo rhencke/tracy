@@ -23,6 +23,19 @@ const {
   DEFAULT_READER_QUERY_ROW_CAP,
 } = RUNTIME_DEFAULTS;
 
+let defaultProgressiveTraceRendererModulePromise = null;
+
+function preloadDefaultProgressiveTraceRendererModule() {
+  if (defaultProgressiveTraceRendererModulePromise === null) {
+    defaultProgressiveTraceRendererModulePromise =
+      import(RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL);
+  }
+
+  return defaultProgressiveTraceRendererModulePromise;
+}
+
+preloadDefaultProgressiveTraceRendererModule().catch(() => {});
+
 function markPerformance(name, options) {
   const performance = options.performance ?? globalThis.performance;
 
@@ -711,7 +724,7 @@ async function loadApp(memory, host, options = {}) {
 
     progressiveTraceRendererPromise = (
       options.importProgressiveTraceRenderer?.() ??
-      import(RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL)
+      preloadDefaultProgressiveTraceRendererModule()
     ).then((module) => {
       progressiveTraceRendererModule = module;
       return module;
