@@ -626,12 +626,15 @@ async function checkInteractiveIngestGate() {
 
   await runFrame(frames, canvasHarness, 10);
   assert.equal(importCalls.length, 1);
-  assert.ok(
-    host.calls.some(
-      (call) => call[0] === "index-open" &&
-        call[1] === "indexes/throttled-100mb.json.idx",
-    ),
+  await waitForAsyncCondition(
+    () =>
+      host.calls.some(
+        (call) => call[0] === "index-open" &&
+          call[1] === "indexes/throttled-100mb.json.idx",
+      ) || controller.status().state === "error",
+    "main-thread reader should open the worker-written OPFS index",
   );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
   assert.ok(
     wasmModuleCalls.some((call) => call.id === "parser" && call.thread === "worker"),
     "interactive ingest gate should instantiate the real worker parser module",
