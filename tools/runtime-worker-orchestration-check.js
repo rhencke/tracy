@@ -2137,6 +2137,60 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   assert.equal(drawCalls, 3);
 }
 
+async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
+  const { frames } = installBrowserStubs();
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  let drawCalls = 0;
+  const coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
+  const ingestWorker = {
+    indexReader: {
+      coveredRange() {
+        return coveredRange;
+      },
+      status() {
+        return { state: "ready" };
+      },
+    },
+    status() {
+      return { coveredRange, state: "running" };
+    },
+  };
+
+  runtime.runApp(memory, {}, {
+    importProgressiveTraceRenderer: async () => ({
+      createProgressiveTraceRenderer() {
+        return {
+          draw() {
+            drawCalls += 1;
+          },
+        };
+      },
+    }),
+    ingestWorker,
+    instantiateWasmModuleForThread: async () => ({
+      exports: {
+        tracy_main() {},
+        tracy_tick() {},
+      },
+    }),
+    worker: {
+      Worker: FakeWorker,
+    },
+  });
+
+  await flushMicrotasks();
+  frames[0](1);
+  frames[1](2);
+  await flushMicrotasks();
+
+  assert.equal(
+    drawCalls,
+    1,
+    "queryable renderer creation should draw in the same frame",
+  );
+}
+
 async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
   const { frames } = installBrowserStubs();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
@@ -2287,6 +2341,7 @@ async function main() {
   await checkProgressiveTraceRendererUsesWasmCanvasOpPlanner();
   await checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange();
   await checkRuntimePreloadsProgressiveTraceRendererImplementation();
+  await checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable();
   await checkAppReadyWaitsForFirstFrameAndDeferredRenderer();
   await checkAppReadyFailsWhenDeferredRendererFails();
 }

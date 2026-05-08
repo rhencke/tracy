@@ -724,6 +724,46 @@ function shouldLoadProgressiveTraceRenderer(ingestWorker) {
   );
 }
 
+function isQueryableCoveredRange(range) {
+  const start = Number(range?.start);
+  const end = Number(range?.end);
+
+  return (
+    range?.valid === true &&
+    Number.isFinite(start) &&
+    Number.isFinite(end) &&
+    end > start
+  );
+}
+
+function shouldDrawProgressiveTraceRenderer(ingestWorker) {
+  const workerStatus = ingestWorker?.status?.();
+  const workerCoveredRange = workerStatus?.coveredRange;
+  const reader = ingestWorker?.indexReader;
+  const readerStatus = reader?.status?.();
+
+  if (
+    readerStatus?.state !== READER_STATUS.READY ||
+    !isQueryableCoveredRange(workerCoveredRange) ||
+    typeof reader?.coveredRange !== "function"
+  ) {
+    return false;
+  }
+
+  const readerCoveredRange = reader.coveredRange();
+
+  return (
+    isQueryableCoveredRange(readerCoveredRange) &&
+    Math.min(
+      Number(workerCoveredRange.end),
+      Number(readerCoveredRange.end),
+    ) > Math.max(
+      Number(workerCoveredRange.start),
+      Number(readerCoveredRange.start),
+    )
+  );
+}
+
 async function loadApp(memory, host, options = {}) {
   markPerformance(PERFORMANCE_MARKS.coreStart, options);
 
@@ -859,6 +899,9 @@ async function loadApp(memory, host, options = {}) {
             document: options.document,
           },
         );
+        if (shouldDrawProgressiveTraceRenderer(options.ingestWorker)) {
+          progressiveTraceRenderer.draw?.();
+        }
         return progressiveTraceRenderer;
       }).catch((error) => {
         options.ingestWorker?.fail?.(error);
