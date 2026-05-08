@@ -914,11 +914,23 @@ async function checkInteractiveIngestGate() {
   });
 
   await flushAsyncWork();
-  assert.ok(
+  assert.equal(
     opfsHarness.calls.some(
       (call) => call.host === "main" && call.op === "file-picker-open",
     ),
-    "interactive ingest gate should open the production file picker path",
+    false,
+    "interactive ingest gate should not open the file picker during app load",
+  );
+  assert.equal(
+    typeof canvasHarness.listeners.get("click"),
+    "function",
+    "interactive ingest gate should wire file picking to a user gesture",
+  );
+  assert.ok(
+    opfsHarness.calls.some(
+      (call) => call.host === "main" && call.op === "set-file-selected-callback",
+    ),
+    "interactive ingest gate should install the production file-selection callback during startup",
   );
   assert.ok(frames.length >= 1);
 
@@ -935,6 +947,15 @@ async function checkInteractiveIngestGate() {
 
   const selectedFile = makeTraceFile();
   elapsedClock.start();
+
+  canvasHarness.listeners.get("click")({ preventDefault() {} });
+  await flushAsyncWork(elapsedClock);
+  assert.ok(
+    opfsHarness.calls.some(
+      (call) => call.host === "main" && call.op === "file-picker-open",
+    ),
+    "interactive ingest gate should open the production file picker path from a user gesture",
+  );
 
   host.selectPickedFile(77, selectedFile);
   await flushAsyncWork(elapsedClock);

@@ -740,7 +740,7 @@ function installFileSelectionIngest(memory, host, ingestWorker, options) {
   });
 }
 
-function openInitialFilePicker(host, ingestWorker, options) {
+function installFilePickerGesture(host, ingestWorker, options) {
   if (
     options.openInitialFilePicker === false ||
     options.ingestFromFileSelection === false ||
@@ -749,13 +749,41 @@ function openInitialFilePicker(host, ingestWorker, options) {
     return;
   }
 
-  try {
-    Promise.resolve(host[HOST_IMPORT_NAME.FILE_PICKER_OPEN](0, 0)).catch(
-      (error) => ingestWorker?.fail?.(error),
-    );
-  } catch (error) {
-    ingestWorker?.fail?.(error);
+  const document = options.document ?? globalThis.document;
+  const trigger =
+    options.filePickerTrigger ??
+    document?.getElementById?.("tracy") ??
+    document?.body;
+
+  if (typeof trigger?.addEventListener !== "function") {
+    return;
   }
+
+  let pending = false;
+  const openFromGesture = () => {
+    if (pending) {
+      return;
+    }
+
+    pending = true;
+    try {
+      Promise.resolve(host[HOST_IMPORT_NAME.FILE_PICKER_OPEN](0, 0))
+        .then((handle) => {
+          if (handle !== -1) {
+            trigger.removeEventListener?.("click", openFromGesture);
+          }
+        })
+        .catch((error) => ingestWorker?.fail?.(error))
+        .finally(() => {
+          pending = false;
+        });
+    } catch (error) {
+      pending = false;
+      ingestWorker?.fail?.(error);
+    }
+  };
+
+  trigger.addEventListener("click", openFromGesture);
 }
 
 function shouldLoadProgressiveTraceRenderer(ingestWorker) {
@@ -906,7 +934,7 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
-  openInitialFilePicker(host, options.ingestWorker, options);
+  installFilePickerGesture(host, options.ingestWorker, options);
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
