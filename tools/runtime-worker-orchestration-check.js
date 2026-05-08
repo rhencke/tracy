@@ -1888,11 +1888,14 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
     false,
     "full readiness should not fire before the first frame",
   );
-  assert.equal(rendererImportStarted, false);
+  assert.equal(
+    rendererImportStarted,
+    true,
+    "deferred renderer import should start before the first frame",
+  );
 
   frames[0](1);
   await flushMicrotasks();
-  assert.equal(rendererImportStarted, true);
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
     false,

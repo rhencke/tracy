@@ -786,7 +786,14 @@ function runSelfTest() {
   assert.ok(runtimeCoreReadyOffset < firstFramePromiseOffset);
   assert.ok(firstFramePromiseOffset < appReadyOffset);
   assert.ok(runtimeCoreReadyOffset < appReadyOffset);
-  assert.match(runtime, /firstFramePromise\.then\(\(\) => \(/);
+  assert.match(
+    runtime,
+    /const deferredRendererReadyPromise =[\s\S]+loadProgressiveTraceRendererModule\(\)/,
+  );
+  assert.match(
+    runtime,
+    /Promise\.all\(\[firstFramePromise, deferredRendererReadyPromise\]\)\.then/,
+  );
   assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);
   assert.match(runtime, /from "\.\/runtime-spec\.mjs"/);

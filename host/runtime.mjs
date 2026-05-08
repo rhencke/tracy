@@ -766,11 +766,12 @@ async function loadApp(memory, host, options = {}) {
     return progressiveTraceRendererPromise;
   }
 
-  firstFramePromise.then(() => (
+  const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
       ? loadProgressiveTraceRendererModule()
-      : null
-  )).then(() => {
+      : Promise.resolve(null);
+
+  Promise.all([firstFramePromise, deferredRendererReadyPromise]).then(() => {
     markPerformance(PERFORMANCE_MARKS.appReady, options);
     measurePerformance(
       PERFORMANCE_MEASURES.appLoad,
