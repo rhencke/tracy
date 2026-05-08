@@ -76,6 +76,7 @@ function main() {
   const makefile = readRepoFile("Makefile");
   const indexHtml = readRepoFile("index.html");
   const runtimeSource = readRepoFile("host/runtime.mjs");
+  const runtimeSpecSource = readRepoFile("host/runtime-spec.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
 
@@ -88,10 +89,11 @@ function main() {
   assert.match(makefile, /dist\/worker\.js: worker\.js[\s\S]+cp \$< \$@/);
   assert.match(makefile, /dist\/host\/%\.mjs: host\/%\.mjs[\s\S]+cp \$< \$@/);
   assert.match(indexHtml, /<script type="module" src="bootstrap\.js"><\/script>/);
-  assert.match(runtimeSource, /const WORKER_URL = "worker\.js"/);
+  assert.match(runtimeSpecSource, /WORKER_URL: "worker\.js"/);
+  assert.match(runtimeSource, /RUNTIME_URLS\.WORKER_URL/);
   assert.match(
     runtimeSource,
-    /new WorkerCtor\(options\.workerUrl \?\? WORKER_URL, \{ type: "module" \}\)/,
+    /new WorkerCtor\(options\.workerUrl \?\? RUNTIME_URLS\.WORKER_URL, \{ type: "module" \}\)/,
   );
   assert.match(
     workerSource,
@@ -119,6 +121,7 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
+    "host/runtime-spec.mjs",
     "index.html",
     "package.json",
   ]) {
@@ -140,6 +143,7 @@ function main() {
     "bootstrap.js",
     "worker.js",
     "host/runtime.mjs",
+    "host/runtime-spec.mjs",
     "host/ingest-worker-runtime.mjs",
   ]) {
     if (fs.existsSync(path.join(ROOT_DIR, "dist", relativePath))) {

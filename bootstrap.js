@@ -1,4 +1,11 @@
-globalThis.performance?.mark?.("tracy.bootstrap.start");
+import {
+  BOOTSTRAP_TIMING,
+  BOOTSTRAP_WASM_MEMORY,
+  PERFORMANCE_MARKS,
+  RUNTIME_URLS,
+} from "./host/runtime-spec.mjs";
+
+globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
 const canvas = globalThis.document?.getElementById?.("tracy");
 const context = canvas?.getContext?.("2d");
@@ -9,12 +16,12 @@ if (context !== undefined) {
 
 if ("serviceWorker" in (globalThis.navigator ?? {})) {
   const registerServiceWorker = () =>
-    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    navigator.serviceWorker.register(RUNTIME_URLS.SERVICE_WORKER_URL).catch(() => {});
   const registerAfterReady = () => {
-    if (performance.getEntriesByName("tracy.app.ready").length > 0) {
-      setTimeout(registerServiceWorker, 250);
+    if (performance.getEntriesByName(PERFORMANCE_MARKS.appReady).length > 0) {
+      setTimeout(registerServiceWorker, BOOTSTRAP_TIMING.SERVICE_WORKER_READY_DELAY_MS);
     } else {
-      setTimeout(registerAfterReady, 16);
+      setTimeout(registerAfterReady, BOOTSTRAP_TIMING.SERVICE_WORKER_READY_POLL_MS);
     }
   };
 
@@ -27,8 +34,8 @@ const [{ makeMainThreadHost }, { runApp }] = await Promise.all([
 ]);
 
 const memory = new WebAssembly.Memory({
-  initial: 256,
-  maximum: 32768,
+  initial: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_INITIAL_PAGES,
+  maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES,
   shared: false,
 });
 

@@ -14,6 +14,7 @@
     "test:layout": "node tools/generate-layout.js --check",
     "test:host-abi": "node tools/generate-host-abi.js --check",
     "test:parser-state-abi": "node tools/generate-parser-state-abi.js --check",
+    "test:runtime-spec": "node tools/generate-runtime-spec.js --check",
     "test:wasm-modules-abi": "node tools/extract-wasm-modules.js --check",
     "test:wasm-modules-loader": "node tools/generate-wasm-modules-abi.js --check",
     "test:bootstrap-lines": "bash tools/check-bootstrap-lines.sh",

@@ -23,7 +23,7 @@ WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
 COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
 COV_MANIFEST_FILES :=
-HOST_JS_GENERATED := host/abi.mjs host/wasm-modules.mjs
+HOST_JS_GENERATED := host/abi.mjs host/runtime-spec.mjs host/wasm-modules.mjs
 HOST_JS := $(sort $(shell find host -type f -name '*.mjs' -print) $(HOST_JS_GENERATED))
 APP_JS_SOURCES := bootstrap.js worker.js
 APP_JS_DIST_FILES := $(patsubst %,dist/%,$(APP_JS_SOURCES))
@@ -50,6 +50,7 @@ GENERATED_FILES := \
 	MEMORY.md \
 	abi/wasm-modules.json \
 	host/abi.mjs \
+	host/runtime-spec.mjs \
 	host/wasm-modules.mjs \
 	$(GENERATED_WAT_FILES)
 
@@ -61,6 +62,7 @@ CLEAN_GENERATED_FILES := \
 	HOST_ABI.md \
 	abi/wasm-modules.json \
 	host/abi.mjs \
+	host/runtime-spec.mjs \
 	host/wasm-modules.mjs
 
 ifneq ($(MODULE_DOC_GENERATOR),)
@@ -71,11 +73,13 @@ GENERATED_INPUTS := \
 	abi/host.json \
 	abi/layout.json \
 	abi/parser-state.json \
+	abi/runtime.json \
 	tools/assemble-wat.js \
 	tools/extract-wasm-modules.js \
 	tools/generate-host-abi.js \
 	tools/generate-layout.js \
 	tools/generate-parser-state-abi.js \
+	tools/generate-runtime-spec.js \
 	tools/generate-wasm-modules-abi.js \
 	tools/layout-spec.js \
 	tools/wat-parser.js \
@@ -114,6 +118,7 @@ $(GENERATED_FILES) &: $(GENERATED_INPUTS)
 	node tools/generate-layout.js
 	node tools/generate-host-abi.js
 	node tools/generate-parser-state-abi.js
+	node tools/generate-runtime-spec.js
 	node tools/extract-wasm-modules.js
 	node tools/generate-wasm-modules-abi.js
 ifneq ($(MODULE_DOC_GENERATOR),)
@@ -225,6 +230,7 @@ check-generated: generated
 
 test: dist check-generated
 	bash tools/check-bootstrap-lines.sh
+	node tools/generate-runtime-spec.js --check
 	node tools/wasm-modules-check.js
 	node tools/host-shim-check.js
 	node tools/ingest-worker-runtime-check.js

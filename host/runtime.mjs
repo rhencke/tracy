@@ -1,7 +1,12 @@
 import { HOST_IMPORT_NAME } from "./abi.mjs";
+import {
+  PERFORMANCE_MARKS,
+  PERFORMANCE_MEASURES,
+  RUNTIME_DEFAULTS,
+  RUNTIME_URLS,
+} from "./runtime-spec.mjs";
 
 const MAIN_THREAD = "main";
-const WORKER_URL = "worker.js";
 const INGEST_WORKER_MESSAGE = Object.freeze({
   COMPLETE: "complete",
   COVERED_RANGE: "covered_range",
@@ -9,27 +14,13 @@ const INGEST_WORKER_MESSAGE = Object.freeze({
   PROGRESS: "progress",
   START: "start",
 });
-const DEFAULT_INGEST_NAME_PTR = 4096;
-const DEFAULT_INGEST_NAME_MAX_BYTES = 4096;
-const DEFAULT_READER_NAME_PTR = 8192;
-const DEFAULT_READER_CACHE_SLOTS = 4;
-const DEFAULT_READER_QUERY_ROW_CAP = 1024;
-const PROGRESSIVE_TRACE_RENDERER_URL = "./progressive-trace-renderer.mjs";
-const PERFORMANCE_MARKS = Object.freeze({
-  appReady: "tracy.app.ready",
-  bootstrapStart: "tracy.bootstrap.start",
-  coreReady: "tracy.core.ready",
-  coreStart: "tracy.core.start",
-  tracyMainEnd: "tracy.main.end",
-  tracyMainStart: "tracy.main.start",
-  wasmInstantiateEnd: "tracy.wasm.instantiate.end",
-  wasmInstantiateStart: "tracy.wasm.instantiate.start",
-});
-const PERFORMANCE_MEASURES = Object.freeze({
-  appLoad: "tracy.app.load",
-  tracyMain: "tracy.main",
-  wasmInstantiate: "tracy.wasm.instantiate",
-});
+const {
+  DEFAULT_INGEST_NAME_MAX_BYTES,
+  DEFAULT_INGEST_NAME_PTR,
+  DEFAULT_READER_CACHE_SLOTS,
+  DEFAULT_READER_NAME_PTR,
+  DEFAULT_READER_QUERY_ROW_CAP,
+} = RUNTIME_DEFAULTS;
 
 function markPerformance(name, options) {
   const performance = options.performance ?? globalThis.performance;
@@ -464,7 +455,7 @@ export function createIngestWorkerController(options = {}) {
     }
 
     try {
-      worker = new WorkerCtor(options.workerUrl ?? WORKER_URL, { type: "module" });
+      worker = new WorkerCtor(options.workerUrl ?? RUNTIME_URLS.WORKER_URL, { type: "module" });
     } catch (error) {
       status.state = "error";
       status.error = errorMessage(error);
@@ -766,7 +757,7 @@ async function loadApp(memory, host, options = {}) {
 
     progressiveTraceRendererPromise = (
       options.importProgressiveTraceRenderer?.() ??
-      import(PROGRESSIVE_TRACE_RENDERER_URL)
+      import(RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL)
     ).then((module) => {
       progressiveTraceRendererModule = module;
       return module;

@@ -11,35 +11,23 @@ const path = require("node:path");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
+const RUNTIME_SPEC = JSON.parse(
+  fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
+);
 const DEFAULT_TIMEOUT_MS = 15000;
 const FAST_3G = Object.freeze({
-  downloadThroughput: Math.floor((1.6 * 1024 * 1024) / 8),
-  latency: 150,
-  uploadThroughput: Math.floor((750 * 1024) / 8),
+  downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
+  latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
+  uploadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.uploadThroughputBytesPerSecond,
 });
-const BUDGETS = Object.freeze({
-  cold: Object.freeze({
-    coreTtiMs: 250,
-    fcpMs: 1100,
-    fullLoadMs: 1000,
-    transferBytes: 75000,
-    wasmInstantiateMs: 200,
-  }),
-  warmHttp: Object.freeze({
-    coreTtiMs: 25,
-    fcpMs: 50,
-    fullLoadMs: 25,
-    transferBytes: 0,
-    wasmInstantiateMs: 25,
-  }),
-  warmSw: Object.freeze({
-    coreTtiMs: 25,
-    fcpMs: 45,
-    fullLoadMs: 25,
-    transferBytes: 0,
-    wasmInstantiateMs: 15,
-  }),
-});
+const BUDGETS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(RUNTIME_SPEC.appLoadBench.budgets).map(([name, budget]) => [
+      name,
+      Object.freeze({ ...budget }),
+    ]),
+  ),
+);
 const MIME_TYPES = Object.freeze({
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -53,6 +41,7 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "bootstrap.js",
   "build-info.js",
   "host/abi.mjs",
+  "host/runtime-spec.mjs",
   "host/wasm-modules.mjs",
   "index.html",
   "manifest.webmanifest",
@@ -701,29 +690,12 @@ async function runBench(options) {
 }
 
 function runSelfTest() {
-  assert.deepEqual(BUDGETS, {
-    cold: {
-      coreTtiMs: 250,
-      fcpMs: 1100,
-      fullLoadMs: 1000,
-      transferBytes: 75000,
-      wasmInstantiateMs: 200,
-    },
-    warmHttp: {
-      coreTtiMs: 25,
-      fcpMs: 50,
-      fullLoadMs: 25,
-      transferBytes: 0,
-      wasmInstantiateMs: 25,
-    },
-    warmSw: {
-      coreTtiMs: 25,
-      fcpMs: 45,
-      fullLoadMs: 25,
-      transferBytes: 0,
-      wasmInstantiateMs: 15,
-    },
+  assert.deepEqual(FAST_3G, {
+    downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
+    latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
+    uploadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.uploadThroughputBytesPerSecond,
   });
+  assert.deepEqual(BUDGETS, RUNTIME_SPEC.appLoadBench.budgets);
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
       coreTtiMs: 1,
@@ -782,8 +754,9 @@ function runSelfTest() {
   const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
   const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.js"), "utf8");
   const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
-  const bootstrapStartOffset = bootstrap.indexOf('performance?.mark?.("tracy.bootstrap.start")');
-  const bootstrapCoreReadyOffset = bootstrap.indexOf('performance?.mark?.("tracy.core.ready")');
+  const runtimeSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs"), "utf8");
+  const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
+  const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
   const runtimeCoreStartOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreStart",
   );
@@ -799,6 +772,7 @@ function runSelfTest() {
 
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
+  assert.equal(packageJson.scripts["test:runtime-spec"], "node tools/generate-runtime-spec.js --check");
   assert.notEqual(bootstrapStartOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
@@ -815,6 +789,12 @@ function runSelfTest() {
   assert.match(runtime, /firstFramePromise\.then\(\(\) => \(/);
   assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);
+  assert.match(runtime, /from "\.\/runtime-spec\.mjs"/);
+  assert.match(runtime, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(runtimeSpec, /Generated from abi\/runtime\.json/);
+  assert.match(bootstrap, /from "\.\/host\/runtime-spec\.mjs"/);
+  assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
+  assert.match(bootstrap, /BOOTSTRAP_TIMING\.SERVICE_WORKER_READY_DELAY_MS/);
   assert.match(
     navigateAndMeasure.toString(),
     /coreReady: performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,
@@ -850,6 +830,7 @@ function runSelfTest() {
     /dist\/build-info\.js: \$\(filter-out dist\/build-info\.js \$\(SERVICE_WORKER_FILES\),\$\(DIST_FILES\)\)/,
   );
   assert.match(makefile, /node tools\/app-load-bench\.js --self-test/);
+  assert.match(makefile, /node tools\/generate-runtime-spec\.js --check/);
 }
 
 async function main() {
