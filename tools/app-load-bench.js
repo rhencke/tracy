@@ -778,6 +778,11 @@ function runSelfTest() {
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
   assert.equal(packageJson.scripts["test:runtime-spec"], "node tools/generate-runtime-spec.js --check");
+  assert.match(indexHtml, /<link rel="modulepreload" href="host\/runtime-spec\.mjs">/);
+  assert.match(
+    indexHtml,
+    /<link rel="modulepreload" href="host\/progressive-trace-renderer-loader\.mjs">/,
+  );
   assert.notEqual(bootstrapStartOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
   assert.notEqual(runtimeCoreStartOffset, -1);
