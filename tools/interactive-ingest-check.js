@@ -661,6 +661,7 @@ async function checkInteractiveIngestGate() {
     await runFrame(frames, canvasHarness, nextFrameAt);
     nextFrameAt += 16;
   }
+  await flushAsyncWork();
   assert.notEqual(controller.status().state, "error", controller.status().error);
   assert.notEqual(rendererInstance, null, "progressive renderer should be created");
   assertInteractiveContractOk(
