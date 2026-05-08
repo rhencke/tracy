@@ -446,6 +446,7 @@ async function checkInteractiveIngestGate() {
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
   const host = {
     ...makeSharedOpfsHost(memory, abi.HOST_IMPORT_NAME),
+    [abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]: true,
     setFileSelectedCallback(callback) {
       fileSelectionCallbacks.push(callback);
     },
