@@ -31,8 +31,7 @@ const context = canvas?.getContext?.("2d");
 if (context !== undefined) {
   context.fillStyle = APP_SHELL_COLORS.APP_SHELL_BACKGROUND;
   context.fillRect(0, 0, canvas.width, canvas.height);
-}
-globalThis.performance?.mark?.(PERFORMANCE_MARKS.appShellPaint);
+} globalThis.performance?.mark?.(PERFORMANCE_MARKS.appShellPaint);
 if ("serviceWorker" in (globalThis.navigator ?? {})) {
   const registerServiceWorker = () =>
     navigator.serviceWorker.register(RUNTIME_URLS.SERVICE_WORKER_URL).catch(() => {});
