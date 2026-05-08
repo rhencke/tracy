@@ -708,6 +708,15 @@ async function loadApp(memory, host, options = {}) {
   let progressiveTraceRendererModule = null;
   let progressiveTraceRendererPromise = null;
   let progressiveTraceRendererCreatePromise = null;
+  let firstFrameResolve = null;
+  let firstFrameSeen = false;
+  const firstFramePromise = new Promise((resolve) => {
+    firstFrameResolve = resolve;
+  });
+  requestAnimationFrame(() => {
+    firstFrameSeen = true;
+    firstFrameResolve();
+  });
 
   function loadProgressiveTraceRendererModule() {
     if (options.progressiveTraceRenderer === false) {
@@ -777,12 +786,6 @@ async function loadApp(memory, host, options = {}) {
     progressiveTraceRenderer === null
       ? loadProgressiveTraceRendererModule()
       : Promise.resolve(null);
-
-  let firstFrameResolve = null;
-  let firstFrameSeen = false;
-  const firstFramePromise = new Promise((resolve) => {
-    firstFrameResolve = resolve;
-  });
 
   Promise.all([firstFramePromise, deferredRendererReadyPromise]).then(() => {
     markPerformance(PERFORMANCE_MARKS.appReady, options);

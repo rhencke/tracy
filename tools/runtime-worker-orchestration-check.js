@@ -183,7 +183,7 @@ async function checkRuntimeOrchestratesWorker() {
     },
     { kind: "mark", name: "tracy.core.ready" },
   ]);
-  assert.equal(frames.length, 1, "requestAnimationFrame should be scheduled");
+  assert.equal(frames.length, 2, "startup frame gate and draw loop should be scheduled");
   assert.deepEqual(worker.posted, [
     {
       ingestId: 1,
@@ -219,7 +219,8 @@ async function checkRuntimeOrchestratesWorker() {
     committedEvents: 7,
   });
 
-  frames[0](123);
+  frames[0](122);
+  frames[1](123);
   await import(moduleUrl("host/trace-renderer-spec.mjs"));
   await flushMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [

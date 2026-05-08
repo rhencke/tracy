@@ -940,7 +940,7 @@ function runSelfTest() {
   );
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
-  assert.ok(runtimeCoreReadyOffset < firstFramePromiseOffset);
+  assert.ok(firstFramePromiseOffset < runtimeWasmStartOffset);
   assert.ok(firstFramePromiseOffset < appReadyOffset);
   assert.ok(runtimeCoreReadyOffset < appReadyOffset);
   assert.match(
