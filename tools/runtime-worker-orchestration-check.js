@@ -5,16 +5,30 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const OPFS_PAGE_SIZE = 0x00010000;
-const INDEX_DECODE_HINT_COMPACT_SLICES = 1;
-const INDEX_DECODE_HINT_TRACK_ID_SHIFT = 8;
-const INDEX_PAGE_HEADER_BUCKET_START_OFFSET = 12;
-const INDEX_PAGE_HEADER_BUCKET_END_OFFSET = 20;
-const INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET = 28;
-const INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET = 36;
+let OPFS_PAGE_SIZE;
+let INDEX_DECODE_HINT_COMPACT_SLICES;
+let INDEX_DECODE_HINT_TRACK_ID_SHIFT;
+let INDEX_PAGE_HEADER_BUCKET_START_OFFSET;
+let INDEX_PAGE_HEADER_BUCKET_END_OFFSET;
+let INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET;
+let INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET;
 
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
+}
+
+async function loadGeneratedIndexFormatSpec() {
+  const { INDEX_DECODE_HINTS, INDEX_FORMAT, INDEX_PAGE_HEADER_OFFSETS } = await import(
+    moduleUrl("host/index-format-spec.mjs")
+  );
+
+  OPFS_PAGE_SIZE = INDEX_FORMAT.OPFS_PAGE_SIZE;
+  INDEX_DECODE_HINT_COMPACT_SLICES = INDEX_DECODE_HINTS.COMPACT_SLICES;
+  INDEX_DECODE_HINT_TRACK_ID_SHIFT = INDEX_DECODE_HINTS.TRACK_ID_SHIFT;
+  INDEX_PAGE_HEADER_BUCKET_START_OFFSET = INDEX_PAGE_HEADER_OFFSETS.BUCKET_START;
+  INDEX_PAGE_HEADER_BUCKET_END_OFFSET = INDEX_PAGE_HEADER_OFFSETS.BUCKET_END;
+  INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET = INDEX_PAGE_HEADER_OFFSETS.RECORD_COUNT;
+  INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET = INDEX_PAGE_HEADER_OFFSETS.DECODE_HINTS;
 }
 
 function installBrowserStubs() {
@@ -2189,6 +2203,7 @@ async function checkAppReadyFailsWhenDeferredRendererFails() {
 }
 
 async function main() {
+  await loadGeneratedIndexFormatSpec();
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
   await checkRuntimeIgnoresStaleIngestWorkerMessages();

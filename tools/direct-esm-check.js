@@ -167,6 +167,45 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
   );
 }
 
+function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
+  const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+
+  assert.match(
+    source,
+    /host\/index-format-spec\.mjs/,
+    "runtime worker orchestration check should import generated index format values",
+  );
+
+  for (const [pattern, message] of [
+    [/const\s+OPFS_PAGE_SIZE\s*=/, "OPFS page size"],
+    [/const\s+INDEX_DECODE_HINT_[A-Z_]+\s*=/, "index decode hints"],
+    [/const\s+INDEX_PAGE_HEADER_[A-Z_]+_OFFSET\s*=/, "index page header offsets"],
+    [/\b0x00010000\b/, "OPFS page size literal"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `runtime worker orchestration check should read ${message} from generated index format values`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/INDEX_FORMAT\.OPFS_PAGE_SIZE/, "OPFS page size"],
+    [/INDEX_DECODE_HINTS\.COMPACT_SLICES/, "compact-slice decode hint"],
+    [/INDEX_DECODE_HINTS\.TRACK_ID_SHIFT/, "track-id decode hint shift"],
+    [/INDEX_PAGE_HEADER_OFFSETS\.BUCKET_START/, "bucket start offset"],
+    [/INDEX_PAGE_HEADER_OFFSETS\.BUCKET_END/, "bucket end offset"],
+    [/INDEX_PAGE_HEADER_OFFSETS\.RECORD_COUNT/, "record count offset"],
+    [/INDEX_PAGE_HEADER_OFFSETS\.DECODE_HINTS/, "decode hints offset"],
+  ]) {
+    assert.match(
+      source,
+      pattern,
+      `runtime worker orchestration check should consume generated ${message}`,
+    );
+  }
+}
+
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
   const source = readRepoFile("host/ingest-worker-runtime.mjs");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
@@ -681,6 +720,7 @@ function main() {
   assertNoInlinePaletteColor("host/canvas.mjs");
   assertNoInlinePaletteColor("host/runtime.mjs");
   assertIndexCatalogUsesGeneratedFormatSpec();
+  assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec();
 }
 
 try {
