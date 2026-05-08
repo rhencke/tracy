@@ -503,6 +503,18 @@ async function waitUntil(predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
   throw new Error("timed out waiting for page condition");
 }
 
+function unfinishedTransferRequestIds(requestIds, cachedRequestIds, loadingBytes) {
+  return [...requestIds].filter(
+    (requestId) => !cachedRequestIds.has(requestId) && !loadingBytes.has(requestId),
+  );
+}
+
+function coreTransferBytesForRequests(requestIds, cachedRequestIds, loadingBytes) {
+  return [...requestIds]
+    .filter((requestId) => !cachedRequestIds.has(requestId))
+    .reduce((total, requestId) => total + (loadingBytes.get(requestId) ?? 0), 0);
+}
+
 async function createPage(cdp) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send("Target.attachToTarget", {
@@ -522,7 +534,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
-  let coreTransferBytes = null;
+  let coreRequestIds = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
@@ -587,9 +599,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       throw new Error(`page reported app-load failure: ${status.error}${detail}`);
     }
     if (status.coreReady === true) {
-      coreTransferBytes = [...loadingBytes]
-        .filter(([requestId]) => requestIds.has(requestId) && !cachedRequestIds.has(requestId))
-        .reduce((total, [, bytes]) => total + bytes, 0);
+      coreRequestIds = new Set(requestIds);
       return true;
     }
 
@@ -617,6 +627,14 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
     return status.fullReady === true;
   });
+  await waitUntil(() =>
+    unfinishedTransferRequestIds(coreRequestIds, cachedRequestIds, loadingBytes).length === 0,
+  );
+  const coreTransferBytes = coreTransferBytesForRequests(
+    coreRequestIds,
+    cachedRequestIds,
+    loadingBytes,
+  );
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
@@ -717,6 +735,34 @@ function runSelfTest() {
     () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
     /fixture fcpMs 2.0 > 1/,
   );
+  const transferRequestIds = new Set(["bootstrap", "renderer", "cached"]);
+  const cachedTransferRequestIds = new Set(["cached"]);
+  const loadingTransferBytes = new Map([["bootstrap", 12]]);
+  assert.deepEqual(
+    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    ["renderer"],
+  );
+  assert.equal(
+    coreTransferBytesForRequests(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+    ),
+    12,
+  );
+  loadingTransferBytes.set("renderer", 34);
+  assert.deepEqual(
+    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    [],
+  );
+  assert.equal(
+    coreTransferBytesForRequests(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+    ),
+    46,
+  );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /fs\.promises\.stat/);
   assert.match(staticServerSource, /fs\.createReadStream/);
@@ -768,7 +814,7 @@ function runSelfTest() {
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
   const bootstrapRendererPreloadOffset = bootstrap.indexOf(
-    "const progressiveTraceRendererModulePromise = import",
+    "const importProgressiveTraceRenderer = () =>",
   );
   const bootstrapRuntimeImportOffset = bootstrap.indexOf('import("./host/runtime.mjs")');
   const runtimeCoreStartOffset = runtime.indexOf(
@@ -778,7 +824,7 @@ function runSelfTest() {
     "markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart",
   );
   const defaultRendererPreloadOffset = runtime.indexOf(
-    "preloadDefaultProgressiveTraceRendererModule().catch(() => {})",
+    "const deferredRendererReadyPromise",
   );
   const runtimeCoreReadyOffset = runtime.indexOf(
     "markPerformance(PERFORMANCE_MARKS.coreReady",
@@ -811,16 +857,12 @@ function runSelfTest() {
   assert.notEqual(tracyMainOffset, -1);
   assert.notEqual(appReadyOffset, -1);
   assert.ok(
-    rendererModuleLoadOffset < runtimeWasmStartOffset,
-    "deferred renderer import should overlap WASM startup",
-  );
-  assert.ok(
-    defaultRendererPreloadOffset < runtimeCoreStartOffset,
-    "default deferred renderer import should start during runtime module evaluation",
+    runtimeCoreReadyOffset < defaultRendererPreloadOffset,
+    "default deferred renderer import should start after core readiness",
   );
   assert.ok(
     bootstrapRendererPreloadOffset < bootstrapRuntimeImportOffset,
-    "bootstrap should start the renderer implementation import before waiting on runtime import",
+    "bootstrap should define the renderer implementation importer before waiting on runtime import",
   );
   assert.ok(runtimeCoreStartOffset < tracyMainOffset);
   assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
@@ -842,7 +884,7 @@ function runSelfTest() {
   assert.match(runtime, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     runtime,
-    /preloadDefaultProgressiveTraceRendererModule\(\)\.catch\(\(\) => \{\}\)/,
+    /const deferredRendererReadyPromise =[\s\S]+loadProgressiveTraceRendererModule\(\)/,
   );
   assert.match(startupSpec, /progressive-trace-renderer\.mjs/);
   assert.doesNotMatch(startupSpec, /progressive-trace-renderer-loader\.mjs/);
@@ -855,7 +897,7 @@ function runSelfTest() {
   assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrap,
-    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
+    /importProgressiveTraceRenderer,/,
   );
   assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
@@ -871,7 +913,15 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /coreTransferBytes = \[\.\.\.loadingBytes\]/,
+    /coreRequestIds = new Set\(requestIds\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /unfinishedTransferRequestIds\(coreRequestIds, cachedRequestIds, loadingBytes\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /coreTransferBytesForRequests\([\s\S]+coreRequestIds,[\s\S]+cachedRequestIds,[\s\S]+loadingBytes/,
   );
   assert.match(
     navigateAndMeasure.toString(),

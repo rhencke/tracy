@@ -133,11 +133,11 @@ function main() {
   assert.doesNotMatch(bootstrapLineCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(serviceWorkerCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
-  assert.match(bootstrapSource, /const progressiveTraceRendererModulePromise = import/);
+  assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrapSource,
-    /importProgressiveTraceRenderer: \(\) => progressiveTraceRendererModulePromise/,
+    /importProgressiveTraceRenderer,/,
   );
   assert.doesNotMatch(bootstrapSource, /progressive-trace-renderer-loader/);
   assert.match(bootstrapSource, /from "\.\/host\/startup-spec\.mjs"/);

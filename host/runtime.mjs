@@ -34,8 +34,6 @@ function preloadDefaultProgressiveTraceRendererModule() {
   return defaultProgressiveTraceRendererModulePromise;
 }
 
-preloadDefaultProgressiveTraceRendererModule().catch(() => {});
-
 function markPerformance(name, options) {
   const performance = options.performance ?? globalThis.performance;
 
@@ -733,11 +731,6 @@ async function loadApp(memory, host, options = {}) {
     return progressiveTraceRendererPromise;
   }
 
-  const deferredRendererReadyPromise =
-    progressiveTraceRenderer === null
-      ? loadProgressiveTraceRendererModule()
-      : Promise.resolve(null);
-
   async function defaultInstantiateMainWasm(id, thread, baseImports, {
     baseUrl = "wasm/",
     compile = defaultCompileWasm,
@@ -779,6 +772,11 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
+
+  const deferredRendererReadyPromise =
+    progressiveTraceRenderer === null
+      ? loadProgressiveTraceRendererModule()
+      : Promise.resolve(null);
 
   let firstFrameResolve = null;
   let firstFrameSeen = false;
