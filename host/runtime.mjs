@@ -5,7 +5,7 @@ import {
   PERFORMANCE_MEASURES,
   RUNTIME_DEFAULTS,
   RUNTIME_URLS,
-} from "./runtime-spec.mjs";
+} from "./startup-spec.mjs";
 
 const MAIN_THREAD = "main";
 const INGEST_WORKER_MESSAGE = Object.freeze({

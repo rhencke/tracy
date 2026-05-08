@@ -1,4 +1,4 @@
-import { TRACE_RENDERER_COLORS } from "./runtime-spec.mjs";
+import { TRACE_RENDERER_COLORS } from "./trace-renderer-spec.mjs";
 
 const DEFAULT_TRACE_QUERY_OUT_PTR = 12288;
 const DEFAULT_TRACE_QUERY_WINDOW = 1000;

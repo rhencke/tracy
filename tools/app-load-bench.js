@@ -42,7 +42,8 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "build-info.js",
   "host/abi.mjs",
   "host/progressive-trace-renderer-loader.mjs",
-  "host/runtime-spec.mjs",
+  "host/startup-spec.mjs",
+  "host/trace-renderer-spec.mjs",
   "host/wasm-modules.mjs",
   "index.html",
   "manifest.webmanifest",
@@ -759,7 +760,8 @@ function runSelfTest() {
     "utf8",
   );
   const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
-  const runtimeSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs"), "utf8");
+  const startupSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "startup-spec.mjs"), "utf8");
+  const traceRendererSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "trace-renderer-spec.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
   const runtimeCoreStartOffset = runtime.indexOf(
@@ -818,21 +820,27 @@ function runSelfTest() {
   );
   assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);
-  assert.match(runtime, /from "\.\/runtime-spec\.mjs"/);
+  assert.match(runtime, /from "\.\/startup-spec\.mjs"/);
+  assert.doesNotMatch(runtime, /from "\.\/runtime-spec\.mjs"/);
   assert.match(runtime, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     runtime,
     /preloadDefaultProgressiveTraceRendererModule\(\)\.catch\(\(\) => \{\}\)/,
   );
-  assert.match(runtimeSpec, /progressive-trace-renderer\.mjs/);
-  assert.doesNotMatch(runtimeSpec, /progressive-trace-renderer-loader\.mjs/);
+  assert.match(startupSpec, /progressive-trace-renderer\.mjs/);
+  assert.doesNotMatch(startupSpec, /progressive-trace-renderer-loader\.mjs/);
   assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
-  assert.match(runtimeSpec, /Generated from abi\/runtime\.json and abi\/palette\.json/);
-  assert.match(bootstrap, /from "\.\/host\/runtime-spec\.mjs"/);
+  assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
+  assert.match(startupSpec, /Generated from abi\/runtime\.json and abi\/palette\.json/);
+  assert.match(traceRendererSpec, /Generated from abi\/palette\.json/);
+  assert.match(bootstrap, /from "\.\/host\/startup-spec\.mjs"/);
+  assert.doesNotMatch(bootstrap, /runtime-spec\.mjs/);
   assert.doesNotMatch(bootstrap, /progressive-trace-renderer/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
-  assert.match(runtimeSpec, /APP_SHELL_COLORS/);
-  assert.match(runtimeSpec, /TRACE_RENDERER_COLORS/);
+  assert.match(startupSpec, /APP_SHELL_COLORS/);
+  assert.doesNotMatch(startupSpec, /TRACE_RENDERER_COLORS/);
+  assert.match(traceRendererSpec, /TRACE_RENDERER_COLORS/);
+  assert.doesNotMatch(traceRendererSpec, /APP_SHELL_COLORS/);
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
   assert.match(bootstrap, /BOOTSTRAP_TIMING\.SERVICE_WORKER_READY_DELAY_MS/);
   assert.match(

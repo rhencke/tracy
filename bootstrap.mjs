@@ -4,7 +4,7 @@ import {
   BOOTSTRAP_WASM_MEMORY,
   PERFORMANCE_MARKS,
   RUNTIME_URLS,
-} from "./host/runtime-spec.mjs";
+} from "./host/startup-spec.mjs";
 
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 

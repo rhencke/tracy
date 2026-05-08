@@ -49,18 +49,16 @@ function renderNamedStrings(groupName, entries) {
   return lines.join("\n");
 }
 
-function renderRuntimeSpecModule() {
+function renderStartupSpecModule() {
   return [
     [
       "// Generated from abi/runtime.json and abi/palette.json by tools/generate-runtime-spec.js.",
-      "// Do not edit host/runtime-spec.mjs by hand.",
+      "// Do not edit host/startup-spec.mjs by hand.",
     ].join("\n"),
     "",
     renderStringConstants("RUNTIME_URLS", spec.urls),
     "",
     renderStringConstants("APP_SHELL_COLORS", paletteSpec.palettes.default.appShell),
-    "",
-    renderStringConstants("TRACE_RENDERER_COLORS", paletteSpec.palettes.default.traceRenderer),
     "",
     renderNumberConstants("BOOTSTRAP_WASM_MEMORY", spec.wasmMemory),
     "",
@@ -71,6 +69,18 @@ function renderRuntimeSpecModule() {
     renderNamedStrings("PERFORMANCE_MARKS", spec.performanceMarks),
     "",
     renderNamedStrings("PERFORMANCE_MEASURES", spec.performanceMeasures),
+    "",
+  ].join("\n");
+}
+
+function renderTraceRendererSpecModule() {
+  return [
+    [
+      "// Generated from abi/palette.json by tools/generate-runtime-spec.js.",
+      "// Do not edit host/trace-renderer-spec.mjs by hand.",
+    ].join("\n"),
+    "",
+    renderStringConstants("TRACE_RENDERER_COLORS", paletteSpec.palettes.default.traceRenderer),
     "",
   ].join("\n");
 }
@@ -100,7 +110,10 @@ function writeIfChanged(path, content) {
   return true;
 }
 
-const ok = writeIfChanged("host/runtime-spec.mjs", renderRuntimeSpecModule());
+const ok = [
+  writeIfChanged("host/startup-spec.mjs", renderStartupSpecModule()),
+  writeIfChanged("host/trace-renderer-spec.mjs", renderTraceRendererSpecModule()),
+].every(Boolean);
 
 if (!ok) {
   process.exitCode = 1;

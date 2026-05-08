@@ -23,7 +23,7 @@ WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
 COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
 COV_MANIFEST_FILES :=
-HOST_JS_GENERATED := host/abi.mjs host/runtime-spec.mjs host/wasm-modules.mjs
+HOST_JS_GENERATED := host/abi.mjs host/startup-spec.mjs host/trace-renderer-spec.mjs host/wasm-modules.mjs
 HOST_JS := $(sort $(shell find host -type f -name '*.mjs' -print) $(HOST_JS_GENERATED))
 APP_JS_SOURCES := bootstrap.mjs worker.js
 APP_JS_DIST_FILES := $(patsubst %,dist/%,$(APP_JS_SOURCES))
@@ -50,7 +50,8 @@ GENERATED_FILES := \
 	MEMORY.md \
 	abi/wasm-modules.json \
 	host/abi.mjs \
-	host/runtime-spec.mjs \
+	host/startup-spec.mjs \
+	host/trace-renderer-spec.mjs \
 	host/wasm-modules.mjs \
 	$(GENERATED_WAT_FILES)
 
@@ -62,7 +63,8 @@ CLEAN_GENERATED_FILES := \
 	HOST_ABI.md \
 	abi/wasm-modules.json \
 	host/abi.mjs \
-	host/runtime-spec.mjs \
+	host/startup-spec.mjs \
+	host/trace-renderer-spec.mjs \
 	host/wasm-modules.mjs
 
 ifneq ($(MODULE_DOC_GENERATOR),)

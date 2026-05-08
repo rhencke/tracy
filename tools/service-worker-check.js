@@ -16,10 +16,10 @@ function main() {
   const bootstrap = readRepoFile("bootstrap.mjs");
   const makefile = readRepoFile("Makefile");
   const packageJson = JSON.parse(readRepoFile("package.json"));
-  const runtimeSpec = readRepoFile("host/runtime-spec.mjs");
+  const startupSpec = readRepoFile("host/startup-spec.mjs");
   const serviceWorker = readRepoFile("service-worker.js");
 
-  assert.match(runtimeSpec, /SERVICE_WORKER_URL: "service-worker\.js"/);
+  assert.match(startupSpec, /SERVICE_WORKER_URL: "service-worker\.js"/);
   assert.match(bootstrap, /navigator\.serviceWorker\.register\(RUNTIME_URLS\.SERVICE_WORKER_URL\)/);
   assert.equal(packageJson.scripts["test:service-worker"], "node tools/service-worker-check.js");
   assert.match(makefile, /SERVICE_WORKER_FILES := dist\/service-worker\.js dist\/precache-manifest\.js/);
