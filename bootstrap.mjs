@@ -8,6 +8,7 @@ const warmProgressiveTraceRendererPromise =
 const importProgressiveTraceRenderer = () =>
   warmProgressiveTraceRendererPromise ??
   import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+const shimModulePromise = import("./host/shim.mjs"), runtimeModulePromise = import("./host/runtime.mjs");
 const instantiateWasmModuleForThread = async (id, thread, imports, options = {}) => {
   if (id !== "app" || thread !== "main") {
     const { instantiateWasmModuleForThread: instantiateWasmGraph } = await import("./host/wasm-modules.mjs");
@@ -16,7 +17,7 @@ const instantiateWasmModuleForThread = async (id, thread, imports, options = {})
   const url = `${(options.baseUrl ?? "wasm/").replace(/\/?$/, "/")}app.wasm`;
   const compile = options.compile ?? ((moduleUrl) => WebAssembly.compileStreaming(fetch(moduleUrl)));
   const instantiate = options.instantiate ?? (async (module, baseImports) => (await WebAssembly.instantiate(module, baseImports)).exports);
-  const exports = await instantiate(await compile(url, id), imports, id, url);
+  const exports = options.compile === undefined && options.instantiate === undefined ? (await WebAssembly.instantiateStreaming(fetch(url), imports)).instance.exports : await instantiate(await compile(url, id), imports, id, url);
   return { exports, imports: { ...imports, app: exports } };
 };
 const canvas = globalThis.document?.getElementById?.("tracy");
@@ -44,6 +45,6 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
     navigator.serviceWorker.register(RUNTIME_URLS.SERVICE_WORKER_URL).catch(() => {});
   Promise.all([appReady(), pageLoaded()]).then(registerServiceWorker);
 }
-const [{ makeMainThreadHost }, { runApp }] = await Promise.all([import("./host/shim.mjs"), import("./host/runtime.mjs")]);
+const [{ makeMainThreadHost }, { runApp }] = await Promise.all([shimModulePromise, runtimeModulePromise]);
 const memory = new WebAssembly.Memory({ initial: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_INITIAL_PAGES, maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES, shared: false });
 runApp(memory, makeMainThreadHost(memory), { importProgressiveTraceRenderer, instantiateWasmModuleForThread });
