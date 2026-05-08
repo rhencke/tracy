@@ -1,11 +1,15 @@
 import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
-import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
+import {
+  CORE_SHELL_MODULE_ID,
+  CORE_SHELL_THREAD,
+  instantiateWasmModuleForThread,
+} from "./wasm-modules.mjs";
 
-const MAIN_THREAD = "main";
 const WORKER_URL = "worker.js";
 const PERFORMANCE_MARKS = Object.freeze({
   appReady: "tracy.app.ready",
   bootstrapStart: "tracy.bootstrap.start",
+  coreReady: "tracy.core.ready",
   tracyMainEnd: "tracy.main.end",
   tracyMainStart: "tracy.main.start",
   wasmInstantiateEnd: "tracy.wasm.instantiate.end",
@@ -13,6 +17,7 @@ const PERFORMANCE_MARKS = Object.freeze({
 });
 const PERFORMANCE_MEASURES = Object.freeze({
   appLoad: "tracy.app.load",
+  coreLoad: "tracy.core.load",
   tracyMain: "tracy.main",
   wasmInstantiate: "tracy.wasm.instantiate",
 });
@@ -189,6 +194,14 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function requestInteractiveFrame(options) {
+  const requestFrame = options.requestAnimationFrame ?? globalThis.requestAnimationFrame;
+
+  return new Promise((resolve) => {
+    requestFrame(resolve);
+  });
+}
+
 async function loadApp(memory, host, options = {}) {
   if (!supportsJSPI()) {
     showError(
@@ -200,7 +213,7 @@ async function loadApp(memory, host, options = {}) {
   const imports = { env: { memory }, host };
   const instantiate = options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
-  const { exports } = await instantiate("app", MAIN_THREAD, imports, {
+  const { exports } = await instantiate(CORE_SHELL_MODULE_ID, CORE_SHELL_THREAD, imports, {
     baseUrl: options.baseUrl ?? "wasm/",
     compile: options.compile,
     instantiate: options.instantiate,
@@ -212,6 +225,15 @@ async function loadApp(memory, host, options = {}) {
     PERFORMANCE_MARKS.wasmInstantiateEnd,
     options,
   );
+  await requestInteractiveFrame(options);
+  markPerformance(PERFORMANCE_MARKS.coreReady, options);
+  measurePerformance(
+    PERFORMANCE_MEASURES.coreLoad,
+    PERFORMANCE_MARKS.bootstrapStart,
+    PERFORMANCE_MARKS.coreReady,
+    options,
+  );
+
   const { tracy_main, tracy_tick } = exports;
 
   markPerformance(PERFORMANCE_MARKS.tracyMainStart, options);
@@ -231,12 +253,13 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
 
+  const requestFrame = options.requestAnimationFrame ?? globalThis.requestAnimationFrame;
   const loop = (ts) => {
     tracy_tick(ts);
-    requestAnimationFrame(loop);
+    requestFrame(loop);
   };
 
-  requestAnimationFrame(loop);
+  requestFrame(loop);
 
   if (options.ingest !== undefined) {
     options.ingestWorker?.start(

@@ -69,6 +69,7 @@ class FakeWorker {
 }
 
 async function checkRuntimeOrchestratesWorker() {
+  FakeWorker.instances = [];
   const { frames } = installBrowserStubs();
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const workerMessages = [];
@@ -143,6 +144,30 @@ async function checkRuntimeOrchestratesWorker() {
       start: "tracy.wasm.instantiate.start",
       end: "tracy.wasm.instantiate.end",
     },
+  ]);
+  assert.equal(frames.length, 1, "core readiness should wait for a frame");
+  assert.deepEqual(worker.posted, []);
+
+  frames[0](100);
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.deepEqual(performanceEntries, [
+    { kind: "mark", name: "tracy.wasm.instantiate.start" },
+    { kind: "mark", name: "tracy.wasm.instantiate.end" },
+    {
+      kind: "measure",
+      name: "tracy.wasm.instantiate",
+      start: "tracy.wasm.instantiate.start",
+      end: "tracy.wasm.instantiate.end",
+    },
+    { kind: "mark", name: "tracy.core.ready" },
+    {
+      kind: "measure",
+      name: "tracy.core.load",
+      start: "tracy.bootstrap.start",
+      end: "tracy.core.ready",
+    },
     { kind: "mark", name: "tracy.main.start" },
     { kind: "mark", name: "tracy.main.end" },
     {
@@ -159,7 +184,7 @@ async function checkRuntimeOrchestratesWorker() {
       end: "tracy.app.ready",
     },
   ]);
-  assert.equal(frames.length, 1, "requestAnimationFrame should be scheduled");
+  assert.equal(frames.length, 2, "requestAnimationFrame should be scheduled");
   assert.deepEqual(worker.posted, [
     {
       indexName: "indexes/trace.idx",
@@ -184,7 +209,7 @@ async function checkRuntimeOrchestratesWorker() {
     committedEvents: 7,
   });
 
-  frames[0](123);
+  frames[1](123);
   assert.deepEqual(ticks, ["main", 123]);
   assert.equal(controller.status().state, "complete");
   assert.equal(controller.status().result.committedEvents, 7);
@@ -204,7 +229,52 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(workerMessages.at(-1).status.state, "error");
 }
 
-checkRuntimeOrchestratesWorker().catch((error) => {
+async function checkCoreReadyRequiresSuccessfulLoad() {
+  FakeWorker.instances = [];
+  const { frames } = installBrowserStubs();
+  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const previousConsoleError = console.error;
+  const performanceEntries = [];
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const performance = {
+    mark(name) {
+      performanceEntries.push({ kind: "mark", name });
+    },
+    measure(name, start, end) {
+      performanceEntries.push({ kind: "measure", name, start, end });
+    },
+  };
+
+  try {
+    console.error = () => {};
+    runtime.runApp(memory, {}, {
+      instantiateWasmModuleForThread: async () => {
+        throw new Error("missing core dependency");
+      },
+      performance,
+      worker: {
+        Worker: FakeWorker,
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.deepEqual(performanceEntries, [
+      { kind: "mark", name: "tracy.wasm.instantiate.start" },
+    ]);
+    assert.equal(frames.length, 0, "failed core load should not schedule readiness frame");
+  } finally {
+    console.error = previousConsoleError;
+  }
+}
+
+async function main() {
+  await checkRuntimeOrchestratesWorker();
+  await checkCoreReadyRequiresSuccessfulLoad();
+}
+
+main().catch((error) => {
   console.error(error.stack || error.message || String(error));
   process.exitCode = 1;
 });
