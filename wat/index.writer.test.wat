@@ -1491,7 +1491,7 @@
     call $assert_eq_i32
 
     call $index_writer_covered_range_end
-    i32.const 40955
+    i32.const 5
     i32.const 462
     call $assert_eq_i32
   )
