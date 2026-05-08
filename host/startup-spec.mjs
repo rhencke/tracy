@@ -20,7 +20,6 @@ export const BOOTSTRAP_WASM_MEMORY = Object.freeze({
 export const BOOTSTRAP_TIMING = Object.freeze({
   SERVICE_WORKER_READY_POLL_MS: 16,
   SERVICE_WORKER_READY_DELAY_MS: 250,
-  COLD_RENDERER_READY_DELAY_MS: 5,
 });
 
 export const RUNTIME_DEFAULTS = Object.freeze({

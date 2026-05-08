@@ -164,23 +164,16 @@ function main() {
   assert.doesNotMatch(bootstrapLineCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(serviceWorkerCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
+  assert.match(bootstrapSource, /const progressiveTraceRendererModulePromise = import/);
   assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrapSource,
-    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
+    /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/,
   );
   assert.match(
     bootstrapSource,
-    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
-  );
-  assert.match(
-    bootstrapSource,
-    /const importColdProgressiveTraceRenderer = \(\) =>[\s\S]+setTimeout\(resolve, BOOTSTRAP_TIMING\.COLD_RENDERER_READY_DELAY_MS\)[\s\S]+import/,
-  );
-  assert.match(
-    bootstrapSource,
-    /warmProgressiveTraceRendererPromise \?\? importColdProgressiveTraceRenderer\(\)/,
+    /const importProgressiveTraceRenderer = \(\) =>[\s\S]+progressiveTraceRendererModulePromise/,
   );
   assert.match(
     bootstrapSource,

@@ -31,10 +31,6 @@
     "SERVICE_WORKER_READY_DELAY_MS": {
       "value": 250,
       "description": "Delay before registering the service worker after the app reaches full readiness."
-    },
-    "COLD_RENDERER_READY_DELAY_MS": {
-      "value": 5,
-      "description": "Delay before starting the cold-path renderer implementation import after core readiness so protected core-transfer classification is complete."
     }
   },
   "appLoadBench": {

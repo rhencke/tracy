@@ -888,7 +888,7 @@ function runSelfTest() {
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
   const bootstrapRendererPreloadOffset = bootstrap.indexOf(
-    "const importProgressiveTraceRenderer = () =>",
+    "const progressiveTraceRendererModulePromise = import",
   );
   const bootstrapRuntimeImportOffset = bootstrap.indexOf('import("./host/runtime.mjs")');
   const runtimeCoreStartOffset = runtime.indexOf(
@@ -971,19 +971,15 @@ function runSelfTest() {
   assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrap,
-    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
+    /const progressiveTraceRendererModulePromise = import/,
   );
   assert.match(
     bootstrap,
-    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
+    /progressiveTraceRendererModulePromise\.catch\(\(\) => \{\}\)/,
   );
   assert.match(
     bootstrap,
-    /const importColdProgressiveTraceRenderer = \(\) =>[\s\S]+setTimeout\(resolve, BOOTSTRAP_TIMING\.COLD_RENDERER_READY_DELAY_MS\)[\s\S]+import/,
-  );
-  assert.match(
-    bootstrap,
-    /warmProgressiveTraceRendererPromise \?\? importColdProgressiveTraceRenderer\(\)/,
+    /const importProgressiveTraceRenderer = \(\) =>[\s\S]+progressiveTraceRendererModulePromise/,
   );
   assert.match(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);

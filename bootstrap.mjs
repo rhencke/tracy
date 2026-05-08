@@ -3,17 +3,12 @@ import { APP_SHELL_COLORS, BOOTSTRAP_TIMING, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 
 const wasmModulesPromise = import("./host/wasm-modules.mjs");
-const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
-const warmProgressiveTraceRendererPromise =
-  serviceWorkerController === null
-    ? null
-    : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
-const importColdProgressiveTraceRenderer = () =>
-  new Promise((resolve) => setTimeout(resolve, BOOTSTRAP_TIMING.COLD_RENDERER_READY_DELAY_MS)).then(() =>
-    import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`),
-  );
+const progressiveTraceRendererModulePromise = import(
+  `./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`,
+);
+progressiveTraceRendererModulePromise.catch(() => {});
 const importProgressiveTraceRenderer = () =>
-  warmProgressiveTraceRendererPromise ?? importColdProgressiveTraceRenderer();
+  progressiveTraceRendererModulePromise;
 const instantiateWasmModuleForThread = async (...args) =>
   (await wasmModulesPromise).instantiateWasmModuleForThread(...args);
 
