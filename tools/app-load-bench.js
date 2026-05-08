@@ -1152,6 +1152,19 @@ function runSelfTest() {
     bootstrap,
     /instantiateWasmModuleForThread/,
   );
+  assert.match(
+    bootstrap,
+    /const mainAppWasmPromise = instantiateWasmModuleForThread\("app", "main"/,
+  );
+  assert.ok(
+    bootstrap.indexOf("const mainAppWasmPromise = instantiateWasmModuleForThread") <
+      bootstrap.indexOf("const { runApp } = await runtimeModulePromise"),
+    "bootstrap should start app wasm instantiation before waiting for runtime.mjs",
+  );
+  assert.match(
+    bootstrap,
+    /instantiateWasmModuleForThread: instantiateWasmModuleWithPreloadedApp/,
+  );
   assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
   assert.match(startupSpec, /APP_SHELL_COLORS/);

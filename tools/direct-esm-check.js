@@ -703,6 +703,19 @@ function main() {
     bootstrapSource,
     /instantiateWasmModuleForThread/,
   );
+  assert.match(
+    bootstrapSource,
+    /const mainAppWasmPromise = instantiateWasmModuleForThread\("app", "main"/,
+  );
+  assert.ok(
+    bootstrapSource.indexOf("const mainAppWasmPromise = instantiateWasmModuleForThread") <
+      bootstrapSource.indexOf("const { runApp } = await runtimeModulePromise"),
+    "bootstrap should start app wasm instantiation before waiting for runtime.mjs",
+  );
+  assert.match(
+    bootstrapSource,
+    /instantiateWasmModuleForThread: instantiateWasmModuleWithPreloadedApp/,
+  );
   assert.doesNotMatch(bootstrapSource, /progressive-trace-renderer-loader/);
   assert.match(bootstrapSource, /from "\.\/host\/startup-spec\.mjs"/);
   assert.doesNotMatch(bootstrapSource, /runtime-spec\.mjs/);

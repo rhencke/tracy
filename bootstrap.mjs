@@ -45,6 +45,23 @@ if ("serviceWorker" in (globalThis.navigator ?? {})) {
     navigator.serviceWorker.register(RUNTIME_URLS.SERVICE_WORKER_URL).catch(() => {});
   Promise.all([appReady(), pageLoaded()]).then(registerServiceWorker);
 }
-const [{ makeMainThreadHost }, { runApp }] = await Promise.all([shimModulePromise, runtimeModulePromise]);
 const memory = new WebAssembly.Memory({ initial: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_INITIAL_PAGES, maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES, shared: false });
-runApp(memory, makeMainThreadHost(memory), { importProgressiveTraceRenderer, instantiateWasmModuleForThread });
+const { makeMainThreadHost } = await shimModulePromise;
+const host = makeMainThreadHost(memory);
+const mainAppWasmPromise = instantiateWasmModuleForThread("app", "main", {
+  env: { memory },
+  host,
+});
+mainAppWasmPromise.catch(() => {});
+const instantiateWasmModuleWithPreloadedApp = (id, thread, imports, options) => {
+  if (id === "app" && thread === "main") {
+    return mainAppWasmPromise;
+  }
+
+  return instantiateWasmModuleForThread(id, thread, imports, options);
+};
+const { runApp } = await runtimeModulePromise;
+runApp(memory, host, {
+  importProgressiveTraceRenderer,
+  instantiateWasmModuleForThread: instantiateWasmModuleWithPreloadedApp,
+});
