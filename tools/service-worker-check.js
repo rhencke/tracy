@@ -21,6 +21,13 @@ function main() {
 
   assert.match(startupSpec, /SERVICE_WORKER_URL: "service-worker\.js"/);
   assert.match(bootstrap, /navigator\.serviceWorker\.register\(RUNTIME_URLS\.SERVICE_WORKER_URL\)/);
+  assert.match(bootstrap, /Promise\.all\(\[appReady\(\), pageLoaded\(\)\]\)\.then\(registerServiceWorker\)/);
+  assert.match(bootstrap, /globalThis\.addEventListener\?\.\(PERFORMANCE_MARKS\.appReady, resolve, \{ once: true \}\)/);
+  assert.doesNotMatch(bootstrap, /registerAfterReady/);
+  assert.doesNotMatch(bootstrap, /SERVICE_WORKER_READY_/);
+  assert.doesNotMatch(bootstrap, /setTimeout/);
+  assert.doesNotMatch(bootstrap, /setTimeout\(register/);
+  assert.doesNotMatch(startupSpec, /BOOTSTRAP_TIMING/);
   assert.equal(packageJson.scripts["test:service-worker"], "node tools/service-worker-check.js");
   assert.match(makefile, /SERVICE_WORKER_FILES := dist\/service-worker\.js dist\/precache-manifest\.js/);
   assert.match(makefile, /dist\/precache-manifest\.js: \$\(filter-out dist\/precache-manifest\.js,\$\(DIST_FILES\)\)/);

@@ -826,6 +826,7 @@ async function loadApp(memory, host, options = {}) {
 
   Promise.all([firstFramePromise, deferredRendererReadyPromise]).then(() => {
     markPerformance(PERFORMANCE_MARKS.appReady, options);
+    globalThis.dispatchEvent?.(new Event(PERFORMANCE_MARKS.appReady));
     measurePerformance(
       PERFORMANCE_MEASURES.appLoad,
       PERFORMANCE_MARKS.bootstrapStart,

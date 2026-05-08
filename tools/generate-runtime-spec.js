@@ -226,6 +226,10 @@ function renderObjectConstant(groupName, value) {
 
 function renderStartupSpecModule() {
   const initColors = colorEntriesByScope("default", "init");
+  const bootstrapTiming =
+    Object.keys(spec.bootstrap).length === 0
+      ? []
+      : ["", renderNumberConstants("BOOTSTRAP_TIMING", spec.bootstrap)];
 
   return [
     [
@@ -238,8 +242,7 @@ function renderStartupSpecModule() {
     renderStringConstants("APP_SHELL_COLORS", initColors),
     "",
     renderNumberConstants("BOOTSTRAP_WASM_MEMORY", spec.wasmMemory),
-    "",
-    renderNumberConstants("BOOTSTRAP_TIMING", spec.bootstrap),
+    ...bootstrapTiming,
     "",
     renderNumberConstants("RUNTIME_DEFAULTS", spec.runtimeDefaults),
     "",

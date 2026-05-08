@@ -23,16 +23,7 @@
       "description": "Maximum WebAssembly memory pages allowed by the bootstrap module."
     }
   },
-  "bootstrap": {
-    "SERVICE_WORKER_READY_POLL_MS": {
-      "value": 16,
-      "description": "Polling interval while waiting for the full app-ready performance mark before service-worker registration."
-    },
-    "SERVICE_WORKER_READY_DELAY_MS": {
-      "value": 250,
-      "description": "Delay before registering the service worker after the app reaches full readiness."
-    }
-  },
+  "bootstrap": {},
   "appLoadBench": {
     "fast3g": {
       "downloadThroughputBytesPerSecond": 209715,
@@ -65,14 +56,6 @@
   },
   "constantAudit": {
     "duplicateNumericValues": [
-      {
-        "numericValue": 250,
-        "paths": [
-          "bootstrap.SERVICE_WORKER_READY_DELAY_MS",
-          "appLoadBench.budgets.cold.coreTtiMs"
-        ],
-        "description": "These are intentionally distinct timing boundaries: service-worker registration delay after full readiness and cold core interactivity budget."
-      },
       {
         "numericValue": 1000,
         "paths": [

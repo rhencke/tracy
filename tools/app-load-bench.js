@@ -1113,6 +1113,17 @@ function runSelfTest() {
   assert.doesNotMatch(bootstrap, /afterProtectedStartupBoundary/);
   assert.doesNotMatch(bootstrap, /new MessageChannel\(\)/);
   assert.doesNotMatch(bootstrap, /setTimeout\(resolve/);
+  assert.match(bootstrap, /const appReady = \(\) => new Promise/);
+  assert.match(bootstrap, /PERFORMANCE_MARKS\.appReady/);
+  assert.match(bootstrap, /globalThis\.addEventListener\?\.\(PERFORMANCE_MARKS\.appReady, resolve, \{ once: true \}\)/);
+  assert.match(bootstrap, /const pageLoaded = \(\) => new Promise/);
+  assert.match(bootstrap, /Promise\.all\(\[appReady\(\), pageLoaded\(\)\]\)\.then\(registerServiceWorker\)/);
+  assert.doesNotMatch(bootstrap, /registerAfterReady/);
+  assert.doesNotMatch(bootstrap, /SERVICE_WORKER_READY_/);
+  assert.doesNotMatch(bootstrap, /setTimeout/);
+  assert.doesNotMatch(bootstrap, /setTimeout\(register/);
+  assert.doesNotMatch(startupSpec, /BOOTSTRAP_TIMING/);
+  assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(
     bootstrap,
@@ -1153,7 +1164,6 @@ function runSelfTest() {
     }
   }
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
-  assert.match(bootstrap, /BOOTSTRAP_TIMING\.SERVICE_WORKER_READY_DELAY_MS/);
   assert.match(
     navigateAndMeasure.toString(),
     /coreReady: performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,

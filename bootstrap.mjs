@@ -1,4 +1,4 @@
-import { APP_SHELL_COLORS, BOOTSTRAP_TIMING, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_MARKS, RUNTIME_URLS } from "./host/startup-spec.mjs";
+import { APP_SHELL_COLORS, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_MARKS, RUNTIME_URLS } from "./host/startup-spec.mjs";
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
 const warmProgressiveTraceRendererPromise =
@@ -26,17 +26,23 @@ if (context !== undefined) {
   context.fillRect(0, 0, canvas.width, canvas.height);
 } globalThis.performance?.mark?.(PERFORMANCE_MARKS.appShellPaint);
 if ("serviceWorker" in (globalThis.navigator ?? {})) {
+  const appReady = () => new Promise((resolve) => {
+    if (performance.getEntriesByName(PERFORMANCE_MARKS.appReady).length > 0) {
+      resolve();
+    } else {
+      globalThis.addEventListener?.(PERFORMANCE_MARKS.appReady, resolve, { once: true });
+    }
+  });
+  const pageLoaded = () => new Promise((resolve) => {
+    if (document.readyState === "complete") {
+      resolve();
+    } else {
+      globalThis.addEventListener?.("load", resolve, { once: true });
+    }
+  });
   const registerServiceWorker = () =>
     navigator.serviceWorker.register(RUNTIME_URLS.SERVICE_WORKER_URL).catch(() => {});
-  const registerAfterReady = () => {
-    if (performance.getEntriesByName(PERFORMANCE_MARKS.appReady).length > 0) {
-      setTimeout(registerServiceWorker, BOOTSTRAP_TIMING.SERVICE_WORKER_READY_DELAY_MS);
-    } else {
-      setTimeout(registerAfterReady, BOOTSTRAP_TIMING.SERVICE_WORKER_READY_POLL_MS);
-    }
-  };
-
-  globalThis.addEventListener?.("load", registerAfterReady);
+  Promise.all([appReady(), pageLoaded()]).then(registerServiceWorker);
 }
 const [{ makeMainThreadHost }, { runApp }] = await Promise.all([import("./host/shim.mjs"), import("./host/runtime.mjs")]);
 const memory = new WebAssembly.Memory({ initial: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_INITIAL_PAGES, maximum: BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES, shared: false });

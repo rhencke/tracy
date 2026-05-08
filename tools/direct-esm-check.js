@@ -495,6 +495,16 @@ function main() {
   assert.doesNotMatch(bootstrapSource, /afterProtectedStartupBoundary/);
   assert.doesNotMatch(bootstrapSource, /new MessageChannel\(\)/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(resolve/);
+  assert.match(bootstrapSource, /const appReady = \(\) => new Promise/);
+  assert.match(bootstrapSource, /PERFORMANCE_MARKS\.appReady/);
+  assert.match(bootstrapSource, /globalThis\.addEventListener\?\.\(PERFORMANCE_MARKS\.appReady, resolve, \{ once: true \}\)/);
+  assert.match(bootstrapSource, /const pageLoaded = \(\) => new Promise/);
+  assert.match(bootstrapSource, /Promise\.all\(\[appReady\(\), pageLoaded\(\)\]\)\.then\(registerServiceWorker\)/);
+  assert.doesNotMatch(bootstrapSource, /registerAfterReady/);
+  assert.doesNotMatch(bootstrapSource, /SERVICE_WORKER_READY_/);
+  assert.doesNotMatch(bootstrapSource, /setTimeout/);
+  assert.doesNotMatch(bootstrapSource, /setTimeout\(register/);
+  assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(
     bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
