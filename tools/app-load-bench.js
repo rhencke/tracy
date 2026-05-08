@@ -61,6 +61,13 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "wasm/parser_state.wasm",
   "worker.js",
 ]);
+const PERFORMANCE_MARKS = Object.freeze({
+  appReady: "tracy.app.ready",
+  bootstrapStart: "tracy.bootstrap.start",
+  coreReady: "tracy.core.ready",
+  wasmInstantiateEnd: "tracy.wasm.instantiate.end",
+});
+const FRAME_SAMPLER_GLOBAL = "__TRACY_APP_LOAD_FRAME_TIMES__";
 
 function parseArgs(argv) {
   const options = {
@@ -98,6 +105,37 @@ function assertMeasuredBudget(name, metrics, budget) {
     if (value > limit) {
       throw new Error(`${name} ${field} ${value.toFixed(1)} > ${limit}`);
     }
+  }
+}
+
+function requireFiniteMarker(timeline, field) {
+  const value = timeline[field];
+
+  if (!Number.isFinite(value)) {
+    throw new Error(`app-load bench missing performance marker ${field}`);
+  }
+
+  return value;
+}
+
+function assertCoreReadyOrdering(timeline) {
+  const bootstrapStartMs = requireFiniteMarker(timeline, "bootstrapStartMs");
+  const wasmInstantiateEndMs = requireFiniteMarker(timeline, "wasmInstantiateEndMs");
+  const firstShellFrameMs = requireFiniteMarker(timeline, "firstShellFrameMs");
+  const coreReadyMs = requireFiniteMarker(timeline, "coreReadyMs");
+  const appReadyMs = requireFiniteMarker(timeline, "appReadyMs");
+
+  if (coreReadyMs <= bootstrapStartMs) {
+    throw new Error("tracy.core.ready must be later than tracy.bootstrap.start");
+  }
+  if (coreReadyMs < wasmInstantiateEndMs) {
+    throw new Error("tracy.core.ready must wait for core wasm dependencies");
+  }
+  if (coreReadyMs < firstShellFrameMs) {
+    throw new Error("tracy.core.ready must wait for the first shell-capable frame");
+  }
+  if (appReadyMs < coreReadyMs) {
+    throw new Error("tracy.app.ready must not precede tracy.core.ready");
   }
 }
 
@@ -520,6 +558,22 @@ async function createPage(cdp) {
   await cdp.send("Network.enable", {}, sessionId);
   await cdp.send("Performance.enable", {}, sessionId);
   await cdp.send("Runtime.enable", {}, sessionId);
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `(() => {
+      const frameTimes = [];
+      Object.defineProperty(globalThis, ${JSON.stringify(FRAME_SAMPLER_GLOBAL)}, {
+        configurable: false,
+        value: frameTimes,
+      });
+      function tick() {
+        if (frameTimes.length < 512) {
+          frameTimes.push(performance.now());
+        }
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();`,
+  }, sessionId);
 
   return { sessionId, targetId };
 }
@@ -577,10 +631,11 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       expression: `(() => {
         const error = document.querySelector('[role="alert"]')?.textContent ?? "";
         const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
+        const mark = (name) => performance.getEntriesByName(name)[0]?.startTime;
         return {
           detail,
           error,
-          ready: performance.getEntriesByName("tracy.app.ready").length > 0,
+          ready: Number.isFinite(mark(${JSON.stringify(PERFORMANCE_MARKS.appReady)})),
         };
       })()`,
       returnByValue: true,
@@ -597,14 +652,35 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
+      const mark = (name) => performance.getEntriesByName(name)[0]?.startTime;
       const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? 0;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
-      return { fcpMs: fcp, ttiMs: appLoad, wasmInstantiateMs: wasm };
+      const bootstrapStartMs = mark(${JSON.stringify(PERFORMANCE_MARKS.bootstrapStart)});
+      const wasmInstantiateEndMs = mark(${JSON.stringify(PERFORMANCE_MARKS.wasmInstantiateEnd)});
+      const coreReadyMs = mark(${JSON.stringify(PERFORMANCE_MARKS.coreReady)});
+      const appReadyMs = mark(${JSON.stringify(PERFORMANCE_MARKS.appReady)});
+      const frameTimes = globalThis[${JSON.stringify(FRAME_SAMPLER_GLOBAL)}] ?? [];
+      return {
+        appReadyMs,
+        bootstrapStartMs,
+        coreReadyMs,
+        fcpMs: fcp,
+        firstShellFrameMs: frameTimes.find((time) => time >= wasmInstantiateEndMs),
+        ttiMs: appLoad,
+        wasmInstantiateMs: wasm,
+        wasmInstantiateEndMs,
+      };
     })()`,
     returnByValue: true,
   }, page.sessionId);
   const metrics = result.result.value;
+
+  // `tracy.core.ready` is the app-load bench's interactivity marker: the
+  // core shell wasm closure is loaded, then the browser reaches a frame that
+  // can run shell input/rendering. The canvas prepaint may happen earlier and
+  // is intentionally not accepted as readiness.
+  assertCoreReadyOrdering(metrics);
 
   metrics.transferBytes = [...loadingBytes]
     .filter(([requestId]) => requestIds.has(requestId) && !cachedRequestIds.has(requestId))
@@ -701,6 +777,45 @@ function runSelfTest() {
     () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
     /fixture fcpMs 2.0 > 1/,
   );
+  assert.doesNotThrow(() =>
+    assertCoreReadyOrdering({
+      appReadyMs: 4,
+      bootstrapStartMs: 0,
+      coreReadyMs: 3,
+      firstShellFrameMs: 3,
+      wasmInstantiateEndMs: 2,
+    }),
+  );
+  assert.throws(
+    () => assertCoreReadyOrdering({
+      appReadyMs: 4,
+      bootstrapStartMs: 0,
+      coreReadyMs: 1,
+      firstShellFrameMs: 3,
+      wasmInstantiateEndMs: 2,
+    }),
+    /core wasm dependencies/,
+  );
+  assert.throws(
+    () => assertCoreReadyOrdering({
+      appReadyMs: 4,
+      bootstrapStartMs: 0,
+      coreReadyMs: 2,
+      firstShellFrameMs: 3,
+      wasmInstantiateEndMs: 2,
+    }),
+    /first shell-capable frame/,
+  );
+  assert.throws(
+    () => assertCoreReadyOrdering({
+      appReadyMs: 2,
+      bootstrapStartMs: 0,
+      coreReadyMs: 3,
+      firstShellFrameMs: 3,
+      wasmInstantiateEndMs: 2,
+    }),
+    /app.ready must not precede/,
+  );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /fs\.promises\.stat/);
   assert.match(staticServerSource, /fs\.createReadStream/);
@@ -750,6 +865,14 @@ function runSelfTest() {
     /dist\/build-info\.js: \$\(filter-out dist\/build-info\.js \$\(SERVICE_WORKER_FILES\),\$\(DIST_FILES\)\)/,
   );
   assert.match(makefile, /node tools\/app-load-bench\.js --self-test/);
+
+  const createPageSource = createPage.toString();
+  const navigateAndMeasureSource = navigateAndMeasure.toString();
+  assert.equal(FRAME_SAMPLER_GLOBAL, "__TRACY_APP_LOAD_FRAME_TIMES__");
+  assert.match(createPageSource, /Page\.addScriptToEvaluateOnNewDocument/);
+  assert.match(createPageSource, /FRAME_SAMPLER_GLOBAL/);
+  assert.match(navigateAndMeasureSource, /assertCoreReadyOrdering\(metrics\)/);
+  assert.match(navigateAndMeasureSource, /canvas prepaint/);
 }
 
 async function main() {
