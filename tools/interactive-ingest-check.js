@@ -648,15 +648,29 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should instantiate the real main-thread index reader module",
   );
 
-  await flushMicrotasks();
+  await waitForAsyncCondition(
+    () =>
+      (
+        controller.status().coveredRange.valid === true &&
+        controller.indexReader.status().state === "ready"
+      ) || controller.status().state === "error",
+    "main-thread reader should be ready for the first covered range",
+  );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
   await runFrame(frames, canvasHarness, 16);
+  await waitForAsyncCondition(
+    () => rendererInstance !== null || controller.status().state === "error",
+    "progressive renderer should be created for the covered range",
+  );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
+  await runFrame(frames, canvasHarness, 32);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_first_events",
     [canvasHarness.firstTraceDrawAt() ?? -1, rendererInstance.status().lastRows.length],
   );
 
-  await runFrame(frames, canvasHarness, 32);
+  await runFrame(frames, canvasHarness, 48);
 
   assertInteractiveContractOk(
     interactiveContract,
@@ -687,7 +701,7 @@ async function checkInteractiveIngestGate() {
     deltaY: -500,
     preventDefault() {},
   });
-  await runFrame(frames, canvasHarness, 48);
+  await runFrame(frames, canvasHarness, 64);
   const zoomedViewport = rendererInstance.status().viewport;
   assertInteractiveContractOk(
     interactiveContract,
@@ -713,7 +727,7 @@ async function checkInteractiveIngestGate() {
     preventDefault() {},
   });
   canvasHarness.listeners.get("pointerup")({ pointerId: 1 });
-  await runFrame(frames, canvasHarness, 64);
+  await runFrame(frames, canvasHarness, 80);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_pan_clamped",
@@ -724,7 +738,7 @@ async function checkInteractiveIngestGate() {
     ],
   );
 
-  await runFrame(frames, canvasHarness, 80);
+  await runFrame(frames, canvasHarness, 96);
   const progressStatuses = workerStatuses.filter(
     (entry) => entry.message?.type === "progress",
   );
