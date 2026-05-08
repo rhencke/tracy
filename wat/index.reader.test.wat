@@ -24,6 +24,7 @@
   (import "index" "INDEX_WRITER_STATUS_NOT_INITIALIZED" (global $INDEX_WRITER_STATUS_NOT_INITIALIZED i32))
   (import "index" "INDEX_WRITER_STATUS_HOST_WRITE_FAILED" (global $INDEX_WRITER_STATUS_HOST_WRITE_FAILED i32))
   (import "index" "INDEX_WRITER_STATUS_HOST_FLUSH_FAILED" (global $INDEX_WRITER_STATUS_HOST_FLUSH_FAILED i32))
+  (import "index" "INDEX_WRITER_STATUS_CATALOG_FULL" (global $INDEX_WRITER_STATUS_CATALOG_FULL i32))
   (import "index" "INDEX_READER_STATUS_OK" (global $INDEX_READER_STATUS_OK i32))
   (import "index" "INDEX_READER_STATUS_NOT_INITIALIZED" (global $INDEX_READER_STATUS_NOT_INITIALIZED i32))
   (import "index" "INDEX_READER_STATUS_MISSING_PAGE" (global $INDEX_READER_STATUS_MISSING_PAGE i32))
@@ -180,6 +181,8 @@
     (func $index_page_catalog_reset))
   (import "index" "index_page_catalog_add_slice_page"
     (func $index_page_catalog_add_slice_page (param i32 i32 i32 i32 i32) (result i32)))
+  (import "index" "index_page_catalog_add_page"
+    (func $index_page_catalog_add_page (param i32 i32 i32) (result i32)))
   (import "index" "index_covered_range_valid"
     (func $index_covered_range_valid (result i32)))
   (import "index" "index_covered_range_start"
@@ -517,6 +520,41 @@
     global.get $INDEX_WRITER_STATUS_OK
     i32.const 95
     call $assert_eq_i32
+  )
+
+  (func $fill_slice_catalog_to_capacity
+    (local $i i32)
+
+    block $done
+      loop $loop
+        local.get $i
+        global.get $INDEX_PAGE_CATALOG_CAPACITY
+        i32.ge_u
+        br_if $done
+
+        i32.const 0
+        local.get $i
+        local.get $i
+        i32.const 10
+        i32.mul
+        local.get $i
+        i32.const 10
+        i32.mul
+        i32.const 5
+        i32.add
+        i32.const 1
+        call $index_page_catalog_add_slice_page
+        i32.const 1
+        i32.const 443
+        call $assert_eq_i32
+
+        local.get $i
+        i32.const 1
+        i32.add
+        local.set $i
+        br $loop
+      end
+    end
   )
 
   (func (export "test_index_reader_loads_miss_and_hits_cache")
@@ -1558,6 +1596,104 @@
     call $index_reader_covered_range_end
     i32.const 50
     i32.const 442
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_page_catalog_add_page_classifies_compact_slice_pages")
+    global.get $PAGE
+    i32.const 900
+    i32.const 5
+    call $write_reader_fixture_page
+
+    call $index_page_catalog_reset
+
+    global.get $PAGE
+    global.get $PAGE_BYTES
+    i32.const 17
+    call $index_page_catalog_add_page
+    global.get $INDEX_STATUS_OK
+    i32.const 444
+    call $assert_eq_i32
+
+    call $index_slice_page_count
+    i32.const 1
+    i32.const 445
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_valid
+    i32.const 1
+    i32.const 446
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_start
+    i32.const 1000
+    i32.const 447
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_end
+    i32.const 1025
+    i32.const 448
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_page_catalog_add_page_reports_validation_errors")
+    call $index_page_catalog_reset
+    call $fill_valid_page
+
+    global.get $PAGE
+    global.get $PAGE_BYTES
+    i32.const 1
+    i32.sub
+    i32.const 18
+    call $index_page_catalog_add_page
+    global.get $INDEX_STATUS_BAD_PAGE_SIZE
+    i32.const 449
+    call $assert_eq_i32
+
+    call $index_slice_page_count
+    i32.const 0
+    i32.const 450
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_page_catalog_add_page_ignores_non_slice_pages")
+    call $index_page_catalog_reset
+    call $fill_valid_page
+
+    global.get $PAGE
+    global.get $PAGE_BYTES
+    i32.const 19
+    call $index_page_catalog_add_page
+    global.get $INDEX_STATUS_OK
+    i32.const 451
+    call $assert_eq_i32
+
+    call $index_slice_page_count
+    i32.const 0
+    i32.const 452
+    call $assert_eq_i32
+
+    call $index_reader_covered_range_valid
+    i32.const 0
+    i32.const 453
+    call $assert_eq_i32
+  )
+
+  (func (export "test_index_page_catalog_add_page_reports_catalog_full")
+    global.get $PAGE
+    i32.const 901
+    i32.const 6
+    call $write_reader_fixture_page
+
+    call $index_page_catalog_reset
+    call $fill_slice_catalog_to_capacity
+
+    global.get $PAGE
+    global.get $PAGE_BYTES
+    i32.const 20
+    call $index_page_catalog_add_page
+    global.get $INDEX_WRITER_STATUS_CATALOG_FULL
+    i32.const 454
     call $assert_eq_i32
   )
 )
