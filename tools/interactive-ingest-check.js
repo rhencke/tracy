@@ -576,6 +576,7 @@ function makeCanvasHarness() {
   const operations = [];
   let currentFrameAt = 0;
   let firstTraceDrawAt = null;
+  let firstTraceDrawWallAt = null;
   const context = {
     beginPath() {
       operations.push({ at: currentFrameAt, op: "beginPath" });
@@ -602,6 +603,7 @@ function makeCanvasHarness() {
         height > 0
       ) {
         firstTraceDrawAt = currentFrameAt;
+        firstTraceDrawWallAt = performance.now();
       }
     },
     lineTo(x, y) {
@@ -648,6 +650,9 @@ function makeCanvasHarness() {
     canvas,
     firstTraceDrawAt() {
       return firstTraceDrawAt;
+    },
+    firstTraceDrawWallAt() {
+      return firstTraceDrawWallAt;
     },
     listeners,
     operations,
@@ -1019,7 +1024,9 @@ async function checkInteractiveIngestGate() {
     `progressive renderer should be created within ${FIRST_EVENTS_BUDGET_MS}ms; elapsed=${performance.now() - fileSelectionStartedAt}ms status=${JSON.stringify(controller.status())} frames=${frames.length} calls=${JSON.stringify(opfsHarness.calls)}`,
   );
   assert.equal(importCalls.length, 1);
-  const firstTraceDrawElapsedMs = performance.now() - fileSelectionStartedAt;
+  const firstTraceDrawElapsedMs =
+    (canvasHarness.firstTraceDrawWallAt() ?? performance.now()) -
+    fileSelectionStartedAt;
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_first_events",
