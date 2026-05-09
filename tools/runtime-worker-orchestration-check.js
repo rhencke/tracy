@@ -4,6 +4,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const {
+  flushMicrotasks,
+  installBrowserGlobals,
+  makeFakeElement,
+} = require("./browser-harness.js");
 
 let OPFS_PAGE_SIZE;
 let INDEX_DECODE_HINT_COMPACT_SLICES;
@@ -66,39 +71,6 @@ async function loadGeneratedTraceRendererSpec() {
   TEST_TRACE_RENDER_RANGE_BYTES = TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT.BYTES;
 }
 
-function installBrowserStubs() {
-  const frames = [];
-
-  globalThis.document = {
-    body: {
-      appendChild() {},
-    },
-    createElement() {
-      return {
-        setAttribute() {},
-        style: {},
-      };
-    },
-    getElementById() {
-      return {
-        hidden: false,
-      };
-    },
-  };
-  globalThis.requestAnimationFrame = (callback) => {
-    frames.push(callback);
-    return frames.length;
-  };
-  globalThis.WebAssembly.Suspending = class Suspending {
-    constructor(fn) {
-      return fn;
-    }
-  };
-  globalThis.WebAssembly.promising = (fn) => fn;
-
-  return { frames };
-}
-
 class FakeWorker {
   static instances = [];
 
@@ -127,10 +99,15 @@ class FakeWorker {
   }
 }
 
-async function flushMicrotasks(count = 8) {
-  for (let index = 0; index < count; index += 1) {
-    await Promise.resolve();
-  }
+function installBrowserStubs() {
+  return installBrowserGlobals({
+    canvas: { hidden: false, id: "tracy" },
+    createElement: () => makeFakeElement(),
+  });
+}
+
+async function flushRuntimeMicrotasks(count = 8) {
+  await flushMicrotasks(count);
 }
 
 function readTraceRenderRow(memory, ptr, index) {
@@ -744,7 +721,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(FakeWorker.instances.length, 0);
   assert.ok(frames.length >= 1, "draw loop should be scheduled before ingest preload");
   frames[0](0);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.equal(FakeWorker.instances.length, 0);
   assert.ok(
     frames.length >= 2,
@@ -754,7 +731,7 @@ async function checkRuntimeOrchestratesWorker() {
   for (const frame of appReadyFrameCallbacks) {
     frame(16);
   }
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
 
   assert.equal(FakeWorker.instances.length, 1);
   const worker = FakeWorker.instances[0];
@@ -837,7 +814,7 @@ async function checkRuntimeOrchestratesWorker() {
   frames[0](122);
   frames[1](123);
   await import(moduleUrl("host/trace-renderer-spec.mjs"));
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
     {
@@ -921,14 +898,14 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 
   assert.equal(controller.worker, null);
   frames[0](0);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.equal(controller.worker, null);
   assert.ok(frames.length >= 2);
   const appReadyFrameCallbacks = frames.splice(0);
   for (const frame of appReadyFrameCallbacks) {
     frame(16);
   }
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
 
   const preloadWorker = controller.worker;
   assert.deepEqual(preloadWorker.posted, [{ type: "preload" }]);
@@ -2997,7 +2974,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     },
   });
 
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
 
   assert.equal(
     importCalls,
@@ -3005,14 +2982,14 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     "renderer implementation module import should start before the first animation frame",
   );
   frames[0](1);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.equal(importCalls, 1, "renderer implementation module should be imported once");
   assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
   coveredRange = { end: 0, start: 0, type: "covered_range", valid: false };
   readerState = "ready";
   frames[1](2);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.equal(
     drawCalls,
     0,
@@ -3020,7 +2997,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   );
 
   frames[2](3);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   frames[3](4);
   assert.equal(
     drawCalls,
@@ -3047,7 +3024,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     "first queryable ingest frame should reuse the preloaded renderer implementation module",
   );
 
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   frames[5](6);
   assert.equal(importCalls, 1);
   assert.equal(drawCalls, 3);
@@ -3092,10 +3069,10 @@ async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
     },
   });
 
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   frames[0](1);
   frames[1](2);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
 
   assert.equal(
     drawCalls,
@@ -3139,7 +3116,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
     },
   });
 
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
 
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.core.ready"),
@@ -3158,7 +3135,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
   );
 
   frames[0](1);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
     false,
@@ -3171,7 +3148,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
     },
   });
   await import(moduleUrl("host/trace-renderer-spec.mjs"));
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
     {
@@ -3216,9 +3193,9 @@ async function checkAppReadyFailsWhenDeferredRendererFails() {
     },
   });
 
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
   frames[0](1);
-  await flushMicrotasks();
+  await flushRuntimeMicrotasks();
 
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
