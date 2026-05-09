@@ -114,7 +114,7 @@
     (result i32)
     local.get $covered_end
     i32.const 1000
-    i32.ne
+    i32.lt_s
     if (result i32)
       i32.const 9
     else
@@ -230,6 +230,52 @@
     end
   )
 
+  (func $interactive_ingest_expect_large_trace_checkpoint
+    (export "interactive_ingest_expect_large_trace_checkpoint")
+    (param $file_offset i32)
+    (param $total_bytes i32)
+    (param $expected_offset i32)
+    (param $expected_total_bytes i32)
+    (param $queryable_covered i32)
+    (param $content_bytes i32)
+    (result i32)
+    local.get $content_bytes
+    local.get $expected_total_bytes
+    i32.ne
+    if (result i32)
+      i32.const 23
+    else
+      local.get $total_bytes
+      local.get $expected_total_bytes
+      i32.ne
+      if (result i32)
+        i32.const 24
+      else
+        local.get $file_offset
+        local.get $expected_offset
+        i32.lt_u
+        if (result i32)
+          i32.const 25
+        else
+          local.get $file_offset
+          local.get $expected_total_bytes
+          i32.ge_u
+          if (result i32)
+            i32.const 26
+          else
+            local.get $queryable_covered
+            i32.eqz
+            if (result i32)
+              i32.const 27
+            else
+              call $ok
+            end
+          end
+        end
+      end
+    end
+  )
+
   (func $interactive_ingest_expect_frame_interval
     (export "interactive_ingest_expect_frame_interval")
     (param $interval f64)
@@ -306,11 +352,22 @@
     i32.const 7
     call $assert_eq_i32
 
+    i32.const 10485760
+    i32.const 104857600
+    i32.const 10485760
+    i32.const 104857600
+    i32.const 1
+    i32.const 104857600
+    call $interactive_ingest_expect_large_trace_checkpoint
+    i32.const 0
+    i32.const 8
+    call $assert_eq_i32
+
     f64.const 16
     f64.const 16.67
     call $interactive_ingest_expect_frame_interval
     i32.const 0
-    i32.const 8
+    i32.const 9
     call $assert_eq_i32
   )
 
@@ -353,6 +410,17 @@
     call $interactive_ingest_expect_frame_interval
     i32.const 22
     i32.const 12
+    call $assert_eq_i32
+
+    i32.const 10485760
+    i32.const 104857600
+    i32.const 10485760
+    i32.const 104857600
+    i32.const 0
+    i32.const 104857600
+    call $interactive_ingest_expect_large_trace_checkpoint
+    i32.const 27
+    i32.const 13
     call $assert_eq_i32
   )
 )

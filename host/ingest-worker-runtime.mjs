@@ -472,6 +472,9 @@ export async function runWorkerIngest(data, options = {}) {
     }
     postCoveredRangeIfDue(workerState);
     postProgress(workerState, "parse");
+    if (typeof options.afterParserYield === "function") {
+      await options.afterParserYield(workerState);
+    }
   }
 
   postProgress(workerState, "index");

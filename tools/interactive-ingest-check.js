@@ -155,24 +155,50 @@ function makeTraceFile() {
     pid: 1,
     tid: 2,
   });
-  const targetLength = 256 * 1024;
-  const paddingLength =
-    targetLength -
-    firstChunkPrefix.length -
-    secondChunkEvent.length -
-    "]}".length;
+  const prefixBytes = encoder.encode(firstChunkPrefix);
+  const tailBytes = encoder.encode(`${secondChunkEvent}]}`);
+  const streamedBytes = INGEST_WINDOW_BYTES;
+  const paddingLength = streamedBytes - prefixBytes.byteLength - tailBytes.byteLength;
 
   assert.ok(paddingLength > 0, "interactive ingest fixture padding must be positive");
-  const bytes = encoder.encode(
-    `${firstChunkPrefix}${" ".repeat(paddingLength)}${secondChunkEvent}]}`,
+  assert.ok(
+    streamedBytes < FIXTURE_SIZE_BYTES,
+    "interactive ingest fixture should advertise a larger virtual trace than the first streamed window",
   );
 
+  function copyRange(target, targetStart, source, sourceStart, sourceEnd) {
+    const overlapStart = Math.max(targetStart, sourceStart);
+    const overlapEnd = Math.min(targetStart + target.byteLength, sourceEnd);
+
+    if (overlapStart >= overlapEnd) {
+      return;
+    }
+
+    target.set(
+      source.subarray(overlapStart - sourceStart, overlapEnd - sourceStart),
+      overlapStart - targetStart,
+    );
+  }
+
   return {
-    contentBytes: bytes.byteLength,
+    contentBytes: FIXTURE_SIZE_BYTES,
     name: "throttled-100mb.json",
     size: FIXTURE_SIZE_BYTES,
     readAt(offset, len) {
-      return bytes.subarray(offset, Math.min(bytes.byteLength, offset + len));
+      const start = Math.min(Number(offset), streamedBytes);
+      const end = Math.min(streamedBytes, start + len);
+      const bytes = new Uint8Array(Math.max(0, end - start));
+
+      bytes.fill(0x20);
+      copyRange(bytes, start, prefixBytes, 0, prefixBytes.byteLength);
+      copyRange(
+        bytes,
+        start,
+        tailBytes,
+        streamedBytes - tailBytes.byteLength,
+        streamedBytes,
+      );
+      return bytes;
     },
   };
 }
@@ -718,7 +744,15 @@ async function checkInteractiveIngestGate() {
   class RunningIngestWorker extends FakeWorker {
     constructor(url, options) {
       super(url, options);
+      this.didYieldForFrame = false;
       this.handler = ingestRuntime.createIngestWorkerMessageHandler({
+        afterParserYield: async () => {
+          if (this.didYieldForFrame) {
+            return;
+          }
+          this.didYieldForFrame = true;
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        },
         baseUrl: "dist/wasm/",
         compile: (url, id) => {
           wasmModuleWarmups.push({ id, thread: "worker" });
@@ -1150,12 +1184,34 @@ async function checkInteractiveIngestGate() {
   const progressStatuses = workerStatuses.filter(
     (entry) => entry.message?.type === "progress",
   );
+  const largeTraceCheckpoint = progressStatuses.find(
+    (entry) =>
+      entry.message.fileOffset >= INGEST_WINDOW_BYTES &&
+      entry.message.fileOffset < FIXTURE_SIZE_BYTES,
+  );
+
+  assert.ok(
+    largeTraceCheckpoint,
+    `interactive ingest gate should observe sustained progress around ${INGEST_WINDOW_BYTES} bytes before completion`,
+  );
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_large_trace_checkpoint",
+    [
+      largeTraceCheckpoint.message.fileOffset,
+      largeTraceCheckpoint.message.totalBytes,
+      INGEST_WINDOW_BYTES,
+      FIXTURE_SIZE_BYTES,
+      flag(queryableCoveredRange.end >= 1000),
+      selectedFile.contentBytes,
+    ],
+  );
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_progress_eta",
     [
       controller.status().progress.fileOffset,
-      selectedFile.contentBytes,
+      INGEST_WINDOW_BYTES,
       flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds === null)),
       flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds > 0)),
     ],

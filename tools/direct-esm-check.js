@@ -288,6 +288,7 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     "interactive_ingest_expect_zoom_clamped",
     "interactive_ingest_expect_pan_clamped",
     "interactive_ingest_expect_progress_eta",
+    "interactive_ingest_expect_large_trace_checkpoint",
     "interactive_ingest_expect_frame_interval",
   ]) {
     assert.match(
@@ -321,6 +322,17 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
       `interactive ingest check should leave ${message} in the Wasm contract`,
     );
   }
+
+  assert.doesNotMatch(
+    source,
+    /256\s*\*\s*1024/,
+    "interactive ingest gate must not back the advertised 100MB trace with a 256KiB buffer",
+  );
+  assert.match(
+    source,
+    /contentBytes:\s*FIXTURE_SIZE_BYTES/,
+    "interactive ingest fixture should expose the advertised large-trace byte size",
+  );
 }
 
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
