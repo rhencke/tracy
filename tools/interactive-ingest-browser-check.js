@@ -8,11 +8,11 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const puppeteer = require("puppeteer-core");
+const { repoPath } = require("./acceptance-wasm-helpers.js");
 
-const ROOT_DIR = path.resolve(__dirname, "..");
-const DIST_DIR = path.join(ROOT_DIR, "dist");
+const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
-  fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
+  fs.readFileSync(repoPath("abi/runtime.json"), "utf8"),
 );
 const { FIXTURE_SIZE_BYTES, FRAME_BUDGET_MS } =
   RUNTIME_SPEC.interactiveIngestCheck;

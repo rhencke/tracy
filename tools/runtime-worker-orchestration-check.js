@@ -3,7 +3,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { pathToFileURL } = require("node:url");
+const { moduleUrl } = require("./acceptance-wasm-helpers.js");
 const {
   flushMicrotasks,
   installBrowserGlobals,
@@ -23,10 +23,6 @@ let TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT;
 let TEST_TRACE_RENDER_COMMAND;
 let TEST_TRACE_RENDER_ROW_BYTES;
 let TEST_TRACE_RENDER_RANGE_BYTES;
-
-function moduleUrl(relativePath) {
-  return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
-}
 
 async function loadGeneratedIndexFormatSpec() {
   const { INDEX_DECODE_HINTS, INDEX_FORMAT, INDEX_PAGE_HEADER_OFFSETS } = await import(
