@@ -743,15 +743,7 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /const wasmModulesUrl = \(\) => \["\.\/host\/", "wasm", "-modules", "\.mjs"\]\.join\(""\)/,
-  );
-  assert.match(
-    bootstrapSource,
-    /await import\(wasmModulesUrl\(\)\)/,
-  );
-  assert.doesNotMatch(
-    bootstrapSource,
-    /wasm-modules\.mjs|import\("\.\/host\/wasm-modules\.mjs"\)/,
+    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(
     bootstrapSource,
