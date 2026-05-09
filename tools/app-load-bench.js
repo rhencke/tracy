@@ -1167,7 +1167,15 @@ function runSelfTest() {
   );
   assert.match(
     bootstrap,
-    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
+    /const wasmModulesUrl = `\.\/host\/\$\{"wasm-modules\.mjs"\}`/,
+  );
+  assert.match(
+    bootstrap,
+    /await import\(wasmModulesUrl\)/,
+  );
+  assert.doesNotMatch(
+    bootstrap,
+    /import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(
     bootstrap,

@@ -4,10 +4,11 @@ const firstFramePromise = new Promise((resolve) => requestAnimationFrame(resolve
 const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
 const warmProgressiveTraceRendererPromise = serviceWorkerController === null ? null : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const importProgressiveTraceRenderer = () => warmProgressiveTraceRendererPromise ?? import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+const wasmModulesUrl = `./host/${"wasm-modules.mjs"}`;
 const shimModulePromise = import("./host/shim.mjs"), runtimeModulePromise = import("./host/runtime.mjs");
 const instantiateWasmModuleForThread = async (id, thread, imports, options = {}) => {
   if (id !== "app" || thread !== "main") {
-    const { instantiateWasmModuleForThread: instantiateWasmGraph } = await import("./host/wasm-modules.mjs");
+    const { instantiateWasmModuleForThread: instantiateWasmGraph } = await import(wasmModulesUrl);
     return instantiateWasmGraph(id, thread, imports, options);
   }
   const url = `${(options.baseUrl ?? "wasm/").replace(/\/?$/, "/")}app.wasm`;
