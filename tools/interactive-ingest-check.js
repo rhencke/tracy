@@ -5,6 +5,13 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const { pathToFileURL } = require("node:url");
+const {
+  flushMicrotasks,
+  installBrowserGlobals,
+  makeFakeCanvas,
+  makeFakeCanvasContext,
+  makeFakeElement,
+} = require("./browser-harness.js");
 
 let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
@@ -82,34 +89,10 @@ function makeInteractiveIngestMemory() {
 }
 
 function installBrowserHarness(canvas) {
-  const frames = [];
-
-  globalThis.document = {
-    body: {
-      appendChild() {},
-    },
-    createElement() {
-      return {
-        setAttribute() {},
-        style: {},
-      };
-    },
-    getElementById(id) {
-      return id === "tracy" ? canvas : null;
-    },
-  };
-  globalThis.requestAnimationFrame = (callback) => {
-    frames.push(callback);
-    return frames.length;
-  };
-  globalThis.WebAssembly.Suspending = class Suspending {
-    constructor(fn) {
-      return fn;
-    }
-  };
-  globalThis.WebAssembly.promising = (fn) => fn;
-
-  return { frames };
+  return installBrowserGlobals({
+    canvas,
+    createElement: () => makeFakeElement(),
+  });
 }
 
 class FakeWorker {
@@ -574,7 +557,7 @@ function makeCanvasHarness() {
   let currentFrameAt = 0;
   let firstTraceDrawAt = null;
   let firstTraceDrawWallAt = null;
-  const context = {
+  const context = makeFakeCanvasContext({
     beginPath() {
       operations.push({ at: currentFrameAt, op: "beginPath" });
     },
@@ -587,7 +570,7 @@ function makeCanvasHarness() {
     fillRect(x, y, width, height) {
       operations.push({
         at: currentFrameAt,
-        fillStyle: this.fillStyle,
+        fillStyle: this.fillStyle ?? this.lastFillStyle,
         height,
         op: "fillRect",
         width,
@@ -625,23 +608,25 @@ function makeCanvasHarness() {
         strokeStyle: this.strokeStyle,
       });
     },
-  };
-  const canvas = {
+  });
+  const canvas = makeFakeCanvas({
+    context,
     height: 180,
     width: 360,
-    addEventListener(type, callback) {
-      listeners.set(type, callback);
+    elementOverrides: {
+      height: 180,
+      width: 360,
+      addEventListener(type, callback) {
+        listeners.set(type, callback);
+      },
+      getContext(type) {
+        assert.equal(type, "2d");
+        return context;
+      },
+      releasePointerCapture() {},
+      setPointerCapture() {},
     },
-    getBoundingClientRect() {
-      return { left: 0, top: 0 };
-    },
-    getContext(type) {
-      assert.equal(type, "2d");
-      return context;
-    },
-    releasePointerCapture() {},
-    setPointerCapture() {},
-  };
+  });
 
   return {
     canvas,
@@ -657,12 +642,6 @@ function makeCanvasHarness() {
       currentFrameAt = value;
     },
   };
-}
-
-async function flushMicrotasks(count = 1) {
-  for (let i = 0; i < count; i += 1) {
-    await Promise.resolve();
-  }
 }
 
 async function flushAsyncWork() {
