@@ -853,6 +853,16 @@ async function checkInteractiveIngestGate() {
   await runFrame(frames, canvasHarness, 0);
   await flushAsyncWork();
   await waitForAsyncCondition(
+    () => frames.length >= 1,
+    "interactive ingest gate should schedule an app-ready follow-up frame before ingest preload",
+  );
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    canvasHarness.setFrameAt(16);
+    frame(16);
+  }
+  await flushAsyncWork();
+  await waitForAsyncCondition(
     () => typeof canvasHarness.listeners.get("click") === "function",
     "interactive ingest gate should wire file picking to a user gesture after production preload",
   );

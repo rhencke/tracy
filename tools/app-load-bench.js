@@ -1082,7 +1082,11 @@ function runSelfTest() {
   );
   assert.match(
     runtime,
-    /Promise\.all\(\[firstFramePromise, deferredRendererReadyPromise\]\)\.then/,
+    /const appReadyPromise = Promise\.all\(\[[\s\S]+firstFramePromise,[\s\S]+deferredRendererReadyPromise,[\s\S]+\]\)\.then/,
+  );
+  assert.match(
+    runtime,
+    /appReadyPromise[\s\S]+then\(afterAppReadyFrame\)[\s\S]+ingestWorker\?\.indexReader\?\.preload/,
   );
   assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
   assert.match(runtime, /\.catch\(reportAppLoadError\)/);

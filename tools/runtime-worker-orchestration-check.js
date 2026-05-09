@@ -303,8 +303,14 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(FakeWorker.instances.length, 0);
   assert.ok(frames.length >= 1, "draw loop should be scheduled before ingest preload");
   frames[0](0);
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
+  assert.equal(FakeWorker.instances.length, 0);
+  assert.ok(frames.length >= 2, "app-ready follow-up frame should be scheduled before ingest preload");
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    frame(16);
+  }
+  await flushMicrotasks();
 
   assert.equal(FakeWorker.instances.length, 1);
   const worker = FakeWorker.instances[0];
@@ -345,7 +351,7 @@ async function checkRuntimeOrchestratesWorker() {
       end: "tracy.app.ready",
     },
   ]);
-  assert.equal(frames.length, 2, "startup frame gate and draw loop should continue");
+  assert.equal(frames.length, 1, "draw loop should continue after ingest preload");
   assert.deepEqual(worker.posted, [
     {
       type: "preload",
@@ -397,7 +403,7 @@ async function checkRuntimeOrchestratesWorker() {
       end: "tracy.app.ready",
     },
   ]);
-  assert.deepEqual(ticks, ["main", 123]);
+  assert.deepEqual(ticks, ["main", 16, 122, 123]);
   assert.equal(controller.status().state, "complete");
   assert.equal(controller.status().progress.fileOffset, 32);
   assert.equal(controller.status().progress.committedPages, 2);
@@ -449,6 +455,11 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 
   const controller = runtime.runApp(memory, host, {
     indexReader: false,
+    importProgressiveTraceRenderer: async () => ({
+      createProgressiveTraceRenderer() {
+        return { draw() {} };
+      },
+    }),
     instantiateWasmModuleForThread: async () => ({
       exports: makeAppExports(),
     }),
@@ -466,8 +477,14 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 
   assert.equal(controller.worker, null);
   frames[0](0);
-  await Promise.resolve();
-  await Promise.resolve();
+  await flushMicrotasks();
+  assert.equal(controller.worker, null);
+  assert.ok(frames.length >= 2);
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    frame(16);
+  }
+  await flushMicrotasks();
 
   const preloadWorker = controller.worker;
   assert.deepEqual(preloadWorker.posted, [{ type: "preload" }]);
@@ -2588,6 +2605,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
       };
     },
     ingestWorker,
+    preloadIngestDependencies: false,
     instantiateWasmModuleForThread: async () => ({
       exports: makeAppExports(),
     }),

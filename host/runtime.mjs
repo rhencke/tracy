@@ -987,26 +987,10 @@ async function loadApp(memory, host, options = {}) {
     progressiveTraceRenderer === null
       ? loadProgressiveTraceRendererModule()
       : Promise.resolve(null);
-  const ingestDependenciesReadyPromise =
-    options.preloadIngestDependencies === false
-      ? Promise.resolve(null)
-      : firstFramePromise.then(() =>
-          Promise.all([
-            options.ingestWorker?.indexReader?.preload?.(),
-            options.ingestWorker?.preload?.(),
-          ]),
-        );
-
-  ingestDependenciesReadyPromise.then(() => {
-    installFilePickerGesture(host, options.ingestWorker, options);
-    if (options.ingest !== undefined) {
-      options.ingestWorker?.start(
-        options.ingest === true ? {} : options.ingest,
-      );
-    }
-  }).catch(reportAppLoadError);
-
-  Promise.all([firstFramePromise, deferredRendererReadyPromise]).then(() => {
+  const appReadyPromise = Promise.all([
+    firstFramePromise,
+    deferredRendererReadyPromise,
+  ]).then(() => {
     markPerformance(PERFORMANCE_MARKS.appReady, options);
     globalThis.dispatchEvent?.(new Event(PERFORMANCE_MARKS.appReady));
     measurePerformance(
@@ -1015,6 +999,31 @@ async function loadApp(memory, host, options = {}) {
       PERFORMANCE_MARKS.appReady,
       options,
     );
+  });
+
+  appReadyPromise.catch(reportAppLoadError);
+
+  const afterAppReadyFrame = () =>
+    new Promise((resolve) => requestAnimationFrame(resolve));
+  const ingestDependenciesReadyPromise =
+    options.preloadIngestDependencies === false
+      ? Promise.resolve(null)
+      : appReadyPromise
+          .then(afterAppReadyFrame)
+          .then(() =>
+            Promise.all([
+              options.ingestWorker?.indexReader?.preload?.(),
+              options.ingestWorker?.preload?.(),
+            ]),
+          );
+
+  ingestDependenciesReadyPromise.then(() => {
+    installFilePickerGesture(host, options.ingestWorker, options);
+    if (options.ingest !== undefined) {
+      options.ingestWorker?.start(
+        options.ingest === true ? {} : options.ingest,
+      );
+    }
   }).catch(reportAppLoadError);
 
   const loop = (ts) => {
