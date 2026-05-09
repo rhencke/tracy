@@ -9,20 +9,9 @@ const { pathToFileURL } = require("node:url");
 let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
+let REQUIRED_TRACE_RENDER_PLANNER_EXPORTS;
 
 const FIRST_EVENTS_BUDGET_MS = 100;
-const REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = Object.freeze([
-  "trace_render_plan_begin",
-  "trace_render_plan_next",
-  "trace_render_plan_op_end",
-  "trace_render_plan_op_start",
-  "trace_render_plan_op_track_id",
-  "trace_render_query_ranges_per_track",
-  "trace_render_query_tile_span",
-  "trace_render_slice_end_x",
-  "trace_render_slice_x",
-  "trace_render_slice_y",
-]);
 
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
@@ -34,10 +23,14 @@ function repoPath(relativePath) {
 
 async function loadGeneratedInteractiveIngestCheckSpec() {
   const { INTERACTIVE_INGEST_CHECK } = await import(moduleUrl("host/startup-spec.mjs"));
+  const { TRACE_RENDERER_REQUIRED_EXPORTS } = await import(
+    moduleUrl("host/trace-renderer-spec.mjs")
+  );
 
   FIXTURE_SIZE_BYTES = INTERACTIVE_INGEST_CHECK.FIXTURE_SIZE_BYTES;
   INGEST_WINDOW_BYTES = INTERACTIVE_INGEST_CHECK.INGEST_WINDOW_BYTES;
   FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
+  REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = TRACE_RENDERER_REQUIRED_EXPORTS;
 }
 
 async function instantiateInteractiveIngestVerifier(memory) {
