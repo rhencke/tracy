@@ -142,6 +142,12 @@ function layoutInvariantErrors() {
   if (cursor > workingBytes) {
     errors.push("memory regions exceed MEM_WORKING_TARGET_BYTES");
   }
+  if (spec.index?.owner !== "index-wasm") {
+    errors.push("index format contract owner must be index-wasm");
+  }
+  if (spec.index?.wasmModule !== "index") {
+    errors.push("index format contract wasmModule must be index");
+  }
 
   return errors;
 }
@@ -183,6 +189,14 @@ module.exports = {
   INDEX_DECODE_HINT_TRACK_ID_SHIFT: indexConstantValue(
     "decodeHints",
     "INDEX_DECODE_HINT_TRACK_ID_SHIFT",
+  ),
+  INDEX_DECODE_HINT_COMPACT_SLICES: indexConstantValue(
+    "decodeHints",
+    "INDEX_DECODE_HINT_COMPACT_SLICES",
+  ),
+  INDEX_DECODE_HINT_PARTIAL: indexConstantValue(
+    "decodeHints",
+    "INDEX_DECODE_HINT_PARTIAL",
   ),
   INDEX_DIRECTORY_BYTES_OFFSET: indexFieldValue("directory", "INDEX_DIRECTORY_BYTES_OFFSET"),
   INDEX_DIRECTORY_COLUMN_COUNT_OFFSET: indexFieldValue(

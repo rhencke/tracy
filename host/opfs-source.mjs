@@ -1,4 +1,4 @@
-import { HOST_IMPORT_NAME } from "./abi.mjs";
+import { HOST_IMPORT_NAME, OPFS_BRIDGE_CONTRACT } from "./abi.mjs";
 import { u64ToNumber } from "./memory.mjs";
 
 function makeUnsupportedHostImport(name, reason) {
@@ -11,51 +11,21 @@ function makeHostImports(source, importNames) {
   return Object.fromEntries(importNames.map((name) => [name, source[name]]));
 }
 
-const OPFS_SOURCE_IMPORTS = Object.freeze([
-  HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE,
-  HOST_IMPORT_NAME.OPFS_READ_CHUNK,
-  HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE,
-  HOST_IMPORT_NAME.OPFS_SOURCE_NAME,
-  HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN,
-  HOST_IMPORT_NAME.OPFS_SOURCE_OPEN,
-  HOST_IMPORT_NAME.OPFS_SOURCE_READ,
-  HOST_IMPORT_NAME.OPFS_SOURCE_SIZE,
-]);
-
-const OPFS_INDEX_READER_IMPORTS = Object.freeze([
-  HOST_IMPORT_NAME.OPFS_INDEX_OPEN,
-  HOST_IMPORT_NAME.OPFS_INDEX_READ,
-  HOST_IMPORT_NAME.OPFS_INDEX_SIZE,
-]);
-
-const OPFS_INDEX_WRITER_IMPORTS = Object.freeze([
-  HOST_IMPORT_NAME.OPFS_INDEX_CREATE,
-  HOST_IMPORT_NAME.OPFS_INDEX_FLUSH,
-  HOST_IMPORT_NAME.OPFS_INDEX_WRITE,
-]);
-
 const OPFS_MAIN_IMPORTS = Object.freeze([
-  ...OPFS_SOURCE_IMPORTS,
-  ...OPFS_INDEX_READER_IMPORTS,
-  ...OPFS_INDEX_WRITER_IMPORTS,
+  ...OPFS_BRIDGE_CONTRACT.sourceImports,
+  ...OPFS_BRIDGE_CONTRACT.indexReaderImports,
+  ...OPFS_BRIDGE_CONTRACT.indexWriterImports,
 ]);
+const OPFS_WORKER_IMPORTS = OPFS_MAIN_IMPORTS;
 
-const OPFS_WORKER_IMPORTS = Object.freeze([
-  ...OPFS_SOURCE_IMPORTS,
-  ...OPFS_INDEX_READER_IMPORTS,
-  ...OPFS_INDEX_WRITER_IMPORTS,
-]);
-
-const WORKER_UNSUPPORTED_FILE_IMPORTS = Object.freeze([
-  HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE,
-  HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE,
-]);
-
-export function makeOpfsSourceHost(memoryView, files = new Map()) {
+export function makeOpfsSourceHost(memoryView, files = new Map(), options = {}) {
   const sources = new Map();
   const indexes = new Map();
   let nextSourceId = 1;
   let nextIndexId = 1;
+  const persistFileSources =
+    options.persistFileSources ??
+    OPFS_BRIDGE_CONTRACT.defaultPersistsFileSources;
 
   function errorMessage(error) {
     return error instanceof Error ? error.message : String(error);
@@ -82,7 +52,7 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
   }
 
   async function opfsRoot() {
-    return navigator.storage?.getDirectory?.() ?? null;
+    return globalThis.navigator?.storage?.getDirectory?.() ?? null;
   }
 
   function decodeName(operation, namePtr, nameLen) {
@@ -116,10 +86,10 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
     return directory.getFileHandle(parts.at(-1), { create });
   }
 
-  function cacheSource(handle, name, size) {
+  function cacheSource(handle, name, size, file = null) {
     const sourceId = nextSourceId;
     nextSourceId += 1;
-    sources.set(sourceId, { handle, name, size, access: null });
+    sources.set(sourceId, { access: null, file, handle, name, size });
     return sourceId;
   }
 
@@ -130,8 +100,8 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
     return indexId;
   }
 
-  function reserveSource(handle, name, size, sourceId) {
-    sources.set(sourceId, { handle, name, size, access: null });
+  function reserveSource(handle, name, size, sourceId, file = null) {
+    sources.set(sourceId, { access: null, file, handle, name, size });
     return sourceId;
   }
 
@@ -160,14 +130,19 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
       throw new Error(`opfs_source_from_file: unknown file handle ${fileHandle}`);
     }
 
-    if (root === null) {
+    if (root === null && persistFileSources) {
       throw new Error("opfs_source_from_file: OPFS root is unavailable");
     }
 
     try {
       const sourceId = nextSourceId;
       nextSourceId += 1;
-      const opfsName = `trace-${Date.now().toString(36)}-${sourceId}.bin`;
+      const { prefix, separator, suffix } = OPFS_BRIDGE_CONTRACT.fileSourceName;
+      const opfsName = `${prefix}${Date.now().toString(36)}${separator}${sourceId}${suffix}`;
+      if (!persistFileSources) {
+        return reserveSource(null, opfsName, file.size, sourceId, file);
+      }
+
       const handle = await root.getFileHandle(opfsName, { create: true });
       const writable = await handle.createWritable();
 
@@ -244,6 +219,14 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
     }
 
     try {
+      if (entry.file !== null) {
+        const chunk = await entry.file.slice(start, start + len).arrayBuffer();
+        const src = new Uint8Array(chunk);
+
+        dest.set(src);
+        return src.byteLength;
+      }
+
       const access = await maybeSyncAccess(entry);
 
       if (access !== null) {
@@ -409,18 +392,26 @@ export function makeOpfsSourceHost(memoryView, files = new Map()) {
 export function makeOpfsMainHost(memoryView, files = new Map()) {
   const opfsHost = makeOpfsSourceHost(memoryView, files);
 
-  return makeHostImports(opfsHost, OPFS_MAIN_IMPORTS);
+  return {
+    ...makeHostImports(opfsHost, OPFS_MAIN_IMPORTS),
+    [OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]:
+      OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale,
+  };
 }
 
-export function makeOpfsWorkerHost(memoryView) {
-  const opfsHost = makeOpfsSourceHost(memoryView);
+export function makeOpfsWorkerHost(memoryView, files = new Map()) {
+  const opfsHost = makeOpfsSourceHost(memoryView, files, {
+    persistFileSources: OPFS_BRIDGE_CONTRACT.workerPersistsFileSources,
+  });
   const workerHost = makeHostImports(opfsHost, OPFS_WORKER_IMPORTS);
 
-  for (const name of WORKER_UNSUPPORTED_FILE_IMPORTS) {
-    workerHost[name] = makeUnsupportedHostImport(
-      name,
-      "file handles are owned by the main thread",
-    );
+  if (files.size === 0) {
+    for (const name of OPFS_BRIDGE_CONTRACT.workerUnsupportedFileImports) {
+      workerHost[name] = makeUnsupportedHostImport(
+        name,
+        OPFS_BRIDGE_CONTRACT.workerUnsupportedFileReason,
+      );
+    }
   }
 
   return workerHost;

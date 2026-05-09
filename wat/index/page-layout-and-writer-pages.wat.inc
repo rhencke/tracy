@@ -587,6 +587,7 @@
     (local $payload_len i32)
     (local $payload_crc i32)
     (local $written i32)
+    (local $decode_hints i32)
 
     global.get $index_writer_count
     i32.eqz
@@ -615,14 +616,6 @@
     end
     local.set $payload_len
 
-    global.get $index_writer_page
-    i32.const 0
-    global.get $index_writer_bucket_start
-    i64.extend_i32_u
-    global.get $index_writer_bucket_end
-    i64.extend_i32_u
-    global.get $index_writer_count
-    local.get $payload_len
     global.get $index_writer_mode
     i32.const 1
     i32.eq
@@ -646,6 +639,25 @@
         i32.const 0
       end
     end
+    local.set $decode_hints
+
+    global.get $index_writer_partial_commit
+    if
+      local.get $decode_hints
+      global.get $INDEX_DECODE_HINT_PARTIAL
+      i32.or
+      local.set $decode_hints
+    end
+
+    global.get $index_writer_page
+    i32.const 0
+    global.get $index_writer_bucket_start
+    i64.extend_i32_u
+    global.get $index_writer_bucket_end
+    i64.extend_i32_u
+    global.get $index_writer_count
+    local.get $payload_len
+    local.get $decode_hints
     global.get $index_writer_dict_epoch
     global.get $index_writer_next_page_id
     i64.extend_i32_u
@@ -701,6 +713,17 @@
       global.get $index_writer_bucket_end
       global.get $index_writer_count
       call $index_page_catalog_add_slice_page
+      local.set $status
+      local.get $status
+      i32.eqz
+      if
+        global.get $INDEX_WRITER_STATUS_CATALOG_FULL
+        return
+      end
+    else
+      global.get $index_writer_bucket_start
+      global.get $index_writer_bucket_end
+      call $index_covered_range_add
     end
 
     global.get $index_writer_next_page_id

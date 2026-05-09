@@ -8,35 +8,28 @@ const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
+const zlib = require("node:zlib");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
+const RUNTIME_SPEC = JSON.parse(
+  fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
+);
 const DEFAULT_TIMEOUT_MS = 15000;
+const CORE_READY_REQUEST_EPSILON_MS = 0.5;
 const FAST_3G = Object.freeze({
-  downloadThroughput: Math.floor((1.6 * 1024 * 1024) / 8),
-  latency: 150,
-  uploadThroughput: Math.floor((750 * 1024) / 8),
+  downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
+  latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
+  uploadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.uploadThroughputBytesPerSecond,
 });
-const BUDGETS = Object.freeze({
-  cold: Object.freeze({
-    fcpMs: 1100,
-    transferBytes: 75000,
-    ttiMs: 250,
-    wasmInstantiateMs: 200,
-  }),
-  warmHttp: Object.freeze({
-    fcpMs: 50,
-    transferBytes: 0,
-    ttiMs: 25,
-    wasmInstantiateMs: 25,
-  }),
-  warmSw: Object.freeze({
-    fcpMs: 45,
-    transferBytes: 0,
-    ttiMs: 25,
-    wasmInstantiateMs: 15,
-  }),
-});
+const BUDGETS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(RUNTIME_SPEC.appLoadBench.budgets).map(([name, budget]) => [
+      name,
+      Object.freeze({ ...budget }),
+    ]),
+  ),
+);
 const MIME_TYPES = Object.freeze({
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -46,10 +39,22 @@ const MIME_TYPES = Object.freeze({
   ".wasm": "application/wasm",
   ".webmanifest": "application/manifest+json",
 });
+const GZIP_EXTENSIONS = new Set([
+  ".html",
+  ".js",
+  ".json",
+  ".mjs",
+  ".svg",
+  ".wasm",
+  ".webmanifest",
+]);
 const REQUIRED_DIST_FILES = Object.freeze([
-  "bootstrap.js",
+  "bootstrap.mjs",
   "build-info.js",
   "host/abi.mjs",
+  "host/progressive-trace-renderer-loader.mjs",
+  "host/startup-spec.mjs",
+  "host/trace-renderer-spec.mjs",
   "host/wasm-modules.mjs",
   "index.html",
   "manifest.webmanifest",
@@ -61,6 +66,10 @@ const REQUIRED_DIST_FILES = Object.freeze([
   "wasm/parser_state.wasm",
   "worker.js",
 ]);
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function parseArgs(argv) {
   const options = {
@@ -130,6 +139,14 @@ function findBrowser(explicitPath) {
 
 function contentType(file) {
   return MIME_TYPES[path.extname(file)] ?? "application/octet-stream";
+}
+
+function acceptsGzip(request) {
+  return /\bgzip\b/.test(request.headers["accept-encoding"] ?? "");
+}
+
+function shouldGzip(file) {
+  return GZIP_EXTENSIONS.has(path.extname(file));
 }
 
 function sendNotFound(response) {
@@ -216,14 +233,26 @@ async function createServer(distDir) {
       return;
     }
 
-    const stream = fs.createReadStream(file);
-    stream.on("error", (error) => response.destroy(error));
-    response.writeHead(200, {
+    const source = await fs.promises.readFile(file);
+    const body =
+      acceptsGzip(request) && shouldGzip(file)
+        ? zlib.gzipSync(source)
+        : source;
+    const headers = {
       "Cache-Control": "public, max-age=31536000, immutable",
-      "Content-Length": stat.size,
+      "Content-Length": body.byteLength,
       "Content-Type": contentType(file),
+    };
+
+    if (body !== source) {
+      headers["Content-Encoding"] = "gzip";
+      headers.Vary = "Accept-Encoding";
+    }
+
+    response.writeHead(200, {
+      ...headers,
     });
-    stream.pipe(response);
+    response.end(body);
   });
   const port = await listen(server);
 
@@ -480,7 +509,12 @@ function launchBrowser(browserPath) {
               child.kill();
             }
             await waitForExit();
-            fs.rmSync(userDataDir, { recursive: true, force: true });
+            fs.rmSync(userDataDir, {
+              force: true,
+              maxRetries: 5,
+              recursive: true,
+              retryDelay: 100,
+            });
           },
           webSocketUrl: match[1],
         });
@@ -509,6 +543,104 @@ async function waitUntil(predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
   throw new Error("timed out waiting for page condition");
 }
 
+function unfinishedTransferRequestIds(requestIds, cachedRequestIds, loadingBytes) {
+  return [...requestIds].filter(
+    (requestId) => !cachedRequestIds.has(requestId) && !loadingBytes.has(requestId),
+  );
+}
+
+function coreTransferBytesForRequests(requestIds, cachedRequestIds, loadingBytes) {
+  return [...requestIds]
+    .filter((requestId) => !cachedRequestIds.has(requestId))
+    .reduce((total, requestId) => total + (loadingBytes.get(requestId) ?? 0), 0);
+}
+
+function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackRequestIds) {
+  if (!Number.isFinite(wallTimeMs)) {
+    return new Set(fallbackRequestIds);
+  }
+
+  const cutoffMs = wallTimeMs + CORE_READY_REQUEST_EPSILON_MS;
+  const requestIds = new Set();
+
+  for (const [requestId, startedAtMs] of requestStartWallMs) {
+    if (Number.isFinite(startedAtMs) && startedAtMs <= cutoffMs) {
+      requestIds.add(requestId);
+    }
+  }
+
+  for (const requestId of fallbackRequestIds) {
+    if (!requestStartWallMs.has(requestId)) {
+      requestIds.add(requestId);
+    }
+  }
+
+  return requestIds;
+}
+
+function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPaths) {
+  const paths = new Set(protectedPaths);
+  const violations = [];
+
+  for (const requestId of requestIds) {
+    const requestUrl = requestUrls.get(requestId);
+    if (requestUrl === undefined) {
+      continue;
+    }
+
+    let pathname;
+    try {
+      pathname = new URL(requestUrl).pathname.replace(/^\//, "");
+    } catch {
+      pathname = requestUrl.replace(/^\//, "");
+    }
+
+    if (paths.has(pathname)) {
+      violations.push(pathname);
+    }
+  }
+
+  return violations;
+}
+
+function assertNoProtectedStartupBoundaryRequests(requestIds, requestUrls, protectedPaths) {
+  const violations = protectedStartupBoundaryViolations(
+    requestIds,
+    requestUrls,
+    protectedPaths,
+  );
+
+  if (violations.length > 0) {
+    throw new Error(
+      `protected startup boundary fetched broad modules before coreReady: ${[
+        ...new Set(violations),
+      ].join(", ")}`,
+    );
+  }
+}
+
+async function performanceMarkWallMs(cdp, page, markName) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const marks = performance.getEntriesByName(${JSON.stringify(markName)}, "mark");
+      const mark = marks[marks.length - 1];
+      if (!mark) {
+        return null;
+      }
+      return performance.timeOrigin + mark.startTime;
+    })()`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  const wallTimeMs = result.result?.value;
+
+  if (!Number.isFinite(wallTimeMs)) {
+    throw new Error(`missing performance mark ${markName}`);
+  }
+
+  return wallTimeMs;
+}
+
 async function createPage(cdp) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send("Target.attachToTarget", {
@@ -526,14 +658,21 @@ async function createPage(cdp) {
 
 async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
+  const requestStartWallMs = new Map();
+  const requestUrls = new Map();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
+  let coreRequestIds = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
       return;
     }
     requestIds.add(event.requestId);
+    requestUrls.set(event.requestId, event.request.url);
+    if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
+      requestStartWallMs.set(event.requestId, event.wallTime * 1000);
+    }
   });
   const offCache = cdp.on("Network.requestServedFromCache", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
@@ -578,9 +717,41 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
         const error = document.querySelector('[role="alert"]')?.textContent ?? "";
         const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
         return {
+          coreReady: performance.getEntriesByName("tracy.core.ready").length > 0,
           detail,
           error,
-          ready: performance.getEntriesByName("tracy.app.ready").length > 0,
+        };
+      })()`,
+      returnByValue: true,
+    }, page.sessionId);
+    const status = result.result?.value ?? {};
+
+    if (status.error) {
+      const detail = status.detail ? ` (${status.detail})` : "";
+      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
+    }
+    return status.coreReady === true;
+  });
+  const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
+  coreRequestIds = requestIdsStartedAtOrBefore(
+    requestStartWallMs,
+    coreReadyWallMs,
+    requestIds,
+  );
+  assertNoProtectedStartupBoundaryRequests(
+    coreRequestIds,
+    requestUrls,
+    ["host/wasm-modules.mjs"],
+  );
+  await waitUntil(async () => {
+    const result = await cdp.send("Runtime.evaluate", {
+      expression: `(() => {
+        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
+        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
+        return {
+          detail,
+          error,
+          fullReady: performance.getEntriesByName("tracy.app.ready").length > 0,
         };
       })()`,
       returnByValue: true,
@@ -592,23 +763,48 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       throw new Error(`page reported app-load failure: ${status.error}${detail}`);
     }
 
-    return status.ready === true;
+    return status.fullReady === true;
   });
+  await waitUntil(() =>
+    unfinishedTransferRequestIds(coreRequestIds, cachedRequestIds, loadingBytes).length === 0,
+  );
+  const coreTransferBytes = coreTransferBytesForRequests(
+    coreRequestIds,
+    cachedRequestIds,
+    loadingBytes,
+  );
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
-      const fcp = performance.getEntriesByName("first-contentful-paint")[0]?.startTime ?? 0;
+      const fcp = performance.getEntriesByName("first-contentful-paint")[0];
+      if (fcp === undefined) {
+        throw new Error("missing browser first-contentful-paint performance entry");
+      }
+      const shellPaint = performance.getEntriesByName("tracy.app.shell.paint")[0]?.startTime;
+      const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
+      const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
-      return { fcpMs: fcp, ttiMs: appLoad, wasmInstantiateMs: wasm };
+      return {
+        coreTtiMs: coreReady - coreStart,
+        fcpMs: fcp.startTime,
+        fullLoadMs: appLoad,
+        shellPaintMs: shellPaint,
+        wasmInstantiateMs: wasm,
+      };
     })()`,
     returnByValue: true,
   }, page.sessionId);
+  if (result.exceptionDetails !== undefined) {
+    const description =
+      result.exceptionDetails.exception?.description ??
+      result.exceptionDetails.text ??
+      "unknown Runtime.evaluate failure";
+    throw new Error(`failed to collect app-load metrics: ${description}`);
+  }
   const metrics = result.result.value;
 
-  metrics.transferBytes = [...loadingBytes]
-    .filter(([requestId]) => requestIds.has(requestId) && !cachedRequestIds.has(requestId))
-    .reduce((total, [, bytes]) => total + bytes, 0);
+  metrics.transferBytes = coreTransferBytes;
 
   offRequest();
   offCache();
@@ -664,36 +860,24 @@ async function runBench(options) {
 }
 
 function runSelfTest() {
-  assert.deepEqual(BUDGETS, {
-    cold: {
-      fcpMs: 1100,
-      transferBytes: 75000,
-      ttiMs: 250,
-      wasmInstantiateMs: 200,
-    },
-    warmHttp: {
-      fcpMs: 50,
-      transferBytes: 0,
-      ttiMs: 25,
-      wasmInstantiateMs: 25,
-    },
-    warmSw: {
-      fcpMs: 45,
-      transferBytes: 0,
-      ttiMs: 25,
-      wasmInstantiateMs: 15,
-    },
+  assert.deepEqual(FAST_3G, {
+    downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
+    latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
+    uploadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.uploadThroughputBytesPerSecond,
   });
+  assert.deepEqual(BUDGETS, RUNTIME_SPEC.appLoadBench.budgets);
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
+      coreTtiMs: 1,
       fcpMs: 1,
+      fullLoadMs: 2,
       transferBytes: 0,
-      ttiMs: 2,
       wasmInstantiateMs: 3,
     }, {
+      coreTtiMs: 1,
       fcpMs: 1,
+      fullLoadMs: 2,
       transferBytes: 0,
-      ttiMs: 2,
       wasmInstantiateMs: 3,
     }),
   );
@@ -701,9 +885,90 @@ function runSelfTest() {
     () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
     /fixture fcpMs 2.0 > 1/,
   );
+  const transferRequestIds = new Set(["bootstrap", "renderer", "cached"]);
+  const cachedTransferRequestIds = new Set(["cached"]);
+  const loadingTransferBytes = new Map([["bootstrap", 12]]);
+  assert.deepEqual(
+    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    ["renderer"],
+  );
+  assert.equal(
+    coreTransferBytesForRequests(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+    ),
+    12,
+  );
+  loadingTransferBytes.set("renderer", 34);
+  assert.deepEqual(
+    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    [],
+  );
+  assert.equal(
+    coreTransferBytesForRequests(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+    ),
+    46,
+  );
+  assert.deepEqual(
+    requestIdsStartedAtOrBefore(
+      new Map([
+        ["bootstrap", 1000],
+        ["renderer", 1002],
+        ["trace-spec", 999.75],
+      ]),
+      1000,
+      new Set(["bootstrap", "renderer", "trace-spec", "unknown"]),
+    ),
+    new Set(["bootstrap", "trace-spec", "unknown"]),
+  );
+  assert.deepEqual(
+    requestIdsStartedAtOrBefore(
+      new Map([
+        ["bootstrap", 1000],
+        ["renderer", 1002],
+      ]),
+      Number.NaN,
+      new Set(["bootstrap", "renderer"]),
+    ),
+    new Set(["bootstrap", "renderer"]),
+  );
+  const requestUrls = new Map([
+    ["bootstrap", "http://127.0.0.1/bootstrap.mjs"],
+    ["wasm-graph", "http://127.0.0.1/host/wasm-modules.mjs"],
+  ]);
+  assert.deepEqual(
+    protectedStartupBoundaryViolations(
+      new Set(["bootstrap", "wasm-graph"]),
+      requestUrls,
+      ["host/wasm-modules.mjs"],
+    ),
+    ["host/wasm-modules.mjs"],
+  );
+  assert.doesNotThrow(() =>
+    assertNoProtectedStartupBoundaryRequests(
+      new Set(["bootstrap"]),
+      requestUrls,
+      ["host/wasm-modules.mjs"],
+    ),
+  );
+  assert.throws(
+    () =>
+      assertNoProtectedStartupBoundaryRequests(
+        new Set(["wasm-graph"]),
+        requestUrls,
+        ["host/wasm-modules.mjs"],
+      ),
+    /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
+  );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /fs\.promises\.stat/);
-  assert.match(staticServerSource, /fs\.createReadStream/);
+  assert.match(staticServerSource, /fs\.promises\.readFile/);
+  assert.match(staticServerSource, /Content-Encoding"\] = "gzip"/);
+  assert.match(staticServerSource, /Content-Length": body\.byteLength/);
   assert.doesNotMatch(staticServerSource, /fs\.(existsSync|statSync|readFileSync)/);
 
   const tmpDist = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-app-load-dist-"));
@@ -732,24 +997,329 @@ function runSelfTest() {
     );
     assert.doesNotThrow(() => assertDistReady(tmpDist));
   } finally {
-    fs.rmSync(tmpDist, { recursive: true, force: true });
+    fs.rmSync(tmpDist, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    });
   }
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));
+  const runtimeSpecJson = JSON.parse(
+    fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
+  );
+  const paletteSpecJson = JSON.parse(
+    fs.readFileSync(path.join(ROOT_DIR, "abi", "palette.json"), "utf8"),
+  );
   const makefile = fs.readFileSync(path.join(ROOT_DIR, "Makefile"), "utf8");
+  const indexHtml = fs.readFileSync(path.join(ROOT_DIR, "index.html"), "utf8");
+  const bootstrap = fs.readFileSync(path.join(ROOT_DIR, "bootstrap.mjs"), "utf8");
+  const rendererLoader = fs.readFileSync(
+    path.join(ROOT_DIR, "host", "progressive-trace-renderer-loader.mjs"),
+    "utf8",
+  );
+  const runtime = fs.readFileSync(path.join(ROOT_DIR, "host", "runtime.mjs"), "utf8");
+  const startupSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "startup-spec.mjs"), "utf8");
+  const traceRendererSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "trace-renderer-spec.mjs"), "utf8");
+  const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
+  const bootstrapShellPaintOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.appShellPaint)");
+  const bootstrapFirstFramePromiseOffset = bootstrap.indexOf("const firstFramePromise");
+  const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
+  const bootstrapRendererPreloadOffset = bootstrap.indexOf(
+    "const importProgressiveTraceRenderer = () =>",
+  );
+  const bootstrapRuntimeImportOffset = bootstrap.indexOf('import("./host/runtime.mjs")');
+  const runtimeCoreStartOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.coreStart",
+  );
+  const runtimeWasmStartOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart",
+  );
+  const defaultRendererPreloadOffset = runtime.indexOf(
+    "const deferredRendererReadyPromise",
+  );
+  const runtimeCoreReadyOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.coreReady",
+  );
+  const firstFramePromiseOffset = runtime.indexOf("firstFramePromise");
+  const rendererModuleLoadOffset = runtime.indexOf("const deferredRendererReadyPromise");
+  const tracyMainOffset = runtime.indexOf("tracy_main();");
+  const appReadyOffset = runtime.indexOf(
+    "markPerformance(PERFORMANCE_MARKS.appReady",
+  );
 
   assert.equal(packageJson.scripts["bench:app-load"], "node tools/app-load-bench.js");
   assert.equal(packageJson.scripts["test:app-load-bench"], "node tools/app-load-bench.js --self-test");
+  assert.equal(packageJson.scripts["test:runtime-spec"], "node tools/generate-runtime-spec.js --check");
+  assert.equal(
+    runtimeSpecJson.urls.PROGRESSIVE_TRACE_RENDERER_URL.value,
+    "./progressive-trace-renderer.mjs",
+  );
+  assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
+  assert.notEqual(bootstrapStartOffset, -1);
+  assert.notEqual(bootstrapShellPaintOffset, -1);
+  assert.notEqual(bootstrapFirstFramePromiseOffset, -1);
+  assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.ok(
+    bootstrapStartOffset < bootstrapShellPaintOffset,
+    "bootstrap should mark app shell paint after startup begins",
+  );
+  assert.ok(
+    bootstrapStartOffset < bootstrapFirstFramePromiseOffset &&
+      bootstrapFirstFramePromiseOffset < bootstrapRuntimeImportOffset,
+    "bootstrap should start waiting for the first animation frame before module startup waits",
+  );
+  assert.notEqual(bootstrapRendererPreloadOffset, -1);
+  assert.notEqual(bootstrapRuntimeImportOffset, -1);
+  assert.notEqual(runtimeCoreStartOffset, -1);
+  assert.notEqual(runtimeWasmStartOffset, -1);
+  assert.notEqual(defaultRendererPreloadOffset, -1);
+  assert.notEqual(runtimeCoreReadyOffset, -1);
+  assert.notEqual(firstFramePromiseOffset, -1);
+  assert.notEqual(rendererModuleLoadOffset, -1);
+  assert.notEqual(tracyMainOffset, -1);
+  assert.notEqual(appReadyOffset, -1);
+  assert.ok(
+    runtimeCoreReadyOffset < defaultRendererPreloadOffset,
+    "default deferred renderer import should start after core readiness",
+  );
+  assert.ok(
+    bootstrapRendererPreloadOffset < bootstrapRuntimeImportOffset,
+    "bootstrap should define the renderer implementation importer before waiting on runtime import",
+  );
+  assert.ok(runtimeCoreStartOffset < tracyMainOffset);
+  assert.ok(tracyMainOffset < runtimeCoreReadyOffset);
+  assert.ok(firstFramePromiseOffset < runtimeWasmStartOffset);
+  assert.ok(firstFramePromiseOffset < appReadyOffset);
+  assert.ok(runtimeCoreReadyOffset < appReadyOffset);
+  assert.match(
+    runtime,
+    /const deferredRendererReadyPromise =[\s\S]+loadProgressiveTraceRendererModule\(\)/,
+  );
+  assert.match(
+    runtime,
+    /const firstFramePromise =[\s\S]+options\.firstFramePromise[\s\S]+\?\?/,
+  );
+  assert.match(
+    runtime,
+    /const appReadyPromise = Promise\.all\(\[[\s\S]+firstFramePromise,[\s\S]+deferredRendererReadyPromise,[\s\S]+\]\)\.then/,
+  );
+  assert.match(
+    runtime,
+    /appReadyPromise[\s\S]+then\(afterAppReadyFrame\)[\s\S]+ingestWorker\?\.indexReader\?\.preload/,
+  );
+  assert.match(runtime, /loadProgressiveTraceRendererModule\(\)/);
+  assert.match(runtime, /\.catch\(reportAppLoadError\)/);
+  assert.match(runtime, /from "\.\/startup-spec\.mjs"/);
+  assert.doesNotMatch(runtime, /from "\.\/runtime-spec\.mjs"/);
+  assert.match(runtime, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(
+    runtime,
+    /const deferredRendererReadyPromise =[\s\S]+loadProgressiveTraceRendererModule\(\)/,
+  );
+  assert.match(startupSpec, /progressive-trace-renderer\.mjs/);
+  assert.doesNotMatch(startupSpec, /progressive-trace-renderer-loader\.mjs/);
+  assert.match(rendererLoader, /import\("\.\/progressive-trace-renderer\.mjs"\)/);
+  assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
+  assert.match(startupSpec, /Generated from abi\/runtime\.json and abi\/palette\.json/);
+  assert.match(
+    traceRendererSpec,
+    /Generated from abi\/runtime\.json, abi\/layout\.json, and abi\/palette\.json/,
+  );
+  assert.match(bootstrap, /from "\.\/host\/startup-spec\.mjs"/);
+  assert.doesNotMatch(bootstrap, /runtime-spec\.mjs/);
+  assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
+  assert.match(
+    bootstrap,
+    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
+  );
+  assert.match(
+    bootstrap,
+    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
+  );
+  assert.match(
+    bootstrap,
+    /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/,
+  );
+  assert.match(
+    bootstrap,
+    /const importProgressiveTraceRenderer = \(\) =>\s+warmProgressiveTraceRendererPromise \?\?\s+import/,
+  );
+  assert.doesNotMatch(bootstrap, /afterProtectedStartupBoundary/);
+  assert.doesNotMatch(bootstrap, /new MessageChannel\(\)/);
+  assert.doesNotMatch(bootstrap, /setTimeout\(resolve/);
+  assert.match(bootstrap, /const appReady = \(\) => new Promise/);
+  assert.match(bootstrap, /PERFORMANCE_MARKS\.appReady/);
+  assert.match(bootstrap, /globalThis\.addEventListener\?\.\(PERFORMANCE_MARKS\.appReady, resolve, \{ once: true \}\)/);
+  assert.match(bootstrap, /const pageLoaded = \(\) => new Promise/);
+  assert.match(bootstrap, /Promise\.all\(\[appReady\(\), pageLoaded\(\)\]\)\.then\(registerServiceWorker\)/);
+  assert.doesNotMatch(bootstrap, /registerAfterReady/);
+  assert.doesNotMatch(bootstrap, /SERVICE_WORKER_READY_/);
+  assert.doesNotMatch(bootstrap, /setTimeout/);
+  assert.doesNotMatch(bootstrap, /setTimeout\(register/);
+  assert.doesNotMatch(startupSpec, /BOOTSTRAP_TIMING/);
+  assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
+  assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
+  assert.match(
+    bootstrap,
+    /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
+  );
+  assert.match(
+    bootstrap,
+    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
+  );
+  assert.match(
+    bootstrap,
+    /importProgressiveTraceRenderer,/,
+  );
+  assert.match(
+    bootstrap,
+    /firstFramePromise,/,
+  );
+  assert.match(
+    bootstrap,
+    /instantiateWasmModuleForThread/,
+  );
+  assert.match(
+    bootstrap,
+    /const mainAppWasmPromise = instantiateWasmModuleForThread\("app", "main"/,
+  );
+  assert.ok(
+    bootstrap.indexOf("const mainAppWasmPromise = instantiateWasmModuleForThread") <
+      bootstrap.indexOf("const { runApp } = await runtimeModulePromise"),
+    "bootstrap should start app wasm instantiation before waiting for runtime.mjs",
+  );
+  assert.match(
+    bootstrap,
+    /instantiateWasmModuleForThread: instantiateWasmModuleWithPreloadedApp/,
+  );
+  assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
+  assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
+  assert.match(startupSpec, /APP_SHELL_COLORS/);
+  assert.doesNotMatch(startupSpec, /TRACE_RENDERER_COLORS/);
+  assert.match(traceRendererSpec, /TRACE_RENDERER_COLORS/);
+  assert.doesNotMatch(traceRendererSpec, /APP_SHELL_COLORS/);
+  for (const group of Object.values(paletteSpecJson.palettes.default)) {
+    for (const [name, entry] of Object.entries(group)) {
+      const colorPattern = new RegExp(
+        `${name}: ${escapeRegExp(JSON.stringify(entry.value))}`,
+      );
+
+      if (entry.scope === "init") {
+        assert.match(startupSpec, colorPattern);
+      } else if (entry.scope === "full") {
+        assert.doesNotMatch(startupSpec, colorPattern);
+        assert.match(traceRendererSpec, colorPattern);
+      } else {
+        assert.fail(`${name} should declare palette scope init or full`);
+      }
+    }
+  }
+  assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
+  assert.match(
+    navigateAndMeasure.toString(),
+    /coreReady: performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /performanceMarkWallMs\(cdp, page, "tracy\.core\.ready"\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestUrls\.set\(event\.requestId, event\.request\.url\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /assertNoProtectedStartupBoundaryRequests\([\s\S]+coreRequestIds,[\s\S]+requestUrls,[\s\S]+\["host\/wasm-modules\.mjs"\]/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /unfinishedTransferRequestIds\(coreRequestIds, cachedRequestIds, loadingBytes\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /coreTransferBytesForRequests\([\s\S]+coreRequestIds,[\s\S]+cachedRequestIds,[\s\S]+loadingBytes/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /metrics\.transferBytes = coreTransferBytes/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /performance\.getEntriesByName\("tracy\.app\.shell\.paint"\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /shellPaintMs: shellPaint/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /performance\.getEntriesByName\("first-contentful-paint"\)\[0\]/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /missing browser first-contentful-paint performance entry/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /fcpMs: fcp\.startTime/,
+  );
+  assert.doesNotMatch(
+    navigateAndMeasure.toString(),
+    /fcpMs: shellPaint/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /fullReady: performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
+  );
+  assert.match(navigateAndMeasure.toString(), /return status\.fullReady === true/);
+  assert.match(
+    indexHtml,
+    /<link rel="modulepreload" href="bootstrap\.mjs">/,
+  );
+  assert.match(
+    indexHtml,
+    /<link rel="preload" href="wasm\/app\.wasm" as="fetch" type="application\/wasm" crossorigin>/,
+  );
+  assert.match(
+    indexHtml,
+    /performance\?\.mark\?\.\("tracy\.app\.shell\.paint"\)/,
+  );
+  assert.ok(
+    indexHtml.indexOf('performance?.mark?.("tracy.app.shell.paint")') <
+      indexHtml.indexOf('<script type="module" src="bootstrap.mjs">'),
+    "index shell-paint mark should run before bootstrap module loading",
+  );
+  assert.deepEqual(
+    [...indexHtml.matchAll(/<link rel="modulepreload" href="([^"]+)">/g)].map(
+      (match) => match[1],
+    ),
+    ["bootstrap.mjs"],
+  );
+  assert.doesNotMatch(
+    indexHtml,
+    /<link rel="modulepreload" href="host\/wasm-modules\.mjs">/,
+  );
   assert.match(makefile, /app-load-bench: dist tools\/app-load-bench\.js/);
   assert.match(
     makefile,
-    /dist\/precache-manifest\.js: \$\(filter-out dist\/precache-manifest\.js,\$\(DIST_FILES\)\) tools\/generate-precache-manifest\.js/,
+    /dist\/precache-manifest\.js: \$\(PRECACHE_DIST_FILES\) tools\/generate-precache-manifest\.js/,
   );
   assert.match(
     makefile,
-    /dist\/build-info\.js: \$\(filter-out dist\/build-info\.js \$\(SERVICE_WORKER_FILES\),\$\(DIST_FILES\)\)/,
+    /dist\/build-info\.js: \$\(APP_RUNTIME_DIST_FILES\)/,
   );
+  assert.match(makefile, /PRODUCTION_WASM_FILES := \$\(filter-out %\.test\.wasm,\$\(WASM_FILES\)\)/);
+  assert.match(makefile, /APP_RUNTIME_DIST_FILES :=[\s\S]+\$\(PRODUCTION_WASM_FILES\)/);
+  assert.match(makefile, /PRECACHE_DIST_FILES :=[\s\S]+\$\(APP_RUNTIME_DIST_FILES\)/);
+  assert.match(makefile, /find \. -type f[\s\S]+! -name '\*\.test\.wasm'/);
   assert.match(makefile, /node tools\/app-load-bench\.js --self-test/);
+  assert.match(makefile, /node tools\/generate-runtime-spec\.js --check/);
 }
 
 async function main() {

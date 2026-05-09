@@ -164,3 +164,20 @@ export const HOST_IMPORTS = Object.freeze([
     async: false,
   }),
 ]);
+
+export const OPFS_BRIDGE_CONTRACT = Object.freeze({
+  sourceImports: Object.freeze(["opfs_create_from_file", "opfs_read_chunk", "opfs_source_from_file", "opfs_source_name", "opfs_source_name_len", "opfs_source_open", "opfs_source_read", "opfs_source_size"]),
+  indexReaderImports: Object.freeze(["opfs_index_open", "opfs_index_read", "opfs_index_size"]),
+  indexWriterImports: Object.freeze(["opfs_index_create", "opfs_index_flush", "opfs_index_write"]),
+  workerUnsupportedFileImports: Object.freeze(["opfs_create_from_file", "opfs_source_from_file"]),
+  indexSizeMayBeStaleMarker: "tracy.opfsIndexSizeMayBeStale",
+  workerUnsupportedFileReason: "file handles are owned by the main thread",
+  fileSourceName: Object.freeze({
+    prefix: "trace-",
+    separator: "-",
+    suffix: ".bin",
+  }),
+  mainIndexSizeMayBeStale: true,
+  workerPersistsFileSources: false,
+  defaultPersistsFileSources: true,
+});

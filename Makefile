@@ -19,13 +19,14 @@ GENERATED_WAT_FILES := \
 	wat/std/mem.wat
 GENERATOR_WAT_INPUTS := $(filter-out $(GENERATED_WAT_FILES),$(WAT_SOURCES))
 WASM_FILES := $(patsubst wat/%.wat,dist/wasm/%.wasm,$(WAT_SOURCES))
+PRODUCTION_WASM_FILES := $(filter-out %.test.wasm,$(WASM_FILES))
 WAT_COMPAT_FILES :=
 COV_WAT_FILES := $(patsubst wat/%.wat,dist/wasm-cov/%.wat,$(WAT_SOURCES))
 COV_WASM_FILES := $(patsubst %.wat,%.wasm,$(COV_WAT_FILES))
 COV_MANIFEST_FILES :=
-HOST_JS_GENERATED := host/abi.mjs host/wasm-modules.mjs
+HOST_JS_GENERATED := host/abi.mjs host/index-format-spec.mjs host/startup-spec.mjs host/trace-renderer-spec.mjs host/wasm-modules.mjs
 HOST_JS := $(sort $(shell find host -type f -name '*.mjs' -print) $(HOST_JS_GENERATED))
-APP_JS_SOURCES := bootstrap.js worker.js
+APP_JS_SOURCES := bootstrap.mjs worker.js
 APP_JS_DIST_FILES := $(patsubst %,dist/%,$(APP_JS_SOURCES))
 HOST_JS_DIST_FILES := $(patsubst host/%,dist/host/%,$(HOST_JS))
 JS_DIST_FILES := \
@@ -35,6 +36,15 @@ STATIC_FILES := $(shell find static -type f -print | sort)
 STATIC_DIST_FILES := $(patsubst static/%,dist/%,$(STATIC_FILES))
 APP_SHELL_FILES := dist/index.html dist/manifest.webmanifest
 SERVICE_WORKER_FILES := dist/service-worker.js dist/precache-manifest.js
+APP_RUNTIME_DIST_FILES := \
+	$(PRODUCTION_WASM_FILES) \
+	$(JS_DIST_FILES) \
+	$(APP_SHELL_FILES) \
+	$(STATIC_DIST_FILES)
+PRECACHE_DIST_FILES := \
+	$(APP_RUNTIME_DIST_FILES) \
+	dist/build-info.js \
+	dist/service-worker.js
 DIST_FILES := \
 	$(WASM_FILES) \
 	$(JS_DIST_FILES) \
@@ -50,6 +60,9 @@ GENERATED_FILES := \
 	MEMORY.md \
 	abi/wasm-modules.json \
 	host/abi.mjs \
+	host/index-format-spec.mjs \
+	host/startup-spec.mjs \
+	host/trace-renderer-spec.mjs \
 	host/wasm-modules.mjs \
 	$(GENERATED_WAT_FILES)
 
@@ -61,6 +74,9 @@ CLEAN_GENERATED_FILES := \
 	HOST_ABI.md \
 	abi/wasm-modules.json \
 	host/abi.mjs \
+	host/index-format-spec.mjs \
+	host/startup-spec.mjs \
+	host/trace-renderer-spec.mjs \
 	host/wasm-modules.mjs
 
 ifneq ($(MODULE_DOC_GENERATOR),)
@@ -71,11 +87,15 @@ GENERATED_INPUTS := \
 	abi/host.json \
 	abi/layout.json \
 	abi/parser-state.json \
+	abi/palette.json \
+	abi/runtime.json \
 	tools/assemble-wat.js \
 	tools/extract-wasm-modules.js \
 	tools/generate-host-abi.js \
 	tools/generate-layout.js \
+	tools/generate-palette-spec.js \
 	tools/generate-parser-state-abi.js \
+	tools/generate-runtime-spec.js \
 	tools/generate-wasm-modules-abi.js \
 	tools/layout-spec.js \
 	tools/wat-parser.js \
@@ -106,14 +126,16 @@ app-load-bench: dist tools/app-load-bench.js
 	node tools/app-load-bench.js
 
 lighthouse-ci: dist .lighthouserc.cjs
-	npx --yes @lhci/cli@0.15.1 autorun --config=.lighthouserc.cjs
+	npm run lhci:autorun
 
 generated: $(GENERATED_FILES)
 
 $(GENERATED_FILES) &: $(GENERATED_INPUTS)
 	node tools/generate-layout.js
 	node tools/generate-host-abi.js
+	node tools/generate-palette-spec.js
 	node tools/generate-parser-state-abi.js
+	node tools/generate-runtime-spec.js
 	node tools/extract-wasm-modules.js
 	node tools/generate-wasm-modules-abi.js
 ifneq ($(MODULE_DOC_GENERATOR),)
@@ -171,7 +193,7 @@ $(foreach wat,$(WAT_SOURCES),$(eval $(call WAT_COV_RULE,$(wat))))
 
 wasm-cov: $(COV_WAT_FILES) $(COV_MANIFEST_FILES) $(COV_WASM_FILES)
 
-dist/bootstrap.js: bootstrap.js
+dist/bootstrap.mjs: bootstrap.mjs
 	mkdir -p $(dir $@)
 	cp $< $@
 
@@ -201,13 +223,13 @@ dist/service-worker.js: service-worker.js
 	mkdir -p $(dir $@)
 	cp $< $@
 
-dist/precache-manifest.js: $(filter-out dist/precache-manifest.js,$(DIST_FILES)) tools/generate-precache-manifest.js
-	node tools/generate-precache-manifest.js dist $@ $(filter-out dist/precache-manifest.js,$(DIST_FILES))
+dist/precache-manifest.js: $(PRECACHE_DIST_FILES) tools/generate-precache-manifest.js
+	node tools/generate-precache-manifest.js dist $@ $(PRECACHE_DIST_FILES)
 
-dist/build-info.js: $(filter-out dist/build-info.js $(SERVICE_WORKER_FILES),$(DIST_FILES))
+dist/build-info.js: $(APP_RUNTIME_DIST_FILES)
 	build_hash="$$( \
 		cd dist && \
-		find . -type f ! -name 'build-info.js' ! -path './.wat-compat/*' -print0 \
+		find . -type f ! -name 'build-info.js' ! -name 'precache-manifest.js' ! -name 'service-worker.js' ! -name '*.test.wasm' ! -path './.wat-compat/*' -print0 \
 			| sort -z \
 			| xargs -0 sha256sum \
 			| sha256sum \
@@ -225,10 +247,14 @@ check-generated: generated
 
 test: dist check-generated
 	bash tools/check-bootstrap-lines.sh
+	node tools/generate-runtime-spec.js --check
+	node tools/generate-palette-spec.js --check
 	node tools/wasm-modules-check.js
 	node tools/host-shim-check.js
 	node tools/ingest-worker-runtime-check.js
 	node tools/runtime-worker-orchestration-check.js
+	node tools/interactive-ingest-check.js
+	node tools/interactive-ingest-browser-check.js
 	node tools/direct-esm-check.js
 	node tools/service-worker-check.js
 	node tools/dist-budget-check.js --self-test

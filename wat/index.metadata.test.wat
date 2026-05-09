@@ -179,9 +179,9 @@
   (import "index" "index_page_catalog_reset"
     (func $index_page_catalog_reset))
   (import "index" "index_page_catalog_add_slice_page"
-    (func $index_page_catalog_add_slice_page (param i32 i32 i32 i32 i32)))
+    (func $index_page_catalog_add_slice_page (param i32 i32 i32 i32 i32) (result i32)))
   (import "index" "index_query_range"
-    (func $index_query_range (param i32 i32 i32 i32) (result i32)))
+    (func $index_query_range (param i32 i32 i32 i32 i32) (result i32)))
   (import "index" "index_reader_configure_cache"
     (func $index_reader_configure_cache (param i32) (result i32)))
   (import "index" "index_reader_evict_cold_pages"
@@ -575,7 +575,7 @@
     call $assert_eq_i32
 
     global.get $INDEX_QUERY_RESULT_BYTES
-    i32.const 24
+    i32.const 28
     i32.const 391
     call $assert_eq_i32
 

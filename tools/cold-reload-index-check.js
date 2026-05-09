@@ -372,7 +372,7 @@ function expectJsonEq(actual, expected, label) {
 }
 
 function queryRows(index, view, trackId, tsMin, tsMax) {
-  const count = index.index_query_range(trackId, tsMin, tsMax, queryOutPtr);
+  const count = index.index_query_range(trackId, tsMin, tsMax, queryOutPtr, 1024);
   expectEq(
     index.index_reader_status(),
     globalValue(index.INDEX_READER_STATUS_OK),
@@ -411,12 +411,16 @@ function rebuildSliceCatalog(index, view, pages) {
       continue;
     }
 
-    index.index_page_catalog_add_slice_page(
-      hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
-      pageId,
-      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET),
-      readU32(view, page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET),
-      readU32(view, page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET),
+    expectEq(
+      index.index_page_catalog_add_slice_page(
+        hints >>> INDEX_DECODE_HINT_TRACK_ID_SHIFT,
+        pageId,
+        readU32(view, page + INDEX_PAGE_HEADER_BUCKET_START_OFFSET),
+        readU32(view, page + INDEX_PAGE_HEADER_BUCKET_END_OFFSET),
+        readU32(view, page + INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET),
+      ),
+      1,
+      `catalog page ${pageId} added`,
     );
   }
 }

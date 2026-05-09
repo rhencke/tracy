@@ -66,9 +66,11 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `COLD_RELOAD_TARGET_BUDGET_MS` | `30000` | Maximum cold-reload time budget for the v0.1 mobile target trace size. |
 | `COLD_RELOAD_MIN_BUDGET_MS` | `250` | Minimum cold-reload check budget for small local fixtures where process startup noise dominates. |
 | `INDEX_TARGET_ENCODED_BYTES_PER_EVENT` | `12` | Maximum average compact index payload bytes per event. |
-| `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
 | `INDEX_COLUMN_ENTRY_BYTES` | `16` | Byte length of one compact index column directory entry. |
 | `INDEX_QUERY_RESULT_FIELD_BYTES` | `4` | Byte length of one u32 field in an index query result row. |
+| `INDEX_DECODE_HINT_COMPACT_SLICES` | `1` | Decode-hints bit marking a compact slice page. |
+| `INDEX_DECODE_HINT_PARTIAL` | `4` | Decode-hints bit marking an unfinished page or LOD bucket. |
+| `INDEX_DECODE_HINT_TRACK_ID_SHIFT` | `8` | Number of bits to shift a track id into or out of the decode-hints bitfield. |
 | `INDEX_PAGE_HEADER_BUCKET_START_OFFSET` | `12` | Index page header byte offset of the inclusive page timestamp start. |
 | `INDEX_PAGE_HEADER_BUCKET_END_OFFSET` | `20` | Index page header byte offset of the inclusive page timestamp end. |
 | `INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET` | `28` | Index page header byte offset of the encoded record count. |
@@ -83,6 +85,7 @@ The shared constants are exported by `wat/std/mem.wat` and generated from
 | `INDEX_QUERY_RESULT_DEPTH_OFFSET` | `12` | Query result row byte offset of the nesting depth. |
 | `INDEX_QUERY_RESULT_CAT_ID_OFFSET` | `16` | Query result row byte offset of the category dictionary id. |
 | `INDEX_QUERY_RESULT_COLOR_OFFSET` | `20` | Query result row byte offset of the resolved color. |
+| `INDEX_QUERY_RESULT_PARTIAL_OFFSET` | `24` | Query result row byte offset of the per-row partial-page flag. |
 
 Index page header, directory, and query-result offsets are part of the
 generated layout spec so cold-reload parity checks and binary readers use
@@ -601,6 +604,9 @@ byte records: token kind, payload pointer, and payload length.  The resume
 record stores output cursors as offsets, record counts, and capacities; it
 never stores the caller's output buffer pointer, so crash recovery does not
 depend on a stale borrowed pointer.
+The default streaming turn capacity is `PARSER_DEFAULT_OUTPUT_RECORD_CAP = 4096`;
+hosts should use that parser ABI value when releasing output after a yield
+instead of copying the cap into JavaScript policy.
 
 ### Parser status and field enums
 

@@ -66,11 +66,31 @@ async function main() {
     makeShim,
     makeWorkerThreadHost,
   } = await import(shimUrl);
-  const { HOST_IMPORT_NAME } = await import(abiUrl);
+  const { HOST_IMPORT_NAME, OPFS_BRIDGE_CONTRACT } = await import(abiUrl);
   const memory = new WebAssembly.Memory({ initial: 1 });
 
   const mainHost = makeMainThreadHost(memory);
   const workerHost = makeWorkerThreadHost(memory);
+  const workerFileHost = makeWorkerThreadHost(
+    memory,
+    new Map([
+      [
+        7,
+        {
+          size: 3,
+          slice(start, end) {
+            assert.equal(start, 1);
+            assert.equal(end, 3);
+            return {
+              async arrayBuffer() {
+                return Uint8Array.from([8, 9]).buffer;
+              },
+            };
+          },
+        },
+      ],
+    ]),
+  );
   const legacyHost = makeShim(memory);
   const mainKeys = hostKeys(mainHost);
   const workerKeys = hostKeys(workerHost);
@@ -105,11 +125,29 @@ async function main() {
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_WRITE), "main host missing index write");
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_FLUSH), "main host missing index flush");
   assert(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_SIZE), "main host missing index size");
+  assert.equal(
+    mainHost[OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+    OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale,
+    "main OPFS host should probe for worker-appended index pages",
+  );
+  assert.equal(
+    workerHost[OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+    undefined,
+    "worker OPFS host should not expose main-thread catalog probe marker",
+  );
 
   assert.throws(
     () => workerHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](1),
-    /file handles are owned by the main thread/,
+    new RegExp(OPFS_BRIDGE_CONTRACT.workerUnsupportedFileReason),
   );
+  const sourceId = await workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](7);
+
+  assert.equal(sourceId, 1);
+  assert.equal(
+    await workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, 1n, 2, 32),
+    2,
+  );
+  assert.deepEqual(Array.from(new Uint8Array(memory.buffer, 32, 2)), [8, 9]);
 }
 
 main().catch((error) => {

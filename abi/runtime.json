@@ -1,0 +1,387 @@
+{
+  "urls": {
+    "WORKER_URL": {
+      "value": "worker.js",
+      "description": "Module worker entrypoint used by the main-thread runtime."
+    },
+    "SERVICE_WORKER_URL": {
+      "value": "service-worker.js",
+      "description": "Service worker entrypoint registered after the app reaches full readiness."
+    },
+    "PROGRESSIVE_TRACE_RENDERER_URL": {
+      "value": "./progressive-trace-renderer.mjs",
+      "description": "Deferred progressive trace renderer implementation module URL, relative to host/runtime.mjs."
+    }
+  },
+  "wasmMemory": {
+    "BOOTSTRAP_MEMORY_INITIAL_PAGES": {
+      "value": 256,
+      "description": "Initial WebAssembly memory pages allocated by the bootstrap module."
+    },
+    "BOOTSTRAP_MEMORY_MAXIMUM_PAGES": {
+      "value": 32768,
+      "description": "Maximum WebAssembly memory pages allowed by the bootstrap module."
+    }
+  },
+  "bootstrap": {},
+  "appLoadBench": {
+    "fast3g": {
+      "downloadThroughputBytesPerSecond": 209715,
+      "latencyMs": 150,
+      "uploadThroughputBytesPerSecond": 96000
+    },
+    "budgets": {
+      "cold": {
+        "coreTtiMs": 250,
+        "fcpMs": 1100,
+        "fullLoadMs": 1000,
+        "transferBytes": 75000,
+        "wasmInstantiateMs": 200
+      },
+      "warmHttp": {
+        "coreTtiMs": 25,
+        "fcpMs": 50,
+        "fullLoadMs": 25,
+        "transferBytes": 0,
+        "wasmInstantiateMs": 25
+      },
+      "warmSw": {
+        "coreTtiMs": 25,
+        "fcpMs": 45,
+        "fullLoadMs": 25,
+        "transferBytes": 0,
+        "wasmInstantiateMs": 15
+      }
+    }
+  },
+  "constantAudit": {
+    "duplicateNumericValues": [
+      {
+        "numericValue": 1000,
+        "paths": [
+          "appLoadBench.budgets.cold.fullLoadMs",
+          "traceRenderer.query.DEFAULT_TRACE_QUERY_WINDOW"
+        ],
+        "description": "Cold full-load readiness and the default renderer query time window are intentionally distinct budgets that happen to share a value."
+      },
+      {
+        "numericValue": 25,
+        "paths": [
+          "appLoadBench.budgets.warmHttp.coreTtiMs",
+          "appLoadBench.budgets.warmHttp.fullLoadMs",
+          "appLoadBench.budgets.warmHttp.wasmInstantiateMs",
+          "appLoadBench.budgets.warmSw.coreTtiMs",
+          "appLoadBench.budgets.warmSw.fullLoadMs"
+        ],
+        "description": "Warm-load budget fields share the same target value, but each measures a separate browser/cache path boundary and may move independently."
+      },
+      {
+        "numericValue": 0,
+        "paths": [
+          "appLoadBench.budgets.warmHttp.transferBytes",
+          "appLoadBench.budgets.warmSw.transferBytes",
+          "traceRenderer.canvasOps.END_TAG"
+        ],
+        "description": "Warm HTTP cache and warm service-worker paths both require no protected-path network transfer, while the renderer canvas-op end tag is a separate Wasm planner sentinel."
+      },
+      {
+        "numericValue": 1,
+        "paths": [
+          "traceRenderer.canvasOps.QUERY_RANGE_TAG",
+          "traceRenderer.canvasOps.TERMINATOR_OP_BUDGET",
+          "traceRenderer.draw.DEFAULT_STROKE_WIDTH",
+          "traceRenderer.layout.DEFAULT_MIN_VIEWPORT_SPAN"
+        ],
+        "description": "These renderer constants are intentionally distinct: viewport clamp span, Wasm query-range tag, planner terminator budget, and canvas stroke width."
+      },
+      {
+        "numericValue": 8,
+        "paths": [
+          "traceRenderer.draw.DEFAULT_BAND_PADDING",
+          "traceRenderer.layout.DEFAULT_UNKNOWN_STRIPE_SPACING"
+        ],
+        "description": "Band padding and unknown-range stripe spacing are separate renderer layout values that happen to match today."
+      },
+      {
+        "numericValue": 6,
+        "paths": [
+          "traceRenderer.color.RGB_HEX_WIDTH",
+          "traceRenderer.draw.DEFAULT_PARTIAL_HATCH_SPACING"
+        ],
+        "description": "Hex color width and partial-slice hatch spacing are unrelated renderer values that happen to match today."
+      },
+      {
+        "numericValue": 10,
+        "paths": [
+          "traceRenderer.draw.DEFAULT_LANE_HEIGHT",
+          "traceRenderer.layout.DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING"
+        ],
+        "description": "Lane height and incomplete-query stripe spacing are separate visual defaults and may move independently."
+      },
+      {
+        "numericValue": 4096,
+        "paths": [
+          "runtimeDefaults.DEFAULT_INGEST_NAME_PTR",
+          "runtimeDefaults.DEFAULT_INGEST_NAME_MAX_BYTES"
+        ],
+        "description": "The ingest source-name pointer and source-name byte capacity are intentionally equal today but describe different parts of the scratch-memory layout."
+      },
+      {
+        "numericValue": 1024,
+        "paths": [
+          "runtimeDefaults.DEFAULT_READER_QUERY_ROW_CAP",
+          "traceRenderer.query.DEFAULT_TRACE_QUERY_ROW_CAP"
+        ],
+        "description": "The main-thread reader query cap and progressive renderer query cap both limit rows today, but they belong to separate call-site contracts."
+      }
+    ]
+  },
+  "runtimeDefaults": {
+    "DEFAULT_INGEST_NAME_PTR": {
+      "value": 4096,
+      "description": "Default memory pointer for host-written ingest source names; this is a scratch-memory address, not the source-name capacity."
+    },
+    "DEFAULT_INGEST_NAME_MAX_BYTES": {
+      "value": 4096,
+      "description": "Maximum encoded byte length for host-written ingest source names; intentionally distinct from DEFAULT_INGEST_NAME_PTR even while both values are 4096."
+    },
+    "DEFAULT_READER_NAME_PTR": {
+      "value": 8192,
+      "description": "Default memory pointer for main-thread reader index names; starts after the ingest-name scratch buffer."
+    },
+    "DEFAULT_READER_CACHE_SLOTS": {
+      "value": 4,
+      "description": "Default number of main-thread index reader cache slots."
+    },
+    "DEFAULT_READER_QUERY_ROW_CAP": {
+      "value": 1024,
+      "description": "Default row cap for main-thread index reader queries."
+    },
+    "DEFAULT_INGEST_PROGRESS_WINDOW_MS": {
+      "value": 5000,
+      "description": "Default worker ingest throughput sample window used for progress and ETA calculation."
+    },
+    "DEFAULT_INGEST_ETA_STABLE_MS": {
+      "value": 3000,
+      "description": "Minimum worker ingest progress sample age before ETA is surfaced to avoid first-ramp flicker."
+    }
+  },
+  "interactiveIngestCheck": {
+    "FIXTURE_SIZE_BYTES": {
+      "value": 104857600,
+      "description": "Size of the throttled trace fixture used by the interactive ingest verification gate."
+    },
+    "INGEST_WINDOW_BYTES": {
+      "value": 10485760,
+      "description": "Expected bytes covered by the mock-throttled ingest window in the interactive ingest verification gate."
+    },
+    "FRAME_BUDGET_MS": {
+      "value": 16.67,
+      "description": "60 fps pan/zoom frame budget enforced by the interactive ingest verification gate."
+    }
+  },
+  "runtimeBridge": {
+    "threads": {
+      "MAIN": "main"
+    },
+    "modules": {
+      "APP": "app",
+      "INDEX": "index",
+      "DEFAULT_BASE_URL": "wasm/"
+    },
+    "worker": {
+      "MODULE_TYPE": "module",
+      "EVENT_MESSAGE": "message",
+      "EVENT_ERROR": "error",
+      "EVENT_MESSAGE_ERROR": "messageerror"
+    },
+    "workerMessages": {
+      "COMPLETE": "complete",
+      "COVERED_RANGE": "covered_range",
+      "ERROR": "error",
+      "PRELOAD": "preload",
+      "PRELOADED": "preloaded",
+      "PROGRESS": "progress",
+      "START": "start"
+    },
+    "workerStatus": {
+      "COMPLETE": "complete",
+      "ERROR": "error",
+      "IDLE": "idle",
+      "RUNNING": "running",
+      "TERMINATED": "terminated",
+      "UNAVAILABLE": "unavailable"
+    },
+    "readerStatus": {
+      "ERROR": "error",
+      "IDLE": "idle",
+      "OPENING": "opening",
+      "READY": "ready"
+    },
+    "fileSelection": {
+      "DEFAULT_TRACE_NAME": "trace",
+      "INDEX_PREFIX": "indexes/",
+      "INDEX_SUFFIX": ".idx",
+      "PATH_SEPARATOR": "/",
+      "SOURCE_PREFIX": "sources/",
+      "UNSAFE_LEAF_PATTERN": "[^A-Za-z0-9._-]",
+      "UNSAFE_LEAF_REPLACEMENT": "_"
+    },
+    "errors": {
+      "APP_LOAD_FAILED": "tracy failed to load the WebAssembly viewer.",
+      "INGEST_WORKER_FAILED": "ingest worker failed",
+      "JSPI_UNAVAILABLE": "tracy needs a browser with WebAssembly JavaScript Promise Integration (JSPI) enabled.",
+      "MAIN_THREAD_INDEX_NAME_LABEL": "main-thread index name",
+      "MAIN_THREAD_INDEX_READER_NOT_READY": "main-thread index reader is not ready",
+      "MODULE_WORKERS_UNAVAILABLE": "module workers are unavailable",
+      "OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_PREFIX": "OPFS source ",
+      "OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_SUFFIX": " did not report a valid name",
+      "OPFS_SOURCE_NAME_READ_FAILED_SUFFIX": " name read failed",
+      "OPFS_SOURCE_NAME_TOO_LONG_PREFIX": "OPFS source name is too long: ",
+      "OPFS_SOURCE_NAME_TOO_LONG_SUFFIX": " bytes",
+      "SLICE_CATALOG_FULL_PREFIX": "main-thread slice catalog full while rebuilding index ",
+      "SLICE_CATALOG_FULL_PAGE_SEPARATOR": " at page ",
+      "WORKER_INGEST_FAILED": "worker ingest failed"
+    }
+  },
+  "traceRenderer": {
+    "query": {
+      "DEFAULT_TRACE_QUERY_OUT_PTR": {
+        "value": 12288,
+        "description": "Default scratch pointer for index query result rows decoded by the progressive trace renderer."
+      },
+      "DEFAULT_TRACE_QUERY_WINDOW": {
+        "value": 1000,
+        "description": "Default minimum time span for one progressive trace renderer query tile."
+      },
+      "DEFAULT_TRACE_QUERY_ROW_CAP": {
+        "value": 1024,
+        "description": "Default maximum index query rows decoded from one progressive trace renderer query."
+      },
+      "DEFAULT_TRACE_QUERY_RANGE_BUDGET": {
+        "value": 64,
+        "description": "Default maximum number of index query ranges the renderer may issue per draw."
+      }
+    },
+    "layout": {
+      "DEFAULT_MIN_VIEWPORT_SPAN": {
+        "value": 1,
+        "description": "Minimum visible time span after pan/zoom clamping."
+      },
+      "DEFAULT_UNKNOWN_AFFORDANCE_WIDTH": {
+        "value": 72,
+        "description": "Default width in CSS pixels for the unknown leading-edge progress affordance."
+      },
+      "DEFAULT_UNKNOWN_STRIPE_SPACING": {
+        "value": 8,
+        "description": "Default stripe spacing in CSS pixels for the unknown leading-edge progress affordance."
+      },
+      "DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING": {
+        "value": 10,
+        "description": "Default stripe spacing in CSS pixels for incomplete query affordances."
+      }
+    },
+    "canvasOps": {
+      "END_TAG": {
+        "value": 0,
+        "description": "Wasm trace renderer planner sentinel tag indicating no more canvas operations."
+      },
+      "QUERY_RANGE_TAG": {
+        "value": 1,
+        "description": "Wasm trace renderer planner tag for an index query-range canvas operation."
+      },
+      "INCOMPLETE_QUERY_RANGE_TAG": {
+        "value": 2,
+        "description": "Wasm trace renderer planner tag for a visible incomplete query-range affordance."
+      },
+      "TERMINATOR_OP_BUDGET": {
+        "value": 1,
+        "description": "Extra planner iteration budget reserved for the required terminating canvas operation."
+      }
+    },
+    "draw": {
+      "DEFAULT_CANVAS_WIDTH": {
+        "value": 800,
+        "description": "Fallback canvas width used by the trace renderer when the browser has not reported dimensions."
+      },
+      "DEFAULT_CANVAS_HEIGHT": {
+        "value": 400,
+        "description": "Fallback canvas height used by the trace renderer when the browser has not reported dimensions."
+      },
+      "DEFAULT_LANE_HEIGHT": {
+        "value": 10,
+        "description": "Default slice lane height in CSS pixels."
+      },
+      "DEFAULT_LANE_GAP": {
+        "value": 3,
+        "description": "Default vertical gap between slice lanes in CSS pixels."
+      },
+      "DEFAULT_TRACE_TOP": {
+        "value": 18,
+        "description": "Default top offset for the first slice lane in CSS pixels."
+      },
+      "DEFAULT_BAND_PADDING": {
+        "value": 8,
+        "description": "Default bottom padding for the rendered trace band in CSS pixels."
+      },
+      "DEFAULT_PARTIAL_HATCH_SPACING": {
+        "value": 6,
+        "description": "Default hatch spacing in CSS pixels for partial slice affordances."
+      },
+      "DEFAULT_STROKE_WIDTH": {
+        "value": 1,
+        "description": "Default line width for trace renderer affordance strokes."
+      }
+    },
+    "interaction": {
+      "WHEEL_DELTA_MIN": {
+        "value": -500,
+        "description": "Minimum wheel delta used by trace viewport zoom clamping."
+      },
+      "WHEEL_DELTA_MAX": {
+        "value": 500,
+        "description": "Maximum wheel delta used by trace viewport zoom clamping."
+      },
+      "WHEEL_DELTA_SCALE": {
+        "value": 0.001,
+        "description": "Scale factor applied to clamped wheel deltas before exponential zoom."
+      }
+    },
+    "color": {
+      "RGB_COLOR_MASK": {
+        "value": 16777215,
+        "description": "Mask for converting packed slice colors to six-digit CSS RGB hex values."
+      },
+      "RGB_HEX_WIDTH": {
+        "value": 6,
+        "description": "Minimum hex digit count for packed slice colors rendered as CSS RGB values."
+      }
+    },
+    "loaderBridge": {
+      "apiMethods": [
+        "draw",
+        "panByPixels",
+        "zoomAtPixel"
+      ],
+      "statusMethod": "status",
+      "loadingStatusField": "loading",
+      "errorStatusField": "error"
+    }
+  },
+  "performanceMarks": {
+    "appReady": "tracy.app.ready",
+    "appShellPaint": "tracy.app.shell.paint",
+    "bootstrapStart": "tracy.bootstrap.start",
+    "coreReady": "tracy.core.ready",
+    "coreStart": "tracy.core.start",
+    "tracyMainEnd": "tracy.main.end",
+    "tracyMainStart": "tracy.main.start",
+    "wasmInstantiateEnd": "tracy.wasm.instantiate.end",
+    "wasmInstantiateStart": "tracy.wasm.instantiate.start"
+  },
+  "performanceMeasures": {
+    "appLoad": "tracy.app.load",
+    "tracyMain": "tracy.main",
+    "wasmInstantiate": "tracy.wasm.instantiate"
+  }
+}

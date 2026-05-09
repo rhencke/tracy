@@ -51,6 +51,28 @@ then [v1.0 — release](https://github.com/rhencke/tracy/issues/35).
   Sharing happens via deep-linkable URL fragments — the recipient
   must already have the same trace file (matched by content hash).
 
+## Agent guidance
+
+- Wasm owns product policy and durable contracts.  JavaScript owns browser
+  capability glue, host wiring, and generated bridge code.
+- Performance gates are product contracts.  Do not loosen timing or transfer
+  budgets to make CI pass; fix the dependency path or measured work.
+- Readiness markers must measure the whole user-facing dependency chain they
+  name.  A marker is not ready while deferred work the user depends on is still
+  pending.
+- Progress and coverage mean queryable data for the specific consumer.  Do not
+  advance UI frontiers from bytes or pages that the renderer, search, or
+  bookmark path cannot actually query.
+- Frame and render budgets must make skipped work visible.  If budgeted paging
+  omits tracks, ranges, or rows, surface an incomplete affordance or summary
+  instead of silently dropping data.
+- Tests and checks should exercise the real owner.  Keep JavaScript checks as
+  thin harnesses that drive scenarios and assert Wasm-owned/generated results,
+  not shadow implementations of product rules.
+- When a PR produces a large cluster of related Insights, synthesize them into
+  repo-local working memory or follow-up issues instead of carrying the raw
+  Insight list forward in startup context.
+
 ## Build + run
 
 The CI workflow builds `dist/` on every PR and deploys that artifact
@@ -70,7 +92,7 @@ make dist
 make -j4 dist
 
 # produced app shell
-ls dist/index.html dist/bootstrap.js dist/host/runtime.mjs dist/wasm/app.wasm
+ls dist/index.html dist/bootstrap.mjs dist/host/runtime.mjs dist/wasm/app.wasm
 
 # run the local test gate
 make test

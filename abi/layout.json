@@ -161,6 +161,8 @@
     }
   },
   "index": {
+    "owner": "index-wasm",
+    "wasmModule": "index",
     "INDEX_TARGET_ENCODED_BYTES_PER_EVENT": {
       "value": 12,
       "description": "Maximum average compact index payload bytes per event."
@@ -190,6 +192,14 @@
       ]
     },
     "decodeHints": {
+      "INDEX_DECODE_HINT_COMPACT_SLICES": {
+        "value": 1,
+        "description": "Decode-hints bit marking a compact slice page."
+      },
+      "INDEX_DECODE_HINT_PARTIAL": {
+        "value": 4,
+        "description": "Decode-hints bit marking an unfinished page or LOD bucket."
+      },
       "INDEX_DECODE_HINT_TRACK_ID_SHIFT": {
         "value": 8,
         "description": "Number of bits to shift a track id into or out of the decode-hints bitfield."
@@ -264,6 +274,12 @@
           "property": "color",
           "value": 20,
           "description": "Query result row byte offset of the resolved color."
+        },
+        {
+          "name": "INDEX_QUERY_RESULT_PARTIAL_OFFSET",
+          "property": "partial",
+          "value": 24,
+          "description": "Query result row byte offset of the per-row partial-page flag."
         }
       ]
     }

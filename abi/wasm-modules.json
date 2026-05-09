@@ -9,7 +9,7 @@
       "dependencies": []
     },
     "index": {
-      "thread": "worker",
+      "thread": "shared",
       "wasmPath": "index.wasm",
       "aliases": [
         "index"

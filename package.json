@@ -7,10 +7,15 @@
     "build:cov": "make wasm-cov",
     "bench:app-load": "node tools/app-load-bench.js",
     "lhci": "make lighthouse-ci",
+    "lhci:autorun": "lhci autorun --config=.lighthouserc.cjs",
+    "playwright:install": "playwright install --with-deps",
+    "playwright:test": "playwright test",
     "test": "make test",
     "test:layout": "node tools/generate-layout.js --check",
     "test:host-abi": "node tools/generate-host-abi.js --check",
+    "test:palette-spec": "node tools/generate-palette-spec.js --check",
     "test:parser-state-abi": "node tools/generate-parser-state-abi.js --check",
+    "test:runtime-spec": "node tools/generate-runtime-spec.js --check",
     "test:wasm-modules-abi": "node tools/extract-wasm-modules.js --check",
     "test:wasm-modules-loader": "node tools/generate-wasm-modules-abi.js --check",
     "test:bootstrap-lines": "bash tools/check-bootstrap-lines.sh",
@@ -18,6 +23,7 @@
     "test:host-shim": "node tools/host-shim-check.js",
     "test:ingest-worker-runtime": "node tools/ingest-worker-runtime-check.js",
     "test:runtime-worker": "node tools/runtime-worker-orchestration-check.js",
+    "test:interactive-ingest-browser": "node tools/interactive-ingest-browser-check.js",
     "test:direct-esm": "node tools/direct-esm-check.js",
     "test:service-worker": "node tools/service-worker-check.js",
     "test:dist-budget": "node tools/dist-budget-check.js --self-test",
@@ -34,5 +40,10 @@
     "test:coverage:strict": "node tools/coverage-run.js --check dist/wasm-cov",
     "coverage": "make coverage",
     "coverage:strict": "make coverage-strict"
+  },
+  "devDependencies": {
+    "@lhci/cli": "0.15.1",
+    "@playwright/test": "1.59.1",
+    "puppeteer-core": "24.43.0"
   }
 }

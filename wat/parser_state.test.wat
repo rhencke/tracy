@@ -12,6 +12,7 @@
   (import "parser_state" "PARSER_PARTIAL_TOKEN_CAP" (global $PARSER_PARTIAL_TOKEN_CAP i32))
   (import "parser_state" "PARSER_DEFAULT_YIELD_BUDGET_MS" (global $PARSER_DEFAULT_YIELD_BUDGET_MS i32))
   (import "parser_state" "PARSER_TOKEN_RECORD_BYTES" (global $PARSER_TOKEN_RECORD_BYTES i32))
+  (import "parser_state" "PARSER_DEFAULT_OUTPUT_RECORD_CAP" (global $PARSER_DEFAULT_OUTPUT_RECORD_CAP i32))
   (import "parser_state" "PARSER_STATE_MAGIC_OFFSET" (global $PARSER_STATE_MAGIC_OFFSET i32))
   (import "parser_state" "PARSER_STATE_VERSION_OFFSET" (global $PARSER_STATE_VERSION_OFFSET i32))
   (import "parser_state" "PARSER_STATE_STATUS_OFFSET" (global $PARSER_STATE_STATUS_OFFSET i32))
@@ -144,174 +145,179 @@
     i32.const 7
     call $assert_eq_i32
 
+    global.get $PARSER_DEFAULT_OUTPUT_RECORD_CAP
+    i32.const 4096
+    i32.const 8
+    call $assert_eq_i32
+
     global.get $PARSER_STATE_MAGIC_OFFSET
     i32.const 0
-    i32.const 8
+    i32.const 9
     call $assert_eq_i32
 
     global.get $PARSER_STATE_VERSION_OFFSET
     i32.const 4
-    i32.const 9
+    i32.const 10
     call $assert_eq_i32
 
     global.get $PARSER_STATE_STATUS_OFFSET
     i32.const 8
-    i32.const 10
+    i32.const 11
     call $assert_eq_i32
 
     global.get $PARSER_STATE_YIELD_BUDGET_MS_OFFSET
     i32.const 12
-    i32.const 11
+    i32.const 12
     call $assert_eq_i32
 
     global.get $PARSER_STATE_SOURCE_ID_OFFSET
     i32.const 16
-    i32.const 12
+    i32.const 13
     call $assert_eq_i32
 
     global.get $PARSER_STATE_FLAGS_OFFSET
     i32.const 20
-    i32.const 13
+    i32.const 14
     call $assert_eq_i32
 
     global.get $PARSER_STATE_FILE_OFFSET_OFFSET
     i32.const 24
-    i32.const 14
+    i32.const 15
     call $assert_eq_i32
 
     global.get $PARSER_STATE_RING_READ_OFFSET
     i32.const 32
-    i32.const 15
+    i32.const 16
     call $assert_eq_i32
 
     global.get $PARSER_STATE_RING_WRITE_OFFSET
     i32.const 36
-    i32.const 16
+    i32.const 17
     call $assert_eq_i32
 
     global.get $PARSER_STATE_RING_COUNT_OFFSET
     i32.const 40
-    i32.const 17
+    i32.const 18
     call $assert_eq_i32
 
     global.get $PARSER_STATE_DEPTH_OFFSET
     i32.const 44
-    i32.const 18
+    i32.const 19
     call $assert_eq_i32
 
     global.get $PARSER_STATE_STACK_LEN_OFFSET
     i32.const 48
-    i32.const 19
+    i32.const 20
     call $assert_eq_i32
 
     global.get $PARSER_STATE_TOKEN_KIND_OFFSET
     i32.const 52
-    i32.const 20
+    i32.const 21
     call $assert_eq_i32
 
     global.get $PARSER_STATE_PARTIAL_TOKEN_LEN_OFFSET
     i32.const 56
-    i32.const 21
+    i32.const 22
     call $assert_eq_i32
 
     global.get $PARSER_STATE_PARTIAL_TOKEN_HASH_OFFSET
     i32.const 60
-    i32.const 22
+    i32.const 23
     call $assert_eq_i32
 
     global.get $PARSER_STATE_STRING_ESCAPE_OFFSET
     i32.const 64
-    i32.const 23
+    i32.const 24
     call $assert_eq_i32
 
     global.get $PARSER_STATE_UNICODE_ACCUM_OFFSET
     i32.const 68
-    i32.const 24
+    i32.const 25
     call $assert_eq_i32
 
     global.get $PARSER_STATE_EVENT_FIELD_OFFSET
     i32.const 72
-    i32.const 25
+    i32.const 26
     call $assert_eq_i32
 
     global.get $PARSER_STATE_EVENT_FIELD_MASK_OFFSET
     i32.const 76
-    i32.const 26
+    i32.const 27
     call $assert_eq_i32
 
     global.get $PARSER_STATE_CURRENT_KEY_HASH_OFFSET
     i32.const 80
-    i32.const 27
+    i32.const 28
     call $assert_eq_i32
 
     global.get $PARSER_STATE_DFA_STATE_OFFSET
     i32.const 84
-    i32.const 28
+    i32.const 29
     call $assert_eq_i32
 
     global.get $PARSER_STATE_EVENT_COUNT_OFFSET
     i32.const 88
-    i32.const 29
+    i32.const 30
     call $assert_eq_i32
 
     global.get $PARSER_STATE_STACK_OFFSET
     i32.const 96
-    i32.const 30
+    i32.const 31
     call $assert_eq_i32
 
     global.get $PARSER_STATE_PARTIAL_TOKEN_OFFSET
     i32.const 160
-    i32.const 31
+    i32.const 32
     call $assert_eq_i32
 
     global.get $PARSER_STATE_OUTPUT_RECORD_CAP_OFFSET
     i32.const 416
-    i32.const 32
+    i32.const 33
     call $assert_eq_i32
 
     global.get $PARSER_STATE_OUTPUT_WRITE_RECORD_OFFSET
     i32.const 420
-    i32.const 33
+    i32.const 34
     call $assert_eq_i32
 
     global.get $PARSER_STATE_OUTPUT_WRITE_OFFSET
     i32.const 424
-    i32.const 34
+    i32.const 35
     call $assert_eq_i32
 
     global.get $PARSER_STATE_OUTPUT_COUNT_OFFSET
     i32.const 428
-    i32.const 35
+    i32.const 36
     call $assert_eq_i32
 
     global.get $PARSER_STATE_LINE_OFFSET
     i32.const 432
-    i32.const 36
+    i32.const 37
     call $assert_eq_i32
 
     global.get $PARSER_STATE_COLUMN_OFFSET
     i32.const 436
-    i32.const 37
+    i32.const 38
     call $assert_eq_i32
 
     global.get $PARSER_STATE_ERROR_LINE_OFFSET
     i32.const 440
-    i32.const 38
+    i32.const 39
     call $assert_eq_i32
 
     global.get $PARSER_STATE_ERROR_COLUMN_OFFSET
     i32.const 444
-    i32.const 39
+    i32.const 40
     call $assert_eq_i32
 
     global.get $PARSER_STATE_TOKEN_START_RING_OFFSET_OFFSET
     i32.const 448
-    i32.const 40
+    i32.const 41
     call $assert_eq_i32
 
     global.get $PARSER_STATE_TOKEN_START_FILE_OFFSET_OFFSET
     i32.const 456
-    i32.const 41
+    i32.const 42
     call $assert_eq_i32
     ;; @generated parser-state-layout-assertions:end
   )

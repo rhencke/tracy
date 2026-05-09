@@ -59,3 +59,13 @@ Do not edit generated ABI values by hand.
 | `HOST_POINTER_MOD_BUTTON_PRIMARY` | `0x00000020` | Primary pointer button is down. |
 | `HOST_POINTER_MOD_BUTTON_SECONDARY` | `0x00000040` | Secondary pointer button is down. |
 | `HOST_POINTER_MOD_BUTTON_AUXILIARY` | `0x00000080` | Auxiliary pointer button is down. |
+
+## OPFS Bridge Contract
+
+Generated from `abi/host.json`. JavaScript owns only browser OPFS/File API
+mechanics; import grouping, bridge markers, unsupported worker capabilities,
+and generated source-name shape live in this shared contract.
+
+- Main OPFS index size marker: `tracy.opfsIndexSizeMayBeStale`
+- Worker file-handle unsupported reason: `file handles are owned by the main thread`
+- File source name shape: `trace-<base36-time>-<source-id>.bin`

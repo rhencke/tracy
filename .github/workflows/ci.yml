@@ -57,7 +57,6 @@ jobs:
         run: make -j dist
 
       - name: Install Chrome
-        if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
           if ! command -v google-chrome >/dev/null 2>&1; then
@@ -95,11 +94,11 @@ jobs:
 
       - name: Install Playwright browsers
         if: github.event_name == 'pull_request' && steps.golden-tests.outputs.exists == 'true'
-        run: npx playwright install --with-deps
+        run: npm run playwright:install
 
       - name: Run Playwright golden e2e
         if: github.event_name == 'pull_request' && steps.golden-tests.outputs.exists == 'true'
-        run: npx playwright test
+        run: npm run playwright:test
 
       - name: Upload Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

@@ -2,7 +2,12 @@
 
 const { readFileSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
-const { assertLayoutSpec, constantEntries, spec } = require("./layout-spec.js");
+const {
+  OPFS_PAGE_SIZE,
+  assertLayoutSpec,
+  constantEntries,
+  spec,
+} = require("./layout-spec.js");
 
 const root = join(__dirname, "..");
 const checkOnly = process.argv.includes("--check");
@@ -33,6 +38,13 @@ function generatedHeader(kind) {
   return [
     `;; Generated from abi/layout.json by tools/generate-layout.js.`,
     `;; Do not edit ${kind} by hand.`,
+  ].join("\n");
+}
+
+function generatedJsHeader(kind) {
+  return [
+    `// Generated from abi/layout.json by tools/generate-layout.js.`,
+    `// Do not edit ${kind} by hand.`,
   ].join("\n");
 }
 
@@ -112,6 +124,62 @@ function renderMemTest() {
   return `${lines.join("\n")}\n`;
 }
 
+function renderIndexFormatSpecModule() {
+  const indexCacheRegion = spec.memoryRegions.find(
+    (entry) => entry.baseConstant === "MEM_INDEX_CACHE_BASE",
+  );
+  const decodeHints = Object.entries(spec.index.decodeHints).map(
+    ([name, entry]) => [
+      name.replace(/^INDEX_DECODE_HINT_/, ""),
+      entry.value,
+    ],
+  );
+  const pageHeaderOffsets = spec.index.pageHeader.fields.map((entry) => [
+    entry.name
+      .replace(/^INDEX_PAGE_HEADER_/, "")
+      .replace(/_OFFSET$/, ""),
+    entry.value,
+  ]);
+  const queryResultFields = spec.index.queryResult.fields.map((entry) => [
+    entry.property.toUpperCase(),
+    entry.value,
+  ]);
+  const queryResultBytes =
+    spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value *
+    spec.index.queryResult.fields.length;
+
+  return [
+    generatedJsHeader("host/index-format-spec.mjs"),
+    "",
+    "export const INDEX_FORMAT_CONTRACT = Object.freeze({",
+    `  OWNER: ${JSON.stringify(spec.index.owner)},`,
+    '  SOURCE: "abi/layout.json#index",',
+    `  WASM_MODULE: ${JSON.stringify(spec.index.wasmModule)},`,
+    "});",
+    "",
+    "export const INDEX_FORMAT = Object.freeze({",
+    `  MEM_INDEX_CACHE_BASE: ${indexCacheRegion.base},`,
+    `  MEM_INDEX_CACHE_SIZE: ${indexCacheRegion.size},`,
+    `  OPFS_PAGE_SIZE: ${OPFS_PAGE_SIZE},`,
+    "});",
+    "",
+    "export const INDEX_DECODE_HINTS = Object.freeze({",
+    ...decodeHints.map(([name, value]) => `  ${name}: ${value},`),
+    "});",
+    "",
+    "export const INDEX_PAGE_HEADER_OFFSETS = Object.freeze({",
+    ...pageHeaderOffsets.map(([name, value]) => `  ${name}: ${value},`),
+    "});",
+    "",
+    "export const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({",
+    `  BYTES: ${queryResultBytes},`,
+    `  FIELD_BYTES: ${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value},`,
+    ...queryResultFields.map(([name, value]) => `  ${name}: ${value},`),
+    "});",
+    "",
+  ].join("\n");
+}
+
 function renderMemoryLayoutSection() {
   const initialBytes = spec.memoryBudgets.find((entry) => entry.name === "MEM_INITIAL_BYTES");
   const initialPages = spec.memoryBudgets.find((entry) => entry.name === "MEM_INITIAL_PAGES");
@@ -171,10 +239,13 @@ function renderMemoryLayoutSection() {
 
   lines.push(
     `| \`INDEX_TARGET_ENCODED_BYTES_PER_EVENT\` | \`${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.value}\` | ${spec.index.INDEX_TARGET_ENCODED_BYTES_PER_EVENT.description} |`,
-    `| \`INDEX_DECODE_HINT_TRACK_ID_SHIFT\` | \`${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.value}\` | ${spec.index.decodeHints.INDEX_DECODE_HINT_TRACK_ID_SHIFT.description} |`,
     `| \`INDEX_COLUMN_ENTRY_BYTES\` | \`${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.value}\` | ${spec.index.directory.INDEX_COLUMN_ENTRY_BYTES.description} |`,
     `| \`INDEX_QUERY_RESULT_FIELD_BYTES\` | \`${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.value}\` | ${spec.index.queryResult.INDEX_QUERY_RESULT_FIELD_BYTES.description} |`,
   );
+
+  for (const [name, entry] of Object.entries(spec.index.decodeHints)) {
+    lines.push(`| \`${name}\` | \`${formatValue(entry)}\` | ${entry.description} |`);
+  }
 
   for (const section of [spec.index.pageHeader, spec.index.directory, spec.index.queryResult]) {
     for (const entry of section.fields) {
@@ -213,7 +284,15 @@ function replaceGeneratedBlock(text, start, end, body) {
 
 function writeIfChanged(path, content) {
   const absolute = join(root, path);
-  const previous = readFileSync(absolute, "utf8");
+  let previous = null;
+
+  try {
+    previous = readFileSync(absolute, "utf8");
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
 
   if (previous === content) {
     return true;
@@ -242,6 +321,7 @@ function updateMarkedFile(path, replacements) {
 const ok = [
   writeIfChanged("wat/std/mem.wat", renderMemWat()),
   writeIfChanged("wat/std/mem.test.wat", renderMemTest()),
+  writeIfChanged("host/index-format-spec.mjs", renderIndexFormatSpecModule()),
   updateMarkedFile("MEMORY.md", [
     {
       start: "<!-- @generated layout:start -->",

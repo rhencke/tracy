@@ -38,6 +38,29 @@ function readonlyArray(values) {
   return `Object.freeze([${values.map((value) => JSON.stringify(value)).join(", ")}])`;
 }
 
+function renderFrozenValue(value, indent = "") {
+  if (Array.isArray(value)) {
+    return readonlyArray(value);
+  }
+
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      return "Object.freeze({})";
+    }
+
+    const lines = ["Object.freeze({"];
+    const childIndent = `${indent}  `;
+    for (const [key, child] of entries) {
+      lines.push(`${childIndent}${key}: ${renderFrozenValue(child, childIndent)},`);
+    }
+    lines.push(`${indent}})`);
+    return lines.join("\n");
+  }
+
+  return JSON.stringify(value);
+}
+
 function importConstantName(name) {
   return name.toUpperCase();
 }
@@ -80,6 +103,7 @@ function renderHostAbiModule() {
   }
 
   lines.push("]);", "");
+  lines.push(`export const OPFS_BRIDGE_CONTRACT = ${renderFrozenValue(source.opfsBridge)};`, "");
   return lines.join("\n");
 }
 
@@ -130,6 +154,19 @@ function renderDocs() {
   for (const entry of constants) {
     lines.push(`| \`${entry.name}\` | \`${formatValue(entry)}\` | ${entry.description} |`);
   }
+
+  lines.push(
+    "",
+    "## OPFS Bridge Contract",
+    "",
+    "Generated from `abi/host.json`. JavaScript owns only browser OPFS/File API",
+    "mechanics; import grouping, bridge markers, unsupported worker capabilities,",
+    "and generated source-name shape live in this shared contract.",
+    "",
+    `- Main OPFS index size marker: \`${source.opfsBridge.indexSizeMayBeStaleMarker}\``,
+    `- Worker file-handle unsupported reason: \`${source.opfsBridge.workerUnsupportedFileReason}\``,
+    `- File source name shape: \`${source.opfsBridge.fileSourceName.prefix}<base36-time>${source.opfsBridge.fileSourceName.separator}<source-id>${source.opfsBridge.fileSourceName.suffix}\``,
+  );
 
   lines.push("");
   return lines.join("\n");

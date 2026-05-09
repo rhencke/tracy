@@ -1,8 +1,9 @@
 import { HOST_IMPORT_NAME } from "./abi.mjs";
 
-export function makeFilePickerHost(memoryView) {
+export function makeFilePickerHost(memoryView, options = {}) {
   const files = new Map();
   let fileInput = null;
+  let fileSelectedCallback = options.onFileSelected ?? null;
   let nextFileHandle = 1;
 
   function ensureFileInput() {
@@ -56,6 +57,9 @@ export function makeFilePickerHost(memoryView) {
         const handle = nextFileHandle;
         nextFileHandle += 1;
         files.set(handle, file);
+        if (typeof fileSelectedCallback === "function") {
+          queueMicrotask(() => fileSelectedCallback({ file, handle }));
+        }
         settle(handle);
       }
 
@@ -73,5 +77,11 @@ export function makeFilePickerHost(memoryView) {
     });
   }
 
-  return { [HOST_IMPORT_NAME.FILE_PICKER_OPEN]: filePickerOpen, files };
+  return {
+    [HOST_IMPORT_NAME.FILE_PICKER_OPEN]: filePickerOpen,
+    files,
+    setFileSelectedCallback(callback) {
+      fileSelectedCallback = callback;
+    },
+  };
 }

@@ -10,11 +10,23 @@ function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
 }
 
+function assertNoAdHocPackageRunner(relativePath) {
+  const forbidden = ["n", "p", "x"].join("");
+  const pattern = new RegExp(`\\b${forbidden}\\b`);
+
+  assert.equal(
+    pattern.test(readRepoFile(relativePath)),
+    false,
+    `${relativePath} should use locked package scripts or local binaries`,
+  );
+}
+
 function main() {
   const config = require(path.join(ROOT_DIR, ".lighthouserc.cjs"));
   const makefile = readRepoFile("Makefile");
   const workflow = readRepoFile(".github/workflows/ci.yml");
   const packageJson = JSON.parse(readRepoFile("package.json"));
+  const lockfile = JSON.parse(readRepoFile("package-lock.json"));
   const assertions = config.ci.assert.assertions;
   const settings = config.ci.collect.settings;
 
@@ -48,15 +60,27 @@ function main() {
     packageJson.scripts.lhci,
     "make lighthouse-ci",
   );
+  assert.equal(packageJson.scripts["lhci:autorun"], "lhci autorun --config=.lighthouserc.cjs");
+  assert.equal(packageJson.scripts["playwright:install"], "playwright install --with-deps");
+  assert.equal(packageJson.scripts["playwright:test"], "playwright test");
   assert.equal(packageJson.scripts["test:lighthouse-ci"], "node tools/lighthouse-ci-check.js");
+  assert.equal(packageJson.devDependencies["@lhci/cli"], "0.15.1");
+  assert.equal(packageJson.devDependencies["@playwright/test"], "1.59.1");
+  assert.equal(lockfile.packages[""].devDependencies["@lhci/cli"], "0.15.1");
+  assert.equal(lockfile.packages[""].devDependencies["@playwright/test"], "1.59.1");
   assert.match(workflow, /run: make lighthouse-ci/);
+  assert.match(workflow, /run: npm run playwright:install/);
+  assert.match(workflow, /run: npm run playwright:test/);
   assert.match(workflow, /sudo apt-get install -y google-chrome-stable/);
   assert.match(workflow, /google-chrome --version/);
   assert.match(workflow, /- name: Run app-load bench[\s\S]+if: github\.event_name == 'pull_request'[\s\S]+timeout-minutes: 5[\s\S]+run: make app-load-bench/);
   assert.match(makefile, /lighthouse-ci: dist \.lighthouserc\.cjs/);
-  assert.match(makefile, /npx --yes @lhci\/cli@0\.15\.1 autorun --config=\.lighthouserc\.cjs/);
+  assert.match(makefile, /npm run lhci:autorun/);
   assert.match(makefile, /node tools\/lighthouse-ci-check\.js/);
   assert.match(workflow, /if: github\.event_name == 'pull_request'[\s\S]+Run Lighthouse CI cold-load gate/);
+  assertNoAdHocPackageRunner("package.json");
+  assertNoAdHocPackageRunner("Makefile");
+  assertNoAdHocPackageRunner(".github/workflows/ci.yml");
 }
 
 try {

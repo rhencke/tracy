@@ -1,21 +1,44 @@
-import { INGEST_WORKER_MESSAGE } from "./ingest-worker-runtime.mjs";
-import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
+import { HOST_ASYNC_IMPORTS, HOST_IMPORT_NAME } from "./abi.mjs";
+import { INDEX_FORMAT } from "./index-format-spec.mjs";
+import {
+  APP_SHELL_COLORS,
+  PERFORMANCE_MARKS,
+  PERFORMANCE_MEASURES,
+  RUNTIME_BRIDGE,
+  RUNTIME_DEFAULTS,
+  RUNTIME_URLS,
+} from "./startup-spec.mjs";
 
-const MAIN_THREAD = "main";
-const WORKER_URL = "worker.js";
-const PERFORMANCE_MARKS = Object.freeze({
-  appReady: "tracy.app.ready",
-  bootstrapStart: "tracy.bootstrap.start",
-  tracyMainEnd: "tracy.main.end",
-  tracyMainStart: "tracy.main.start",
-  wasmInstantiateEnd: "tracy.wasm.instantiate.end",
-  wasmInstantiateStart: "tracy.wasm.instantiate.start",
-});
-const PERFORMANCE_MEASURES = Object.freeze({
-  appLoad: "tracy.app.load",
-  tracyMain: "tracy.main",
-  wasmInstantiate: "tracy.wasm.instantiate",
-});
+const {
+  errors: RUNTIME_ERRORS,
+  fileSelection: FILE_SELECTION,
+  modules: RUNTIME_MODULES,
+  readerStatus: READER_STATUS,
+  threads: RUNTIME_THREADS,
+  worker: WORKER_CONTRACT,
+  workerMessages: INGEST_WORKER_MESSAGE,
+  workerStatus: WORKER_STATUS,
+} = RUNTIME_BRIDGE;
+const MAIN_THREAD = RUNTIME_THREADS.MAIN;
+const {
+  DEFAULT_INGEST_NAME_MAX_BYTES,
+  DEFAULT_INGEST_NAME_PTR,
+  DEFAULT_READER_CACHE_SLOTS,
+  DEFAULT_READER_NAME_PTR,
+  DEFAULT_READER_QUERY_ROW_CAP,
+} = RUNTIME_DEFAULTS;
+const DEFAULT_STALE_CATALOG_PROBE_PAGES = 1;
+
+let defaultProgressiveTraceRendererModulePromise = null;
+
+function preloadDefaultProgressiveTraceRendererModule() {
+  if (defaultProgressiveTraceRendererModulePromise === null) {
+    defaultProgressiveTraceRendererModulePromise =
+      import(RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL);
+  }
+
+  return defaultProgressiveTraceRendererModulePromise;
+}
 
 function markPerformance(name, options) {
   const performance = options.performance ?? globalThis.performance;
@@ -31,10 +54,37 @@ function measurePerformance(name, start, end, options) {
   } catch {}
 }
 
+function wasmHostImports(host) {
+  if (!supportsJSPI()) {
+    return host;
+  }
+
+  const wrapped = { ...host };
+  for (const name of HOST_ASYNC_IMPORTS) {
+    if (typeof host[name] === "function") {
+      wrapped[name] = new WebAssembly.Suspending(host[name]);
+    }
+  }
+  return wrapped;
+}
+
+function promisingWasmExport(fn, receiver = undefined) {
+  return typeof WebAssembly.promising === "function"
+    ? WebAssembly.promising(fn)
+    : fn.bind(receiver);
+}
+
+function reportAppLoadError(error) {
+  console.error(error);
+  globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
+  showError(RUNTIME_ERRORS.APP_LOAD_FAILED);
+}
+
 function cloneWorkerStatus(status) {
   return {
     coveredRange: status.coveredRange,
     error: status.error,
+    ingest: status.ingest,
     progress: status.progress,
     result: status.result,
     state: status.state,
@@ -48,70 +98,493 @@ function notifyWorkerStatus(status, options, message) {
   return snapshot;
 }
 
-export function createIngestWorkerController(options = {}) {
-  const WorkerCtor = options.Worker ?? globalThis.Worker;
-  const status = {
-    coveredRange: null,
-    error: null,
-    progress: null,
-    result: null,
-    state: "idle",
+function globalValue(value) {
+  return value instanceof WebAssembly.Global ? value.value : value;
+}
+
+function normalizedRowCap(value, fallback) {
+  const numeric = Number(value);
+
+  return Number.isFinite(numeric) && numeric >= 0
+    ? Math.floor(numeric)
+    : fallback;
+}
+
+function growMemoryToFit(memory, byteLength) {
+  const pageSize = INDEX_FORMAT.OPFS_PAGE_SIZE;
+  const neededPages = Math.ceil(byteLength / pageSize);
+  const currentPages = Math.floor(memory.buffer.byteLength / pageSize);
+
+  if (neededPages <= currentPages) {
+    return;
+  }
+
+  memory.grow(neededPages - currentPages);
+}
+
+function ensureIndexReaderCacheMemory(memory, slotCount) {
+  const slots = Math.max(1, Math.floor(Number(slotCount)));
+
+  growMemoryToFit(
+    memory,
+    INDEX_FORMAT.MEM_INDEX_CACHE_BASE + slots * INDEX_FORMAT.OPFS_PAGE_SIZE,
+  );
+}
+
+function readCoveredRange(index) {
+  const valid =
+    globalValue(index?.index_reader_covered_range_valid?.() ?? 0) !== 0;
+
+  return {
+    valid,
+    start: valid
+      ? globalValue(index.index_reader_covered_range_start?.() ?? 0)
+      : 0,
+    end: valid
+      ? globalValue(index.index_reader_covered_range_end?.() ?? 0)
+      : 0,
   };
+}
 
-  if (typeof WorkerCtor !== "function") {
-    status.state = "unavailable";
-    status.error = "module workers are unavailable";
-    notifyWorkerStatus(status, options, null);
+async function defaultCompileWasm(url) {
+  return WebAssembly.compileStreaming(fetch(url));
+}
 
+async function defaultInstantiateWasm(module, imports) {
+  const instance = await WebAssembly.instantiate(module, imports);
+
+  return instance.exports;
+}
+
+function writeHostString(memory, ptr, value, label) {
+  const encoded = new TextEncoder().encode(value);
+  const bytes = new Uint8Array(memory.buffer);
+  const end = ptr + encoded.byteLength;
+
+  if (end > bytes.byteLength) {
+    throw new Error(`${label} does not fit in memory at ${ptr}`);
+  }
+
+  bytes.set(encoded, ptr);
+  return encoded.byteLength;
+}
+
+function requireIndexReaderExport(exports, name) {
+  if (typeof exports?.[name] !== "function") {
+    throw new Error(`index reader module missing required export ${name}`);
+  }
+}
+
+function assertIndexReaderCappedQueryMetadataAbi(exports) {
+  requireIndexReaderExport(exports, "index_query_range_capped");
+  requireIndexReaderExport(exports, "index_query_range_matched_rows");
+  requireIndexReaderExport(exports, "index_query_range_written_rows");
+}
+
+export function createMainThreadIndexReaderController(memory, host, options = {}) {
+  async function defaultInstantiateIndexWasm(...args) {
+    const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
+
+    return instantiateWasmModuleForThread(...args);
+  }
+
+  const instantiate =
+    options.instantiateWasmModuleForThread ?? defaultInstantiateIndexWasm;
+  const readerState = {
+    catalogFull: false,
+    catalogPageCount: null,
+    error: null,
+    exports: null,
+    indexId: null,
+    indexName: null,
+    openPromise: null,
+    rebuildSliceCatalog: null,
+    state: READER_STATUS.IDLE,
+  };
+  let operationQueue = Promise.resolve();
+  let queuedOpenName = null;
+  let queuedOpenPromise = null;
+
+  function runExclusive(operation) {
+    const nextOperation = operationQueue.then(operation, operation);
+
+    operationQueue = nextOperation.catch(() => {});
+    return nextOperation;
+  }
+
+  function queueOpen(indexName) {
+    if (queuedOpenPromise !== null && queuedOpenName === indexName) {
+      return queuedOpenPromise;
+    }
+
+    queuedOpenName = indexName;
+    queuedOpenPromise = runExclusive(() => open(indexName)).finally(() => {
+      queuedOpenName = null;
+      queuedOpenPromise = null;
+    });
+    return queuedOpenPromise;
+  }
+
+  function cloneReaderStatus() {
     return {
-      start() {
-        notifyWorkerStatus(status, options, null);
-        return false;
-      },
-      status() {
-        return cloneWorkerStatus(status);
-      },
-      terminate() {},
-      worker: null,
+      catalogFull: readerState.catalogFull,
+      error: readerState.error,
+      indexId: readerState.indexId,
+      indexName: readerState.indexName,
+      state: readerState.state,
     };
   }
 
-  let worker;
-  try {
-    worker = new WorkerCtor(options.workerUrl ?? WORKER_URL, { type: "module" });
-  } catch (error) {
-    status.state = "error";
-    status.error = error instanceof Error ? error.message : String(error);
-    notifyWorkerStatus(status, options, null);
+  function failSliceCatalogOverflow(indexId, pageCount) {
+    const message =
+      `${RUNTIME_ERRORS.SLICE_CATALOG_FULL_PREFIX}${indexId}` +
+      `${RUNTIME_ERRORS.SLICE_CATALOG_FULL_PAGE_SEPARATOR}${pageCount}`;
 
-    return {
-      start() {
-        notifyWorkerStatus(status, options, null);
-        return false;
+    readerState.catalogFull = true;
+    readerState.error = message;
+    readerState.state = READER_STATUS.ERROR;
+    throw new Error(message);
+  }
+
+  async function loadIndexExports() {
+    if (readerState.exports !== null) {
+      return readerState.exports;
+    }
+
+    const loaded = await instantiate(
+      RUNTIME_MODULES.INDEX,
+      MAIN_THREAD,
+      { env: { memory }, host: wasmHostImports(host) },
+      {
+        baseUrl: options.baseUrl ?? RUNTIME_MODULES.DEFAULT_BASE_URL,
+        compile: options.compile,
+        instantiate: options.instantiate,
       },
-      status() {
-        return cloneWorkerStatus(status);
-      },
-      terminate() {},
-      worker: null,
-    };
+    );
+    assertIndexReaderCappedQueryMetadataAbi(loaded.exports);
+    readerState.exports = loaded.exports;
+    return readerState.exports;
+  }
+
+  async function loadSliceCatalogRebuild() {
+    if (readerState.rebuildSliceCatalog !== null) {
+      return readerState.rebuildSliceCatalog;
+    }
+    if (typeof host[HOST_IMPORT_NAME.OPFS_INDEX_SIZE] !== "function") {
+      return null;
+    }
+
+    readerState.rebuildSliceCatalog = await import("./index-reader-catalog.mjs");
+    return readerState.rebuildSliceCatalog;
+  }
+
+  async function refreshSliceCatalog(index, indexId, { force = false } = {}) {
+    if (readerState.rebuildSliceCatalog === null) {
+      return false;
+    }
+
+    const pageCount =
+      readerState.rebuildSliceCatalog.mainThreadSliceCatalogPageCount(
+        host,
+        indexId,
+      );
+    const previousPageCount = readerState.catalogPageCount;
+    const shouldProbe =
+      readerState.rebuildSliceCatalog.shouldProbeMainThreadSliceCatalog(host);
+    if (
+      shouldProbe &&
+      (
+        force ||
+        (
+          previousPageCount !== null &&
+          pageCount <= previousPageCount
+        )
+      )
+    ) {
+      const resetCatalog =
+        force || previousPageCount === null || pageCount < previousPageCount;
+      const startPage = resetCatalog ? 0 : previousPageCount;
+      if (resetCatalog && previousPageCount !== null) {
+        index.index_reader_init(indexId);
+      }
+      const probed =
+        await readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
+          memory,
+          host,
+          index,
+          indexId,
+          {
+            pageCount,
+            maxProbePages:
+              options.staleCatalogProbePages ?? DEFAULT_STALE_CATALOG_PROBE_PAGES,
+            probeUntilMissing: true,
+            reset: resetCatalog,
+            startPage,
+          },
+        );
+      readerState.catalogPageCount = probed.pageCount;
+      if (probed.catalogFull === true) {
+        failSliceCatalogOverflow(indexId, probed.pageCount);
+      }
+      if (probed.rebuilt) {
+        index.index_reader_init(indexId);
+      }
+      readerState.catalogFull = false;
+      return probed.rebuilt;
+    }
+    if (!force && previousPageCount === pageCount) {
+      return false;
+    }
+    if (pageCount <= 0) {
+      readerState.catalogPageCount = pageCount;
+      return false;
+    }
+
+    const resetCatalog =
+      force || previousPageCount === null || pageCount < previousPageCount;
+    const startPage = resetCatalog ? 0 : previousPageCount;
+    if (resetCatalog && previousPageCount !== null) {
+      index.index_reader_init(indexId);
+    }
+    const rebuilt =
+      await readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
+        memory,
+        host,
+        index,
+        indexId,
+        {
+          pageCount,
+          reset: resetCatalog,
+          startPage,
+        },
+      );
+    readerState.catalogPageCount = rebuilt.pageCount;
+    if (rebuilt.catalogFull === true) {
+      failSliceCatalogOverflow(indexId, rebuilt.pageCount);
+    }
+    if (rebuilt.rebuilt) {
+      index.index_reader_init(indexId);
+    }
+
+    readerState.catalogFull = false;
+    return rebuilt.rebuilt;
+  }
+
+  async function open(indexName) {
+    if (typeof indexName !== "string" || indexName.length === 0) {
+      return false;
+    }
+    if (
+      readerState.state === READER_STATUS.READY &&
+      readerState.indexName === indexName
+    ) {
+      if (readerState.openPromise !== null) {
+        return readerState.openPromise;
+      }
+
+      readerState.openPromise = (async () => {
+        try {
+          await refreshSliceCatalog(readerState.exports, readerState.indexId, {
+            force: readCoveredRange(readerState.exports).valid === false,
+          });
+          return true;
+        } catch (error) {
+          readerState.error = errorMessage(error);
+          readerState.state = READER_STATUS.ERROR;
+          throw error;
+        } finally {
+          readerState.openPromise = null;
+        }
+      })();
+
+      return readerState.openPromise;
+    }
+    if (
+      readerState.state === READER_STATUS.OPENING &&
+      readerState.indexName === indexName &&
+      readerState.openPromise !== null
+    ) {
+      return readerState.openPromise;
+    }
+
+    readerState.error = null;
+    readerState.catalogFull = false;
+    readerState.indexName = indexName;
+    readerState.state = READER_STATUS.OPENING;
+    readerState.openPromise = (async () => {
+      try {
+        const index = await loadIndexExports();
+        const namePtr = options.readerNamePtr ?? DEFAULT_READER_NAME_PTR;
+        const nameLen = writeHostString(
+          memory,
+          namePtr,
+          indexName,
+          RUNTIME_ERRORS.MAIN_THREAD_INDEX_NAME_LABEL,
+        );
+        const indexId = await host[HOST_IMPORT_NAME.OPFS_INDEX_OPEN](
+          namePtr,
+          nameLen,
+        );
+
+        const readerCacheSlots =
+          options.readerCacheSlots ?? DEFAULT_READER_CACHE_SLOTS;
+
+        ensureIndexReaderCacheMemory(memory, readerCacheSlots);
+        index.index_reader_configure_cache?.(readerCacheSlots);
+        index.index_reader_init(indexId);
+        await loadSliceCatalogRebuild();
+        await refreshSliceCatalog(index, indexId, { force: true });
+        readerState.indexId = indexId;
+        readerState.state = READER_STATUS.READY;
+        return true;
+      } catch (error) {
+        readerState.error = errorMessage(error);
+        readerState.state = READER_STATUS.ERROR;
+        throw error;
+      } finally {
+        readerState.openPromise = null;
+      }
+    })();
+
+    return readerState.openPromise;
+  }
+
+  return {
+    coveredRange() {
+      if (readerState.exports === null) {
+        return { valid: false, start: 0, end: 0 };
+      }
+      return readCoveredRange(readerState.exports);
+    },
+    exports() {
+      return readerState.exports;
+    },
+    async preload() {
+      await loadIndexExports();
+      await loadSliceCatalogRebuild();
+      return true;
+    },
+    async open(indexName) {
+      return queueOpen(indexName);
+    },
+    async queryRange(
+      trackId,
+      tsMin,
+      tsMax,
+      outPtr,
+      maxRows = options.queryRowCap ?? DEFAULT_READER_QUERY_ROW_CAP,
+    ) {
+      if (
+        readerState.state !== READER_STATUS.READY ||
+        readerState.exports === null
+      ) {
+        throw new Error(RUNTIME_ERRORS.MAIN_THREAD_INDEX_READER_NOT_READY);
+      }
+
+      return runExclusive(async () => {
+        const rowCap = normalizedRowCap(maxRows, DEFAULT_READER_QUERY_ROW_CAP);
+        const queryRange = promisingWasmExport(
+          readerState.exports.index_query_range,
+          readerState.exports,
+        );
+        const count = await queryRange(
+          trackId,
+          tsMin,
+          tsMax,
+          outPtr,
+          rowCap,
+        );
+
+        return {
+          capped:
+            globalValue(readerState.exports.index_query_range_capped()) !== 0,
+          count,
+          matchedRows: Number(
+            globalValue(readerState.exports.index_query_range_matched_rows()),
+          ),
+          writtenRows: Number(
+            globalValue(readerState.exports.index_query_range_written_rows()),
+          ),
+        };
+      });
+    },
+    status() {
+      return cloneReaderStatus();
+    },
+    trackCount() {
+      return readerState.exports === null
+        ? 0
+        : Number(globalValue(readerState.exports.index_track_count?.() ?? 0));
+    },
+  };
+}
+
+export function createIngestWorkerController(options = {}) {
+  const WorkerCtor = options.Worker ?? globalThis.Worker;
+  const indexReader = options.indexReader ?? null;
+  const status = {
+    coveredRange: null,
+    error: null,
+    ingest: null,
+    progress: null,
+    result: null,
+    state: WORKER_STATUS.IDLE,
+  };
+
+  let worker = null;
+  let activeIngestId = null;
+  let nextIngestId = 1;
+  let preloadPromise = null;
+  let preloadResolve = null;
+  let preloadReject = null;
+
+  function isActiveIngestMessage(message) {
+    return Number.isInteger(message?.ingestId) && message.ingestId === activeIngestId;
   }
 
   function handleWorkerMessage(event) {
     const message = event?.data ?? event;
 
+    if (message?.type === INGEST_WORKER_MESSAGE.PRELOADED) {
+      preloadResolve?.(true);
+      preloadResolve = null;
+      preloadReject = null;
+      return;
+    }
+    if (
+      message?.type === INGEST_WORKER_MESSAGE.ERROR &&
+      !Number.isInteger(message?.ingestId) &&
+      preloadReject !== null
+    ) {
+      preloadReject(new Error(message.message ?? RUNTIME_ERRORS.WORKER_INGEST_FAILED));
+      preloadResolve = null;
+      preloadReject = null;
+      return;
+    }
+
+    if (!isActiveIngestMessage(message)) {
+      return;
+    }
+
     if (message?.type === INGEST_WORKER_MESSAGE.PROGRESS) {
       status.progress = message;
-      status.state = "running";
+      status.state = WORKER_STATUS.RUNNING;
     } else if (message?.type === INGEST_WORKER_MESSAGE.COVERED_RANGE) {
       status.coveredRange = message;
-      status.state = "running";
+      status.state = WORKER_STATUS.RUNNING;
+      if (typeof status.ingest?.indexName === "string") {
+        indexReader?.open(status.ingest.indexName)?.catch((error) => {
+          status.error = errorMessage(error);
+          status.state = WORKER_STATUS.ERROR;
+          notifyWorkerStatus(status, options, null);
+        });
+      }
     } else if (message?.type === INGEST_WORKER_MESSAGE.COMPLETE) {
       status.result = message;
-      status.state = "complete";
+      status.state = WORKER_STATUS.COMPLETE;
     } else if (message?.type === INGEST_WORKER_MESSAGE.ERROR) {
-      status.error = message.message ?? "worker ingest failed";
-      status.state = "error";
+      status.error = message.message ?? RUNTIME_ERRORS.WORKER_INGEST_FAILED;
+      status.state = WORKER_STATUS.ERROR;
     } else {
       return;
     }
@@ -119,47 +592,140 @@ export function createIngestWorkerController(options = {}) {
     notifyWorkerStatus(status, options, message);
   }
 
-  function handleWorkerError(event) {
-    status.state = "error";
-    status.error = event?.message ?? "ingest worker failed";
+  function handleWorkerError(event, eventWorker = event?.target) {
+    if (eventWorker !== undefined && eventWorker !== worker) {
+      return;
+    }
+
+    status.state = WORKER_STATUS.ERROR;
+    status.error = event?.message ?? RUNTIME_ERRORS.INGEST_WORKER_FAILED;
+    preloadReject?.(new Error(status.error));
+    preloadResolve = null;
+    preloadReject = null;
     notifyWorkerStatus(status, options, event);
   }
 
-  if (typeof worker.addEventListener === "function") {
-    worker.addEventListener("message", handleWorkerMessage);
-    worker.addEventListener("error", handleWorkerError);
-    worker.addEventListener("messageerror", handleWorkerError);
-  } else {
-    worker.onmessage = handleWorkerMessage;
-    worker.onerror = handleWorkerError;
+  function cancelActiveWorker() {
+    worker?.terminate?.();
+    worker = null;
+  }
+
+  function ensureWorker() {
+    if (worker !== null) {
+      return worker;
+    }
+    if (typeof WorkerCtor !== "function") {
+      status.state = WORKER_STATUS.UNAVAILABLE;
+      status.error = RUNTIME_ERRORS.MODULE_WORKERS_UNAVAILABLE;
+      notifyWorkerStatus(status, options, null);
+      return null;
+    }
+
+    try {
+      worker = new WorkerCtor(options.workerUrl ?? RUNTIME_URLS.WORKER_URL, {
+        type: WORKER_CONTRACT.MODULE_TYPE,
+      });
+    } catch (error) {
+      status.state = WORKER_STATUS.ERROR;
+      status.error = errorMessage(error);
+      notifyWorkerStatus(status, options, null);
+      return null;
+    }
+
+    const installedWorker = worker;
+    if (typeof worker.addEventListener === "function") {
+      worker.addEventListener(
+        WORKER_CONTRACT.EVENT_MESSAGE,
+        handleWorkerMessage,
+      );
+      worker.addEventListener(WORKER_CONTRACT.EVENT_ERROR, (event) =>
+        handleWorkerError(event, installedWorker),
+      );
+      worker.addEventListener(WORKER_CONTRACT.EVENT_MESSAGE_ERROR, (event) =>
+        handleWorkerError(event, installedWorker),
+      );
+    } else {
+      worker.onmessage = handleWorkerMessage;
+      worker.onerror = (event) => handleWorkerError(event, installedWorker);
+    }
+
+    return worker;
   }
 
   return {
     start(data = {}) {
-      status.state = "running";
+      if (status.state === WORKER_STATUS.RUNNING) {
+        cancelActiveWorker();
+      }
+
+      const activeWorker = ensureWorker();
+      if (activeWorker === null) {
+        return false;
+      }
+
+      const ingestId = nextIngestId;
+      nextIngestId += 1;
+      activeIngestId = ingestId;
+      status.state = WORKER_STATUS.RUNNING;
       status.error = null;
+      status.coveredRange = null;
+      status.ingest = { ...data, ingestId };
+      status.progress = null;
       status.result = null;
       notifyWorkerStatus(status, options, null);
-      worker.postMessage({
+      activeWorker.postMessage({
         ...data,
+        ingestId,
         type: INGEST_WORKER_MESSAGE.START,
       });
       return true;
     },
+    preload() {
+      if (preloadPromise !== null) {
+        return preloadPromise;
+      }
+
+      const activeWorker = ensureWorker();
+      if (activeWorker === null) {
+        preloadPromise = Promise.resolve(false);
+        return preloadPromise;
+      }
+
+      preloadPromise = new Promise((resolve, reject) => {
+        preloadResolve = resolve;
+        preloadReject = reject;
+      });
+      activeWorker.postMessage({
+        type: INGEST_WORKER_MESSAGE.PRELOAD,
+      });
+      return preloadPromise;
+    },
     status() {
       return cloneWorkerStatus(status);
     },
-    terminate() {
-      worker.terminate?.();
-      status.state = "terminated";
+    indexReader,
+    fail(error) {
+      status.error = errorMessage(error);
+      status.state = WORKER_STATUS.ERROR;
       notifyWorkerStatus(status, options, null);
     },
-    worker,
+    terminate() {
+      cancelActiveWorker();
+      activeIngestId = null;
+      status.state = WORKER_STATUS.TERMINATED;
+      notifyWorkerStatus(status, options, null);
+    },
+    get worker() {
+      return worker;
+    },
   };
 }
 
 function supportsJSPI() {
-  return typeof WebAssembly.Suspending === "function";
+  return (
+    typeof WebAssembly.Suspending === "function" &&
+    typeof WebAssembly.promising === "function"
+  );
 }
 
 function showError(message) {
@@ -172,10 +738,10 @@ function showError(message) {
   error.style.display = "grid";
   error.style.placeItems = "center";
   error.style.padding = "2rem";
-  error.style.color = "#1f1b16";
+  error.style.color = APP_SHELL_COLORS.ERROR_TEXT;
   error.style.font = "1rem/1.4 system-ui, sans-serif";
   error.style.textAlign = "center";
-  error.style.background = "#fbf8f4";
+  error.style.background = APP_SHELL_COLORS.APP_SHELL_BACKGROUND;
   error.textContent = message;
 
   if (canvas !== null) {
@@ -189,22 +755,321 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function readHostString(memory, ptr, len) {
+  return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
+}
+
+function sourceNameForId(memory, host, sourceId, options) {
+  const nameLen = host[HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN]?.(sourceId);
+
+  if (!Number.isInteger(nameLen) || nameLen <= 0) {
+    throw new Error(
+      `${RUNTIME_ERRORS.OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_PREFIX}` +
+        `${sourceId}${RUNTIME_ERRORS.OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_SUFFIX}`,
+    );
+  }
+
+  const namePtr = options.ingestNamePtr ?? DEFAULT_INGEST_NAME_PTR;
+  const maxNameBytes = options.ingestNameMaxBytes ?? DEFAULT_INGEST_NAME_MAX_BYTES;
+
+  if (nameLen > maxNameBytes) {
+    throw new Error(
+      `${RUNTIME_ERRORS.OPFS_SOURCE_NAME_TOO_LONG_PREFIX}${nameLen}` +
+        RUNTIME_ERRORS.OPFS_SOURCE_NAME_TOO_LONG_SUFFIX,
+    );
+  }
+
+  const written = host[HOST_IMPORT_NAME.OPFS_SOURCE_NAME]?.(
+    sourceId,
+    namePtr,
+    nameLen,
+  );
+  if (written !== nameLen) {
+    throw new Error(
+      `${RUNTIME_ERRORS.OPFS_SOURCE_DID_NOT_REPORT_VALID_NAME_PREFIX}` +
+        `${sourceId}${RUNTIME_ERRORS.OPFS_SOURCE_NAME_READ_FAILED_SUFFIX}`,
+    );
+  }
+
+  return readHostString(memory, namePtr, nameLen);
+}
+
+function indexNameForSource(sourceName) {
+  const leaf = sourceName
+    .split(FILE_SELECTION.PATH_SEPARATOR)
+    .filter((part) => part.length > 0)
+    .at(-1);
+  const safeLeaf = (leaf ?? FILE_SELECTION.DEFAULT_TRACE_NAME).replace(
+    new RegExp(FILE_SELECTION.UNSAFE_LEAF_PATTERN, "g"),
+    FILE_SELECTION.UNSAFE_LEAF_REPLACEMENT,
+  );
+
+  return (
+    `${FILE_SELECTION.INDEX_PREFIX}${safeLeaf}` +
+    FILE_SELECTION.INDEX_SUFFIX
+  );
+}
+
+function sourceNameForSelectedFile(selection) {
+  const rawName =
+    typeof selection?.file?.name === "string" && selection.file.name.length > 0
+      ? selection.file.name
+      : FILE_SELECTION.DEFAULT_TRACE_NAME;
+
+  return `${FILE_SELECTION.SOURCE_PREFIX}${rawName}`;
+}
+
+async function startIngestForSelectedFile(selection, context) {
+  const fileHandle = selection?.handle ?? selection?.fileHandle;
+
+  if (!Number.isInteger(fileHandle) || fileHandle < 0) {
+    return false;
+  }
+
+  if (
+    selection?.file !== null &&
+    typeof selection?.file === "object" &&
+    typeof selection.file.size === "number"
+  ) {
+    const sourceName = sourceNameForSelectedFile(selection);
+
+    return context.ingestWorker.start({
+      indexName: indexNameForSource(sourceName),
+      sourceFile: selection.file,
+      sourceFileHandle: fileHandle,
+      sourceName,
+      sourceSize: selection.file.size,
+    });
+  }
+
+  const sourceId = await context.host[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](
+    fileHandle,
+  );
+  const sourceName = sourceNameForId(
+    context.memory,
+    context.host,
+    sourceId,
+    context.options,
+  );
+  const sourceSize =
+    typeof selection.file?.size === "number" ? selection.file.size : undefined;
+
+  return context.ingestWorker.start({
+    indexName: indexNameForSource(sourceName),
+    sourceName,
+    sourceSize,
+  });
+}
+
+function installFileSelectionIngest(memory, host, ingestWorker, options) {
+  if (
+    options.ingestFromFileSelection === false ||
+    typeof host.setFileSelectedCallback !== "function" ||
+    typeof host[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE] !== "function"
+  ) {
+    return;
+  }
+
+  host.setFileSelectedCallback((selection) => {
+    startIngestForSelectedFile(selection, {
+      host,
+      ingestWorker,
+      memory,
+      options,
+    }).catch((error) => ingestWorker.fail?.(error));
+  });
+}
+
+function installFilePickerGesture(host, ingestWorker, options) {
+  if (
+    options.openInitialFilePicker === false ||
+    options.ingestFromFileSelection === false ||
+    typeof host[HOST_IMPORT_NAME.FILE_PICKER_OPEN] !== "function"
+  ) {
+    return;
+  }
+
+  const document = options.document ?? globalThis.document;
+  const trigger =
+    options.filePickerTrigger ??
+    document?.getElementById?.("tracy") ??
+    document?.body;
+
+  if (typeof trigger?.addEventListener !== "function") {
+    return;
+  }
+
+  let pending = false;
+  const openFromGesture = () => {
+    if (pending) {
+      return;
+    }
+
+    pending = true;
+    try {
+      Promise.resolve(host[HOST_IMPORT_NAME.FILE_PICKER_OPEN](0, 0))
+        .then((handle) => {
+          if (handle !== -1) {
+            trigger.removeEventListener?.("click", openFromGesture);
+          }
+        })
+        .catch((error) => ingestWorker?.fail?.(error))
+        .finally(() => {
+          pending = false;
+        });
+    } catch (error) {
+      pending = false;
+      ingestWorker?.fail?.(error);
+    }
+  };
+
+  trigger.addEventListener("click", openFromGesture);
+}
+
+function shouldLoadProgressiveTraceRenderer(ingestWorker) {
+  const workerStatus = ingestWorker?.status?.();
+  const workerCoveredRange = workerStatus?.coveredRange;
+  const reader = ingestWorker?.indexReader;
+  const readerStatus = reader?.status?.();
+
+  return (
+    readerStatus?.state === READER_STATUS.READY &&
+    workerCoveredRange != null
+  );
+}
+
+function isQueryableCoveredRange(range) {
+  const start = Number(range?.start);
+  const end = Number(range?.end);
+
+  return (
+    range?.valid === true &&
+    Number.isFinite(start) &&
+    Number.isFinite(end) &&
+    end > start
+  );
+}
+
+function shouldDrawProgressiveTraceRenderer(ingestWorker) {
+  const workerStatus = ingestWorker?.status?.();
+  const workerCoveredRange = workerStatus?.coveredRange;
+  const reader = ingestWorker?.indexReader;
+  const readerStatus = reader?.status?.();
+
+  if (
+    readerStatus?.state !== READER_STATUS.READY ||
+    !isQueryableCoveredRange(workerCoveredRange) ||
+    typeof reader?.coveredRange !== "function"
+  ) {
+    return false;
+  }
+
+  const readerCoveredRange = reader.coveredRange();
+
+  return (
+    isQueryableCoveredRange(readerCoveredRange) &&
+    Math.min(
+      Number(workerCoveredRange.end),
+      Number(readerCoveredRange.end),
+    ) > Math.max(
+      Number(workerCoveredRange.start),
+      Number(readerCoveredRange.start),
+    )
+  );
+}
+
+function drawProgressiveTraceRenderer(renderer, options, ts) {
+  try {
+    const drawn = renderer?.draw?.(ts);
+    drawn?.catch?.((error) => {
+      options.ingestWorker?.fail?.(error);
+      reportAppLoadError(error);
+    });
+  } catch (error) {
+    options.ingestWorker?.fail?.(error);
+    reportAppLoadError(error);
+  }
+}
+
 async function loadApp(memory, host, options = {}) {
+  markPerformance(PERFORMANCE_MARKS.coreStart, options);
+
   if (!supportsJSPI()) {
     showError(
-      "tracy needs a browser with WebAssembly JavaScript Promise Integration (JSPI) enabled.",
+      RUNTIME_ERRORS.JSPI_UNAVAILABLE,
     );
     return;
   }
 
-  const imports = { env: { memory }, host };
-  const instantiate = options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
+  const imports = { env: { memory }, host: wasmHostImports(host) };
+  let progressiveTraceRenderer =
+    options.progressiveTraceRenderer === false
+      ? null
+      : (options.progressiveTraceRenderer ?? null);
+  let progressiveTraceRendererModule = null;
+  let progressiveTraceRendererPromise = null;
+  let progressiveTraceRendererCreatePromise = null;
+  let firstFrameResolve = () => {};
+  let firstFrameSeen = options.firstFramePromise !== undefined;
+  const firstFramePromise =
+    options.firstFramePromise ??
+    new Promise((resolve) => {
+      firstFrameResolve = resolve;
+      requestAnimationFrame(() => {
+        firstFrameSeen = true;
+        firstFrameResolve();
+      });
+    });
+
+  function loadProgressiveTraceRendererModule() {
+    if (options.progressiveTraceRenderer === false) {
+      return Promise.resolve(null);
+    }
+    if (progressiveTraceRendererModule !== null) {
+      return Promise.resolve(progressiveTraceRendererModule);
+    }
+    if (progressiveTraceRendererPromise !== null) {
+      return progressiveTraceRendererPromise;
+    }
+
+    progressiveTraceRendererPromise = (
+      options.importProgressiveTraceRenderer?.() ??
+      preloadDefaultProgressiveTraceRendererModule()
+    ).then((module) => {
+      progressiveTraceRendererModule = module;
+      return module;
+    });
+
+    return progressiveTraceRendererPromise;
+  }
+
+  async function defaultInstantiateMainWasm(id, thread, baseImports, {
+    baseUrl = RUNTIME_MODULES.DEFAULT_BASE_URL,
+    compile = defaultCompileWasm,
+    instantiate = defaultInstantiateWasm,
+  } = {}) {
+    const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
+
+    return instantiateWasmModuleForThread(id, thread, baseImports, {
+      baseUrl,
+      compile,
+      instantiate,
+    });
+  }
+
+  const instantiate =
+    options.instantiateWasmModuleForThread ?? defaultInstantiateMainWasm;
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateStart, options);
-  const { exports } = await instantiate("app", MAIN_THREAD, imports, {
-    baseUrl: options.baseUrl ?? "wasm/",
-    compile: options.compile,
-    instantiate: options.instantiate,
-  });
+  const { exports } = await instantiate(
+    RUNTIME_MODULES.APP,
+    MAIN_THREAD,
+    imports,
+    {
+      baseUrl: options.baseUrl ?? RUNTIME_MODULES.DEFAULT_BASE_URL,
+      compile: options.compile,
+      instantiate: options.instantiate,
+    },
+  );
   markPerformance(PERFORMANCE_MARKS.wasmInstantiateEnd, options);
   measurePerformance(
     PERFORMANCE_MEASURES.wasmInstantiate,
@@ -223,36 +1088,117 @@ async function loadApp(memory, host, options = {}) {
     PERFORMANCE_MARKS.tracyMainEnd,
     options,
   );
-  markPerformance(PERFORMANCE_MARKS.appReady, options);
-  measurePerformance(
-    PERFORMANCE_MEASURES.appLoad,
-    PERFORMANCE_MARKS.bootstrapStart,
-    PERFORMANCE_MARKS.appReady,
-    options,
-  );
+  markPerformance(PERFORMANCE_MARKS.coreReady, options);
+
+  const deferredRendererReadyPromise =
+    progressiveTraceRenderer === null
+      ? loadProgressiveTraceRendererModule()
+      : Promise.resolve(null);
+  const appReadyPromise = Promise.all([
+    firstFramePromise,
+    deferredRendererReadyPromise,
+  ]).then(() => {
+    markPerformance(PERFORMANCE_MARKS.appReady, options);
+    globalThis.dispatchEvent?.(new Event(PERFORMANCE_MARKS.appReady));
+    measurePerformance(
+      PERFORMANCE_MEASURES.appLoad,
+      PERFORMANCE_MARKS.bootstrapStart,
+      PERFORMANCE_MARKS.appReady,
+      options,
+    );
+  });
+
+  appReadyPromise.catch(reportAppLoadError);
+
+  const afterAppReadyFrame = () =>
+    new Promise((resolve) => requestAnimationFrame(resolve));
+  const filePickerGestureReadyPromise = appReadyPromise.then(afterAppReadyFrame);
+  const filePickerInstalledPromise = filePickerGestureReadyPromise.then(() => {
+    installFilePickerGesture(host, options.ingestWorker, options);
+  });
+  const ingestDependenciesReadyPromise =
+    options.preloadIngestDependencies === false
+      ? Promise.resolve(null)
+      : filePickerInstalledPromise.then(() =>
+          Promise.all([
+            options.ingestWorker?.indexReader?.preload?.(),
+            options.ingestWorker?.preload?.(),
+          ]),
+        );
+
+  filePickerInstalledPromise.then(() => {
+    if (options.ingest !== undefined) {
+      ingestDependenciesReadyPromise.then(() => {
+        options.ingestWorker?.start(
+          options.ingest === true ? {} : options.ingest,
+        );
+      }).catch(reportAppLoadError);
+    }
+  }).catch(reportAppLoadError);
+  ingestDependenciesReadyPromise.catch(reportAppLoadError);
 
   const loop = (ts) => {
     tracy_tick(ts);
+    if (!firstFrameSeen) {
+      firstFrameSeen = true;
+      firstFrameResolve();
+    }
+    if (progressiveTraceRenderer !== null) {
+      drawProgressiveTraceRenderer(progressiveTraceRenderer, options, ts);
+    } else if (
+      options.progressiveTraceRenderer !== false &&
+      progressiveTraceRendererCreatePromise === null &&
+      shouldLoadProgressiveTraceRenderer(options.ingestWorker)
+    ) {
+      progressiveTraceRendererCreatePromise = loadProgressiveTraceRendererModule().then((module) => {
+        progressiveTraceRenderer = module.createProgressiveTraceRenderer(
+          memory,
+          options.ingestWorker,
+          {
+            ...options.progressiveTraceRendererOptions,
+            document: options.document,
+            renderPlannerExports: exports,
+          },
+        );
+        if (shouldDrawProgressiveTraceRenderer(options.ingestWorker)) {
+          drawProgressiveTraceRenderer(progressiveTraceRenderer, options);
+        }
+        return progressiveTraceRenderer;
+      }).catch((error) => {
+        options.ingestWorker?.fail?.(error);
+        reportAppLoadError(error);
+      });
+    }
     requestAnimationFrame(loop);
   };
 
   requestAnimationFrame(loop);
 
-  if (options.ingest !== undefined) {
-    options.ingestWorker?.start(
-      options.ingest === true ? {} : options.ingest,
-    );
-  }
 }
 
 export function runApp(memory, host, options = {}) {
+  const indexReader =
+    options.indexReader === false
+      ? null
+      : options.indexReader ??
+        createMainThreadIndexReaderController(memory, host, {
+          ...options.indexReaderOptions,
+          baseUrl: options.baseUrl,
+          compile: options.compile,
+          instantiate: options.instantiate,
+          instantiateWasmModuleForThread: options.instantiateWasmModuleForThread,
+        });
   const ingestWorker =
-    options.ingestWorker ?? createIngestWorkerController(options.worker ?? {});
+    options.ingestWorker ??
+    createIngestWorkerController({
+      ...(options.worker ?? {}),
+      indexReader,
+    });
+
+  installFileSelectionIngest(memory, host, ingestWorker, options);
 
   loadApp(memory, host, { ...options, ingestWorker }).catch((error) => {
-    console.error(error);
-    globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
-    showError("tracy failed to load the WebAssembly viewer.");
+    reportAppLoadError(error);
   });
 
   return ingestWorker;

@@ -13,6 +13,7 @@
   (import "parser_state" "PARSER_STACK_CAP" (global $PARSER_STACK_CAP i32))
   (import "parser_state" "PARSER_PARTIAL_TOKEN_CAP" (global $PARSER_PARTIAL_TOKEN_CAP i32))
   (import "parser_state" "PARSER_TOKEN_RECORD_BYTES" (global $PARSER_TOKEN_RECORD_BYTES i32))
+  (import "parser_state" "PARSER_DEFAULT_OUTPUT_RECORD_CAP" (global $PARSER_DEFAULT_OUTPUT_RECORD_CAP i32))
   (import "parser_state" "PARSER_STATE_STATUS_OFFSET" (global $PARSER_STATE_STATUS_OFFSET i32))
   (import "parser_state" "PARSER_STATE_YIELD_BUDGET_MS_OFFSET" (global $PARSER_STATE_YIELD_BUDGET_MS_OFFSET i32))
   (import "parser_state" "PARSER_STATE_SOURCE_ID_OFFSET" (global $PARSER_STATE_SOURCE_ID_OFFSET i32))
@@ -91,7 +92,6 @@
   (global $FLAG_EXPECT_KEY i32 (i32.const 1))
   (global $FLAG_AFTER_KEY i32 (i32.const 2))
   (global $DEFAULT_CHUNK_BYTES i32 (i32.const 4096))
-  (global $DEFAULT_PARSE_OUTPUT_RECORDS i32 (i32.const 4096))
   (global $EXTRACTOR_EVENT_BYTES i32 (i32.const 40))
   (global $EXTRACTOR_EVENT_PTR i32 (i32.const 32768))
   (global $EXTRACTOR_FIELD_NONE i32 (i32.const 0))
@@ -1188,6 +1188,11 @@
     global.set $extractor_discard_event
   )
 
+  (func (export "extractor_reset_cursor")
+    i32.const 0
+    global.set $extractor_cursor
+  )
+
   (func (export "extractor_next") (result i32)
     (local $count i32)
     (local $kind i32)
@@ -1210,11 +1215,19 @@
         local.get $kind
         global.get $PARSER_JSON_TOKEN_EOF
         i32.eq
+        if
+          i32.const -1
+          return
+        end
+
         local.get $kind
         global.get $PARSER_JSON_TOKEN_NEED_MORE
         i32.eq
-        i32.or
         if
+          global.get $extractor_cursor
+          i32.const 1
+          i32.add
+          global.set $extractor_cursor
           i32.const -1
           return
         end
@@ -3492,7 +3505,7 @@
     local.tee $chunk_len
     drop
 
-    global.get $DEFAULT_PARSE_OUTPUT_RECORDS
+    global.get $PARSER_DEFAULT_OUTPUT_RECORD_CAP
     call $ensure_ring_memory
 
     call $token_output_base
@@ -3505,7 +3518,7 @@
     i32.ne
     if
       local.get $state
-      global.get $DEFAULT_PARSE_OUTPUT_RECORDS
+      global.get $PARSER_DEFAULT_OUTPUT_RECORD_CAP
       call $reset_token_output
     end
 
