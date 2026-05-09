@@ -283,6 +283,7 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
   for (const exportName of [
     "interactive_ingest_expect_renderer_preload",
     "interactive_ingest_expect_worker_start",
+    "interactive_ingest_expect_independent_memories",
     "interactive_ingest_expect_first_events",
     "interactive_ingest_expect_covered_partial_unknown",
     "interactive_ingest_expect_zoom_clamped",
@@ -332,6 +333,21 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     source,
     /contentBytes:\s*FIXTURE_SIZE_BYTES/,
     "interactive ingest fixture should expose the advertised large-trace byte size",
+  );
+  assert.doesNotMatch(
+    source,
+    /memoryFactory:\s*\(\)\s*=>\s*memory/,
+    "interactive ingest gate must not force the worker onto the main-thread Wasm memory",
+  );
+  assert.doesNotMatch(
+    source,
+    /assert\.equal\(workerMemory,\s*memory\)/,
+    "interactive ingest gate must not assert that worker and main share one Wasm memory",
+  );
+  assert.match(
+    source,
+    /interactive_ingest_expect_independent_memories/,
+    "interactive ingest gate should fail closed when main and worker Wasm memories are shared",
   );
 }
 

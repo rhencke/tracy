@@ -80,6 +80,10 @@ function flag(value) {
   return value ? 1 : 0;
 }
 
+function makeInteractiveIngestMemory() {
+  return new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
+}
+
 function installBrowserHarness(canvas) {
   const frames = [];
 
@@ -215,12 +219,12 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
   let nextWorkerIndexId = 222;
   const createdWorkerHosts = [];
 
-  function putName(ptr, len) {
-    return decodeString(memory, ptr, len);
+  function putNameFrom(targetMemory, ptr, len) {
+    return decodeString(targetMemory, ptr, len);
   }
 
-  function copyToMemory(src, destPtr, len) {
-    const dest = new Uint8Array(memory.buffer, destPtr, len);
+  function copyToMemory(targetMemory, src, destPtr, len) {
+    const dest = new Uint8Array(targetMemory.buffer, destPtr, len);
 
     dest.fill(0);
     dest.set(src.subarray(0, len));
@@ -289,7 +293,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
           "interactive ingest gate should not open multiple file pickers at once",
         );
         calls.push({
-          accept: putName(acceptPtr, acceptLen),
+          accept: putNameFrom(memory, acceptPtr, acceptLen),
           host: "main",
           op: "file-picker-open",
         });
@@ -322,7 +326,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         return encoded.byteLength;
       },
       [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
-        const name = putName(namePtr, nameLen);
+        const name = putNameFrom(memory, namePtr, nameLen);
         const sourceId = nextMainSourceId;
 
         nextMainSourceId += 1;
@@ -342,11 +346,11 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         const start = Number(offset);
         const chunk = source.file.readAt(start, len);
 
-        copyToMemory(chunk, destPtr, len);
+        copyToMemory(memory, chunk, destPtr, len);
         return chunk.byteLength;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
-        const name = putName(namePtr, nameLen);
+        const name = putNameFrom(memory, namePtr, nameLen);
         const indexId = nextMainIndexId;
 
         nextMainIndexId += 1;
@@ -356,7 +360,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         return indexId;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
-        const name = putName(namePtr, nameLen);
+        const name = putNameFrom(memory, namePtr, nameLen);
         const indexId = nextMainIndexId;
 
         durableIndex(name);
@@ -384,7 +388,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
           offset: start,
           op: "index-read",
         });
-        copyToMemory(chunk, destPtr, len);
+        copyToMemory(memory, chunk, destPtr, len);
         return chunk.byteLength;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_WRITE](indexId, offset, srcPtr, len) {
@@ -423,7 +427,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
     return mainHost;
   }
 
-  function makeWorkerHost(files) {
+  function makeWorkerHost(files, workerMemory) {
     const sources = new Map();
     const indexes = new Map();
 
@@ -467,7 +471,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         return encoded.byteLength;
       },
       [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
-        const name = putName(namePtr, nameLen);
+        const name = putNameFrom(workerMemory, namePtr, nameLen);
 
         calls.push({ host: "worker", name, op: "source-open" });
         throw new Error(`worker OPFS source ${name} should come from selected File`);
@@ -480,11 +484,11 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         const start = Number(offset);
         const chunk = source.file.readAt(start, len);
 
-        copyToMemory(chunk, destPtr, len);
+        copyToMemory(workerMemory, chunk, destPtr, len);
         return chunk.byteLength;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
-        const name = putName(namePtr, nameLen);
+        const name = putNameFrom(workerMemory, namePtr, nameLen);
         const indexId = nextWorkerIndexId;
 
         nextWorkerIndexId += 1;
@@ -494,7 +498,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         return indexId;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
-        const name = putName(namePtr, nameLen);
+        const name = putNameFrom(workerMemory, namePtr, nameLen);
         const indexId = nextWorkerIndexId;
 
         durableIndex(name);
@@ -515,7 +519,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         const chunk = bytes.subarray(start, Math.min(bytes.byteLength, start + len));
 
         calls.push({ host: "worker", id: indexId, len, name: index.name, offset: start, op: "index-read" });
-        copyToMemory(chunk, destPtr, len);
+        copyToMemory(workerMemory, chunk, destPtr, len);
         return chunk.byteLength;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_WRITE](indexId, offset, srcPtr, len) {
@@ -531,7 +535,7 @@ function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
         if (end > durable.bytes.byteLength) {
           nextBytes.set(durable.bytes);
         }
-        nextBytes.set(new Uint8Array(memory.buffer, srcPtr, len), start);
+        nextBytes.set(new Uint8Array(workerMemory.buffer, srcPtr, len), start);
         durable.bytes = nextBytes;
         calls.push({ host: "worker", id: indexId, len, name: index.name, offset: start, op: "index-write" });
         return len;
@@ -696,7 +700,7 @@ async function checkInteractiveIngestGate() {
   const wasmModules = await import(moduleUrl("host/wasm-modules.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
+  const memory = makeInteractiveIngestMemory();
   const canvasHarness = makeCanvasHarness();
   const { frames } = installBrowserHarness(canvasHarness.canvas);
   const sourceName = "sources/throttled-100mb.json";
@@ -706,6 +710,8 @@ async function checkInteractiveIngestGate() {
   const wasmModuleWarmups = [];
   const workerWasmCompileCache = new Map();
   let rendererInstance = null;
+  let workerHostSawIndependentMemory = false;
+  let workerImportSawIndependentMemory = false;
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
   const opfsHarness = makeProductionTopologyOpfsHarness(memory, abi.HOST_IMPORT_NAME);
   const host = {
@@ -745,6 +751,12 @@ async function checkInteractiveIngestGate() {
     constructor(url, options) {
       super(url, options);
       this.didYieldForFrame = false;
+      this.memory = makeInteractiveIngestMemory();
+      assert.notEqual(
+        this.memory,
+        memory,
+        "interactive ingest gate must use independent main and worker Wasm memories",
+      );
       this.handler = ingestRuntime.createIngestWorkerMessageHandler({
         afterParserYield: async () => {
           if (this.didYieldForFrame) {
@@ -762,10 +774,16 @@ async function checkInteractiveIngestGate() {
           return workerWasmCompileCache.get(id);
         },
         hostFactory: (workerMemory, files) => {
-          assert.equal(workerMemory, memory);
+          assert.equal(workerMemory, this.memory);
+          assert.notEqual(
+            workerMemory,
+            memory,
+            "worker host must not receive the main-thread Wasm memory",
+          );
+          workerHostSawIndependentMemory = true;
           assert.ok(files instanceof Map, "worker host should receive selected files");
           assert.equal(files.size, 1, "worker host should receive the selected File by handle");
-          const workerHost = opfsHarness.makeWorkerHost(files);
+          const workerHost = opfsHarness.makeWorkerHost(files, workerMemory);
 
           assert.notEqual(
             workerHost,
@@ -776,7 +794,13 @@ async function checkInteractiveIngestGate() {
         },
         instantiateWasmModuleForThread: async (id, thread, imports) => {
           wasmModuleCalls.push({ id, thread });
-          assert.equal(imports.env.memory, memory);
+          assert.equal(imports.env.memory, this.memory);
+          assert.notEqual(
+            imports.env.memory,
+            memory,
+            "worker Wasm modules must not import the main-thread Wasm memory",
+          );
+          workerImportSawIndependentMemory = true;
           return wasmModules.instantiateWasmModuleForThread(
             id,
             thread,
@@ -789,7 +813,7 @@ async function checkInteractiveIngestGate() {
             },
           );
         },
-        memoryFactory: () => memory,
+        memoryFactory: () => this.memory,
         now: nextWorkerTime,
         postMessage: (message) => {
           if (message?.type === ingestRuntime.INGEST_WORKER_MESSAGE.COMPLETE) {
@@ -1039,6 +1063,15 @@ async function checkInteractiveIngestGate() {
             call.name === "indexes/throttled-100mb.json.idx",
         ),
       ),
+    ],
+  );
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_independent_memories",
+    [
+      flag(controller.worker.memory !== memory),
+      flag(workerHostSawIndependentMemory),
+      flag(workerImportSawIndependentMemory),
     ],
   );
   assert.ok(

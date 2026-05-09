@@ -61,6 +61,33 @@
     end
   )
 
+  (func $interactive_ingest_expect_independent_memories
+    (export "interactive_ingest_expect_independent_memories")
+    (param $worker_memory_independent i32)
+    (param $worker_host_memory_independent i32)
+    (param $worker_import_memory_independent i32)
+    (result i32)
+    local.get $worker_memory_independent
+    i32.eqz
+    if (result i32)
+      i32.const 28
+    else
+      local.get $worker_host_memory_independent
+      i32.eqz
+      if (result i32)
+        i32.const 29
+      else
+        local.get $worker_import_memory_independent
+        i32.eqz
+        if (result i32)
+          i32.const 30
+        else
+          call $ok
+        end
+      end
+    end
+  )
+
   (func $interactive_ingest_expect_first_events
     (export "interactive_ingest_expect_first_events")
     (param $first_draw_frame_at i32)
@@ -307,12 +334,20 @@
     i32.const 2
     call $assert_eq_i32
 
+    i32.const 1
+    i32.const 1
+    i32.const 1
+    call $interactive_ingest_expect_independent_memories
+    i32.const 0
+    i32.const 3
+    call $assert_eq_i32
+
     i32.const 16
     i32.const 16
     i32.const 1
     call $interactive_ingest_expect_first_events
     i32.const 0
-    i32.const 3
+    i32.const 4
     call $assert_eq_i32
 
     i32.const 1000
@@ -322,7 +357,7 @@
     i32.const 1
     call $interactive_ingest_expect_covered_partial_unknown
     i32.const 0
-    i32.const 4
+    i32.const 5
     call $assert_eq_i32
 
     i32.const 1
@@ -332,7 +367,7 @@
     f64.const 1000
     call $interactive_ingest_expect_zoom_clamped
     i32.const 0
-    i32.const 5
+    i32.const 6
     call $assert_eq_i32
 
     f64.const 1000
@@ -340,7 +375,7 @@
     f64.const 1000
     call $interactive_ingest_expect_pan_clamped
     i32.const 0
-    i32.const 6
+    i32.const 7
     call $assert_eq_i32
 
     i32.const 20971520
@@ -349,7 +384,7 @@
     i32.const 1
     call $interactive_ingest_expect_progress_eta
     i32.const 0
-    i32.const 7
+    i32.const 8
     call $assert_eq_i32
 
     i32.const 10485760
@@ -360,14 +395,14 @@
     i32.const 104857600
     call $interactive_ingest_expect_large_trace_checkpoint
     i32.const 0
-    i32.const 8
+    i32.const 9
     call $assert_eq_i32
 
     f64.const 16
     f64.const 16.67
     call $interactive_ingest_expect_frame_interval
     i32.const 0
-    i32.const 9
+    i32.const 10
     call $assert_eq_i32
   )
 
@@ -384,7 +419,7 @@
     i32.const 1
     call $interactive_ingest_expect_first_events
     i32.const 7
-    i32.const 10
+    i32.const 11
     call $assert_eq_i32
 
     i32.const 96
@@ -392,7 +427,15 @@
     i32.const 1
     call $interactive_ingest_expect_first_events
     i32.const 9
-    i32.const 101
+    i32.const 12
+    call $assert_eq_i32
+
+    i32.const 1
+    i32.const 0
+    i32.const 1
+    call $interactive_ingest_expect_independent_memories
+    i32.const 29
+    i32.const 13
     call $assert_eq_i32
 
     i32.const 1000
@@ -402,14 +445,14 @@
     i32.const 1
     call $interactive_ingest_expect_covered_partial_unknown
     i32.const 10
-    i32.const 11
+    i32.const 14
     call $assert_eq_i32
 
     f64.const 16.68
     f64.const 16.67
     call $interactive_ingest_expect_frame_interval
     i32.const 22
-    i32.const 12
+    i32.const 15
     call $assert_eq_i32
 
     i32.const 10485760
@@ -420,7 +463,7 @@
     i32.const 104857600
     call $interactive_ingest_expect_large_trace_checkpoint
     i32.const 27
-    i32.const 13
+    i32.const 16
     call $assert_eq_i32
   )
 )
