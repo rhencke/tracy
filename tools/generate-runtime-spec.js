@@ -107,6 +107,18 @@ function renderNumberConstants(groupName, entries) {
   return lines.join("\n");
 }
 
+function renderStringArrayConstant(groupName, values, { local }) {
+  const keyword = local ? "const" : "export const";
+  const lines = [`${keyword} ${groupName} = Object.freeze([`];
+
+  for (const value of values) {
+    lines.push(`  ${JSON.stringify(value)},`);
+  }
+
+  lines.push("]);");
+  return lines.join("\n");
+}
+
 function renderStringConstants(groupName, entries) {
   const lines = [`export const ${groupName} = Object.freeze({`];
 
@@ -185,13 +197,101 @@ function renderTraceRendererContractBlock({ local }) {
     "",
     renderNumbers("TRACE_RENDERER_CANVAS_OPS", spec.traceRenderer.canvasOps),
     "",
+    renderNumbers("TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT", spec.traceRenderer.incompleteRangeLayout),
+    "",
     renderNumbers("TRACE_RENDERER_DRAW_DEFAULTS", spec.traceRenderer.draw),
     "",
     renderNumbers("TRACE_RENDERER_INTERACTION_DEFAULTS", spec.traceRenderer.interaction),
     "",
     renderNumbers("TRACE_RENDERER_COLOR_DEFAULTS", spec.traceRenderer.color),
     "",
+    renderStringArrayConstant(
+      "TRACE_RENDERER_REQUIRED_EXPORTS",
+      spec.traceRenderer.requiredExports,
+      { local },
+    ),
+    "",
     indexLayout,
+  ].join("\n");
+}
+
+function watGlobal(name, value) {
+  return `  (global $${name} i32 (i32.const ${value}))`;
+}
+
+function traceRendererWatGlobals() {
+  const canvasOps = spec.traceRenderer.canvasOps;
+  const drawDefaults = spec.traceRenderer.draw;
+  const incompleteRangeLayout = spec.traceRenderer.incompleteRangeLayout;
+  const layoutDefaults = spec.traceRenderer.layout;
+  const indexQueryResultBytes =
+    layoutSpec.INDEX_QUERY_RESULT_FIELD_BYTES * layoutSpec.INDEX_QUERY_RESULT_FIELDS.length;
+  const globals = [
+    ["TRACE_RENDER_DEFAULT_MIN_VIEWPORT_SPAN", layoutDefaults.DEFAULT_MIN_VIEWPORT_SPAN.value],
+    [
+      "TRACE_RENDER_DEFAULT_UNKNOWN_AFFORDANCE_WIDTH",
+      layoutDefaults.DEFAULT_UNKNOWN_AFFORDANCE_WIDTH.value,
+    ],
+    ["TRACE_RENDER_DEFAULT_UNKNOWN_STRIPE_SPACING", layoutDefaults.DEFAULT_UNKNOWN_STRIPE_SPACING.value],
+    [
+      "TRACE_RENDER_DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING",
+      layoutDefaults.DEFAULT_INCOMPLETE_QUERY_STRIPE_SPACING.value,
+    ],
+    ["TRACE_RENDER_DEFAULT_LANE_HEIGHT", drawDefaults.DEFAULT_LANE_HEIGHT.value],
+    ["TRACE_RENDER_DEFAULT_LANE_GAP", drawDefaults.DEFAULT_LANE_GAP.value],
+    ["TRACE_RENDER_DEFAULT_TRACE_TOP", drawDefaults.DEFAULT_TRACE_TOP.value],
+    ["TRACE_RENDER_DEFAULT_BAND_PADDING", drawDefaults.DEFAULT_BAND_PADDING.value],
+    [
+      "TRACE_RENDER_DEFAULT_PARTIAL_HATCH_SPACING",
+      drawDefaults.DEFAULT_PARTIAL_HATCH_SPACING.value,
+    ],
+    ["TRACE_RENDER_OP_END", canvasOps.END_TAG.value],
+    ["TRACE_RENDER_OP_QUERY_RANGE", canvasOps.QUERY_RANGE_TAG.value],
+    ["TRACE_RENDER_OP_INCOMPLETE_QUERY_RANGE", canvasOps.INCOMPLETE_QUERY_RANGE_TAG.value],
+    ["TRACE_RENDER_COMMAND_FILL_RECT", canvasOps.DRAW_FILL_RECT_TAG.value],
+    ["TRACE_RENDER_COMMAND_STROKE_LINE", canvasOps.DRAW_STROKE_LINE_TAG.value],
+    ["TRACE_RENDER_COMMAND_CLEAR_RECT", canvasOps.DRAW_CLEAR_RECT_TAG.value],
+    ["TRACE_RENDER_COMMAND_HATCH_RECT", canvasOps.DRAW_HATCH_RECT_TAG.value],
+    ["TRACE_RENDER_STYLE_ROLE", canvasOps.DRAW_STYLE_ROLE_KIND.value],
+    ["TRACE_RENDER_STYLE_RGB", canvasOps.DRAW_STYLE_RGB_KIND.value],
+    ["TRACE_RENDER_ROLE_BACKGROUND", canvasOps.DRAW_STYLE_ROLE_BACKGROUND.value],
+    ["TRACE_RENDER_ROLE_DEFAULT_SLICE", canvasOps.DRAW_STYLE_ROLE_DEFAULT_SLICE.value],
+    ["TRACE_RENDER_ROLE_PARTIAL_SLICE", canvasOps.DRAW_STYLE_ROLE_PARTIAL_SLICE.value],
+    ["TRACE_RENDER_ROLE_PARTIAL_HATCH", canvasOps.DRAW_STYLE_ROLE_PARTIAL_HATCH.value],
+    ["TRACE_RENDER_ROLE_UNKNOWN_FILL", canvasOps.DRAW_STYLE_ROLE_UNKNOWN_FILL.value],
+    ["TRACE_RENDER_ROLE_UNKNOWN_STRIPE", canvasOps.DRAW_STYLE_ROLE_UNKNOWN_STRIPE.value],
+    ["TRACE_RENDER_ROLE_INCOMPLETE_FILL", canvasOps.DRAW_STYLE_ROLE_INCOMPLETE_FILL.value],
+    ["TRACE_RENDER_ROLE_INCOMPLETE_STRIPE", canvasOps.DRAW_STYLE_ROLE_INCOMPLETE_STRIPE.value],
+    ["TRACE_RENDER_COMMAND_BYTES", canvasOps.DRAW_COMMAND_BYTES.value],
+    ["TRACE_RENDER_COMMAND_TAG_OFFSET", canvasOps.DRAW_COMMAND_TAG_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_STYLE_KIND_OFFSET", canvasOps.DRAW_COMMAND_STYLE_KIND_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_STYLE_VALUE_OFFSET", canvasOps.DRAW_COMMAND_STYLE_VALUE_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_X_OFFSET", canvasOps.DRAW_COMMAND_X_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_Y_OFFSET", canvasOps.DRAW_COMMAND_Y_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_WIDTH_OFFSET", canvasOps.DRAW_COMMAND_WIDTH_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_HEIGHT_OFFSET", canvasOps.DRAW_COMMAND_HEIGHT_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_X2_OFFSET", canvasOps.DRAW_COMMAND_X2_OFFSET.value],
+    ["TRACE_RENDER_COMMAND_Y2_OFFSET", canvasOps.DRAW_COMMAND_Y2_OFFSET.value],
+    ["INDEX_QUERY_RESULT_BYTES", indexQueryResultBytes],
+    ...layoutSpec.INDEX_QUERY_RESULT_FIELDS.map((field) => [
+      `INDEX_QUERY_RESULT_${field.property.toUpperCase()}_OFFSET`,
+      field.offset,
+    ]),
+    ["TRACE_RENDER_INCOMPLETE_RANGE_BYTES", incompleteRangeLayout.BYTES.value],
+    ["TRACE_RENDER_INCOMPLETE_RANGE_START_OFFSET", incompleteRangeLayout.START.value],
+    ["TRACE_RENDER_INCOMPLETE_RANGE_END_OFFSET", incompleteRangeLayout.END.value],
+    ["TRACE_RENDER_INCOMPLETE_RANGE_TRACK_ID_OFFSET", incompleteRangeLayout.TRACK_ID.value],
+  ];
+
+  return globals.map(([name, value]) => watGlobal(name, value)).join("\n");
+}
+
+function renderTraceRendererWatAbi() {
+  return [
+    ";; Generated from abi/runtime.json and abi/layout.json by tools/generate-runtime-spec.js.",
+    ";; Do not edit wat/trace-renderer-abi.wat.inc by hand.",
+    traceRendererWatGlobals(),
+    "",
   ].join("\n");
 }
 
@@ -334,6 +434,7 @@ assertTraceRendererInlinePalette();
 const ok = [
   writeIfChanged("host/startup-spec.mjs", renderStartupSpecModule()),
   writeIfChanged("host/trace-renderer-spec.mjs", renderTraceRendererSpecModule()),
+  writeIfChanged("wat/trace-renderer-abi.wat.inc", renderTraceRendererWatAbi()),
 ].every(Boolean);
 
 if (!ok) {

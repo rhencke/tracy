@@ -17,7 +17,10 @@ GENERATED_WAT_FILES := \
 	wat/parser_state.wat \
 	wat/std/mem.test.wat \
 	wat/std/mem.wat
+GENERATED_WAT_INCLUDES := \
+	wat/trace-renderer-abi.wat.inc
 GENERATOR_WAT_INPUTS := $(filter-out $(GENERATED_WAT_FILES),$(WAT_SOURCES))
+GENERATOR_WAT_INCLUDE_INPUTS := $(filter-out $(GENERATED_WAT_INCLUDES),$(WAT_INCLUDES))
 WASM_FILES := $(patsubst wat/%.wat,dist/wasm/%.wasm,$(WAT_SOURCES))
 PRODUCTION_WASM_FILES := $(filter-out %.test.wasm,$(WASM_FILES))
 WAT_COMPAT_FILES :=
@@ -64,7 +67,8 @@ GENERATED_FILES := \
 	host/startup-spec.mjs \
 	host/trace-renderer-spec.mjs \
 	host/wasm-modules.mjs \
-	$(GENERATED_WAT_FILES)
+	$(GENERATED_WAT_FILES) \
+	$(GENERATED_WAT_INCLUDES)
 
 ifneq ($(MODULE_DOC_GENERATOR),)
 GENERATED_FILES += docs/MODULES.md
@@ -101,7 +105,7 @@ GENERATED_INPUTS := \
 	tools/wat-parser.js \
 	$(MODULE_DOC_GENERATOR) \
 	$(GENERATOR_WAT_INPUTS) \
-	$(WAT_INCLUDES)
+	$(GENERATOR_WAT_INCLUDE_INPUTS)
 
 .PHONY: \
 	all \

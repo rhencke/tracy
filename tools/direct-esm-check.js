@@ -430,9 +430,11 @@ function assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRen
 
   for (const groupName of [
     "TRACE_RENDERER_CANVAS_OPS",
+    "TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT",
     "TRACE_RENDERER_DRAW_DEFAULTS",
     "TRACE_RENDERER_INTERACTION_DEFAULTS",
     "TRACE_RENDERER_COLOR_DEFAULTS",
+    "TRACE_RENDERER_REQUIRED_EXPORTS",
   ]) {
     assert.match(
       rendererSource,

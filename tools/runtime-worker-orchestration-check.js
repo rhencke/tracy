@@ -12,6 +12,12 @@ let INDEX_PAGE_HEADER_BUCKET_START_OFFSET;
 let INDEX_PAGE_HEADER_BUCKET_END_OFFSET;
 let INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET;
 let INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET;
+let INDEX_QUERY_RESULT_LAYOUT;
+let TRACE_RENDERER_CANVAS_OPS;
+let TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT;
+let TEST_TRACE_RENDER_COMMAND;
+let TEST_TRACE_RENDER_ROW_BYTES;
+let TEST_TRACE_RENDER_RANGE_BYTES;
 
 function moduleUrl(relativePath) {
   return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
@@ -29,6 +35,35 @@ async function loadGeneratedIndexFormatSpec() {
   INDEX_PAGE_HEADER_BUCKET_END_OFFSET = INDEX_PAGE_HEADER_OFFSETS.BUCKET_END;
   INDEX_PAGE_HEADER_RECORD_COUNT_OFFSET = INDEX_PAGE_HEADER_OFFSETS.RECORD_COUNT;
   INDEX_PAGE_HEADER_DECODE_HINTS_OFFSET = INDEX_PAGE_HEADER_OFFSETS.DECODE_HINTS;
+}
+
+async function loadGeneratedTraceRendererSpec() {
+  ({
+    INDEX_QUERY_RESULT_LAYOUT,
+    TRACE_RENDERER_CANVAS_OPS,
+    TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT,
+  } = await import(moduleUrl("host/trace-renderer-spec.mjs")));
+  TEST_TRACE_RENDER_COMMAND = Object.freeze({
+    BYTES: TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_BYTES,
+    CLEAR_RECT: TRACE_RENDERER_CANVAS_OPS.DRAW_CLEAR_RECT_TAG,
+    END: TRACE_RENDERER_CANVAS_OPS.END_TAG,
+    FILL_RECT: TRACE_RENDERER_CANVAS_OPS.DRAW_FILL_RECT_TAG,
+    HATCH_RECT: TRACE_RENDERER_CANVAS_OPS.DRAW_HATCH_RECT_TAG,
+    INCOMPLETE_FILL: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_INCOMPLETE_FILL,
+    INCOMPLETE_QUERY_RANGE: TRACE_RENDERER_CANVAS_OPS.INCOMPLETE_QUERY_RANGE_TAG,
+    INCOMPLETE_STRIPE: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_INCOMPLETE_STRIPE,
+    PARTIAL_HATCH: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_PARTIAL_HATCH,
+    PARTIAL_SLICE: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_PARTIAL_SLICE,
+    QUERY_RANGE: TRACE_RENDERER_CANVAS_OPS.QUERY_RANGE_TAG,
+    RGB_STYLE: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_RGB_KIND,
+    ROLE_BACKGROUND: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_BACKGROUND,
+    ROLE_DEFAULT_SLICE: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_DEFAULT_SLICE,
+    ROLE_STYLE: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_KIND,
+    UNKNOWN_FILL: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_UNKNOWN_FILL,
+    UNKNOWN_STRIPE: TRACE_RENDERER_CANVAS_OPS.DRAW_STYLE_ROLE_UNKNOWN_STRIPE,
+  });
+  TEST_TRACE_RENDER_ROW_BYTES = INDEX_QUERY_RESULT_LAYOUT.BYTES;
+  TEST_TRACE_RENDER_RANGE_BYTES = TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT.BYTES;
 }
 
 function installBrowserStubs() {
@@ -98,14 +133,371 @@ async function flushMicrotasks(count = 8) {
   }
 }
 
+function readTraceRenderRow(memory, ptr, index) {
+  const view = new DataView(memory.buffer);
+  const base = ptr + index * TEST_TRACE_RENDER_ROW_BYTES;
+
+  return {
+    color: view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.COLOR, true),
+    depth: view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.DEPTH, true),
+    dur: view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.DUR, true),
+    partial: view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.PARTIAL, true) !== 0,
+    start: view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.START, true),
+  };
+}
+
 function makeTraceRenderPlannerExports(observed = {}) {
   const state = {
+    commandOverflow: 0,
     ops: [],
     viewportEnd: 0,
     viewportStart: 0,
   };
 
+  function sliceX(sliceStart, viewportStart, viewportSpan, canvasWidth) {
+    if (viewportSpan === 0) {
+      return 0;
+    }
+
+    const x = Math.trunc(((sliceStart - viewportStart) * canvasWidth) / viewportSpan);
+
+    if (x < 0) {
+      return 0;
+    }
+    if (x > canvasWidth) {
+      return canvasWidth;
+    }
+    return x;
+  }
+
+  function rangeX(rangeStart, rangeEnd, viewportStart, viewportSpan, canvasWidth) {
+    const viewportEnd = viewportStart + viewportSpan;
+    const clippedStart = Math.min(viewportEnd, Math.max(viewportStart, rangeStart));
+
+    return sliceX(clippedStart, viewportStart, viewportSpan, canvasWidth);
+  }
+
+  function rangeWidth(rangeStart, rangeEnd, viewportStart, viewportSpan, canvasWidth) {
+    const viewportEnd = viewportStart + viewportSpan;
+    const clippedStart = Math.max(viewportStart, rangeStart);
+    const clippedEnd = Math.min(viewportEnd, rangeEnd);
+
+    if (clippedEnd <= clippedStart) {
+      return 0;
+    }
+
+    const x = sliceX(clippedStart, viewportStart, viewportSpan, canvasWidth);
+    const endX = sliceX(clippedEnd, viewportStart, viewportSpan, canvasWidth);
+    const width = endX - x;
+
+    return width <= 0 ? 1 : width;
+  }
+
+  function emitCommand(view, commandPtr, commandCap, tag, styleKind, styleValue, x, y, width, height, x2, y2) {
+    if (state.commandCount >= commandCap) {
+      state.commandOverflow = 1;
+      return;
+    }
+
+    const base = commandPtr + state.commandCount * TEST_TRACE_RENDER_COMMAND.BYTES;
+
+    view.setUint32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_TAG_OFFSET, tag, true);
+    view.setUint32(
+      base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_STYLE_KIND_OFFSET,
+      styleKind,
+      true,
+    );
+    view.setUint32(
+      base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_STYLE_VALUE_OFFSET,
+      styleValue,
+      true,
+    );
+    view.setInt32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_X_OFFSET, x, true);
+    view.setInt32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_Y_OFFSET, y, true);
+    view.setInt32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_WIDTH_OFFSET, width, true);
+    view.setInt32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_HEIGHT_OFFSET, height, true);
+    view.setInt32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_X2_OFFSET, x2, true);
+    view.setInt32(base + TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_Y2_OFFSET, y2, true);
+    state.commandCount += 1;
+  }
+
+  function emitFillRect(view, commandPtr, commandCap, styleKind, styleValue, x, y, width, height) {
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    emitCommand(
+      view,
+      commandPtr,
+      commandCap,
+      TEST_TRACE_RENDER_COMMAND.FILL_RECT,
+      styleKind,
+      styleValue,
+      x,
+      y,
+      width,
+      height,
+      0,
+      0,
+    );
+  }
+
+  function emitHatches(view, commandPtr, commandCap, x, y, width, height, spacing, styleValue) {
+    emitCommand(
+      view,
+      commandPtr,
+      commandCap,
+      TEST_TRACE_RENDER_COMMAND.HATCH_RECT,
+      TEST_TRACE_RENDER_COMMAND.ROLE_STYLE,
+      styleValue,
+      x,
+      y,
+      width,
+      height,
+      Math.max(1, spacing),
+      0,
+    );
+  }
+
   return {
+    trace_render_append_query_rows(sourcePtr, sourceCount, destPtr, destCount, destCap) {
+      if (observed.memory === undefined) {
+        return 0;
+      }
+
+      const bytes = new Uint8Array(observed.memory.buffer);
+      let copied = 0;
+      while (copied < sourceCount && destCount + copied < destCap) {
+        const source = sourcePtr + copied * TEST_TRACE_RENDER_ROW_BYTES;
+        const dest = destPtr + (destCount + copied) * TEST_TRACE_RENDER_ROW_BYTES;
+
+        bytes.copyWithin(dest, source, source + TEST_TRACE_RENDER_ROW_BYTES);
+        copied += 1;
+      }
+      return copied;
+    },
+    trace_render_commands_begin(
+      commandPtr,
+      commandCap,
+      rowPtr,
+      rowCount,
+      incompletePtr,
+      incompleteCount,
+      viewportStart,
+      viewportEnd,
+      coveredEnd,
+      canvasWidth,
+      canvasHeight,
+      laneHeight,
+      laneGap,
+      top,
+      bandPadding,
+      ingestActive,
+      partialHatchSpacing,
+      unknownAffordanceWidth,
+      unknownStripeSpacing,
+      incompleteStripeSpacing,
+    ) {
+      observed.commandsBegin?.({
+        canvasHeight,
+        canvasWidth,
+        commandCap,
+        commandPtr,
+        coveredEnd,
+        incompleteCount,
+        incompletePtr,
+        rowCount,
+        rowPtr,
+        viewportEnd,
+        viewportStart,
+      });
+      state.commandOverflow = 0;
+      state.commandCount = 0;
+
+      if (observed.memory === undefined) {
+        return 0;
+      }
+
+      const view = new DataView(observed.memory.buffer);
+      const viewportSpan = Math.max(1, viewportEnd - viewportStart);
+      let maxDepth = 0;
+
+      for (let i = 0; i < rowCount; i += 1) {
+        maxDepth = Math.max(
+          maxDepth,
+          view.getUint32(
+            rowPtr + i * TEST_TRACE_RENDER_ROW_BYTES + INDEX_QUERY_RESULT_LAYOUT.DEPTH,
+            true,
+          ),
+        );
+      }
+
+      const bandHeight = Math.min(
+        canvasHeight,
+        top + (maxDepth + 1) * (laneHeight + laneGap) + bandPadding,
+      );
+
+      emitCommand(
+        view,
+        commandPtr,
+        commandCap,
+        TEST_TRACE_RENDER_COMMAND.CLEAR_RECT,
+        0,
+        0,
+        0,
+        0,
+        canvasWidth,
+        bandHeight,
+        0,
+        0,
+      );
+      emitFillRect(
+        view,
+        commandPtr,
+        commandCap,
+        TEST_TRACE_RENDER_COMMAND.ROLE_STYLE,
+        TEST_TRACE_RENDER_COMMAND.ROLE_BACKGROUND,
+        0,
+        0,
+        canvasWidth,
+        bandHeight,
+      );
+
+      for (let i = 0; i < rowCount; i += 1) {
+        const base = rowPtr + i * TEST_TRACE_RENDER_ROW_BYTES;
+        const rowStart = view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.START, true);
+        const rowDur = Math.max(1, view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.DUR, true));
+        const rowDepth = view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.DEPTH, true);
+        const rowColor = view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.COLOR, true);
+        const rowPartial = view.getUint32(base + INDEX_QUERY_RESULT_LAYOUT.PARTIAL, true) !== 0;
+        const sliceEnd = Math.min(viewportEnd, rowStart + rowDur);
+        const x = sliceX(rowStart, viewportStart, viewportSpan, canvasWidth);
+        const endX = sliceX(sliceEnd, viewportStart, viewportSpan, canvasWidth);
+        const width = Math.max(1, endX - x);
+        const y = top + rowDepth * (laneHeight + laneGap);
+
+        if (rowPartial && ingestActive !== 0) {
+          emitFillRect(
+            view,
+            commandPtr,
+            commandCap,
+            TEST_TRACE_RENDER_COMMAND.ROLE_STYLE,
+            TEST_TRACE_RENDER_COMMAND.PARTIAL_SLICE,
+            x,
+            y,
+            width,
+            laneHeight,
+          );
+          emitHatches(
+            view,
+            commandPtr,
+            commandCap,
+            x,
+            y,
+            width,
+            laneHeight,
+            partialHatchSpacing,
+            TEST_TRACE_RENDER_COMMAND.PARTIAL_HATCH,
+          );
+        } else if (rowColor === 0) {
+          emitFillRect(
+            view,
+            commandPtr,
+            commandCap,
+            TEST_TRACE_RENDER_COMMAND.ROLE_STYLE,
+            TEST_TRACE_RENDER_COMMAND.ROLE_DEFAULT_SLICE,
+            x,
+            y,
+            width,
+            laneHeight,
+          );
+        } else {
+          emitFillRect(
+            view,
+            commandPtr,
+            commandCap,
+            TEST_TRACE_RENDER_COMMAND.RGB_STYLE,
+            rowColor,
+            x,
+            y,
+            width,
+            laneHeight,
+          );
+        }
+      }
+
+      for (let i = 0; i < incompleteCount; i += 1) {
+        const base = incompletePtr + i * TEST_TRACE_RENDER_RANGE_BYTES;
+        const start = view.getUint32(base + TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT.START, true);
+        const end = view.getUint32(base + TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT.END, true);
+        const width = rangeWidth(start, end, viewportStart, viewportSpan, canvasWidth);
+
+        if (width <= 0) {
+          continue;
+        }
+
+        const x = rangeX(start, end, viewportStart, viewportSpan, canvasWidth);
+
+        emitFillRect(
+          view,
+          commandPtr,
+          commandCap,
+          TEST_TRACE_RENDER_COMMAND.ROLE_STYLE,
+          TEST_TRACE_RENDER_COMMAND.INCOMPLETE_FILL,
+          x,
+          0,
+          width,
+          bandHeight,
+        );
+        emitHatches(
+          view,
+          commandPtr,
+          commandCap,
+          x,
+          0,
+          width,
+          bandHeight,
+          incompleteStripeSpacing,
+          TEST_TRACE_RENDER_COMMAND.INCOMPLETE_STRIPE,
+        );
+      }
+
+      if (ingestActive !== 0 && coveredEnd <= viewportEnd) {
+        const width = Math.max(0, Math.min(canvasWidth, unknownAffordanceWidth));
+
+        if (width > 0) {
+          const x = Math.max(0, canvasWidth - width);
+
+          emitFillRect(
+            view,
+            commandPtr,
+            commandCap,
+            TEST_TRACE_RENDER_COMMAND.ROLE_STYLE,
+            TEST_TRACE_RENDER_COMMAND.UNKNOWN_FILL,
+            x,
+            0,
+            width,
+            bandHeight,
+          );
+          emitHatches(
+            view,
+            commandPtr,
+            commandCap,
+            x,
+            0,
+            width,
+            bandHeight,
+            unknownStripeSpacing,
+            TEST_TRACE_RENDER_COMMAND.UNKNOWN_STRIPE,
+          );
+        }
+      }
+
+      return state.commandCount;
+    },
+    trace_render_commands_overflow() {
+      return state.commandOverflow;
+    },
     trace_render_plan_begin(
       viewportStart,
       viewportEnd,
@@ -143,7 +535,7 @@ function makeTraceRenderPlannerExports(observed = {}) {
               ops.push({
                 end: viewportEnd,
                 start: Math.max(viewportStart, queryStart),
-                tag: 2,
+                tag: TEST_TRACE_RENDER_COMMAND.INCOMPLETE_QUERY_RANGE,
                 trackId,
               });
             }
@@ -155,7 +547,7 @@ function makeTraceRenderPlannerExports(observed = {}) {
               ops.push({
                 end: viewportEnd,
                 start: viewportStart,
-                tag: 2,
+                tag: TEST_TRACE_RENDER_COMMAND.INCOMPLETE_QUERY_RANGE,
                 trackId: skippedTrackId,
               });
             }
@@ -165,7 +557,7 @@ function makeTraceRenderPlannerExports(observed = {}) {
           ops.push({
             end: Math.min(viewportEnd, queryStart + tileSpan),
             start: queryStart,
-            tag: 1,
+            tag: TEST_TRACE_RENDER_COMMAND.QUERY_RANGE,
             trackId,
           });
           queryRangeCount += 1;
@@ -178,7 +570,7 @@ function makeTraceRenderPlannerExports(observed = {}) {
       const op = state.ops.shift();
 
       if (op === undefined) {
-        return 0;
+        return TEST_TRACE_RENDER_COMMAND.END;
       }
 
       state.currentOp = op;
@@ -201,6 +593,38 @@ function makeTraceRenderPlannerExports(observed = {}) {
       observed.queryTileSpan?.({ queryWindow, rangesPerTrack, viewportSpan });
       return Math.max(1, queryWindow, Math.ceil(viewportSpan / rangesPerTrack));
     },
+    trace_render_range_x(rangeStart, rangeEnd, viewportStart, viewportSpan, canvasWidth) {
+      observed.rangeX?.({
+        canvasWidth,
+        rangeEnd,
+        rangeStart,
+        viewportSpan,
+        viewportStart,
+      });
+      const viewportEnd = viewportStart + viewportSpan;
+      const start = Math.min(viewportEnd, Math.max(viewportStart, rangeStart));
+      return Math.max(0, ((start - viewportStart) / viewportSpan) * canvasWidth);
+    },
+    trace_render_range_width(rangeStart, rangeEnd, viewportStart, viewportSpan, canvasWidth) {
+      observed.rangeWidth?.({
+        canvasWidth,
+        rangeEnd,
+        rangeStart,
+        viewportSpan,
+        viewportStart,
+      });
+      const viewportEnd = viewportStart + viewportSpan;
+      const start = Math.max(viewportStart, rangeStart);
+      const end = Math.min(viewportEnd, rangeEnd);
+
+      if (end <= start) {
+        return 0;
+      }
+
+      const x = Math.max(0, ((start - viewportStart) / viewportSpan) * canvasWidth);
+      const endX = Math.min(canvasWidth, ((end - viewportStart) / viewportSpan) * canvasWidth);
+      return Math.max(1, endX - x);
+    },
     trace_render_slice_end_x(sliceEnd, viewportStart, viewportSpan, canvasWidth) {
       observed.sliceEndX?.({ canvasWidth, sliceEnd, viewportSpan, viewportStart });
       return Math.min(
@@ -215,6 +639,22 @@ function makeTraceRenderPlannerExports(observed = {}) {
     trace_render_slice_y(depth, top, laneHeight, laneGap) {
       observed.sliceY?.({ depth, laneGap, laneHeight, top });
       return top + depth * (laneHeight + laneGap);
+    },
+    trace_render_stripe_end(x, width, height) {
+      observed.stripeEnd?.({ height, width, x });
+      return x + width + height;
+    },
+    trace_render_stripe_start(x, height) {
+      observed.stripeStart?.({ height, x });
+      return x - height;
+    },
+    trace_render_unknown_width(canvasWidth, affordanceWidth) {
+      observed.unknownWidth?.({ affordanceWidth, canvasWidth });
+      return Math.max(0, Math.min(canvasWidth, affordanceWidth));
+    },
+    trace_render_unknown_x(canvasWidth, affordanceWidth) {
+      observed.unknownX?.({ affordanceWidth, canvasWidth });
+      return canvasWidth - Math.max(0, Math.min(canvasWidth, affordanceWidth));
     },
   };
 }
@@ -1626,11 +2066,10 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
     canvas,
     queryOutPtr: 2048,
     queryWindow: 100,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
-  const rows = renderer.draw(123);
-  assert.equal(rows.length, 2);
+  assert.equal(renderer.draw(123), 2);
   assert.deepEqual(
     queryCalls,
     [
@@ -1773,7 +2212,7 @@ async function checkProgressiveTraceRendererClipsLeftEdgeSlices() {
     },
   };
   const renderPlannerExports = {
-    ...makeTraceRenderPlannerExports(),
+    ...makeTraceRenderPlannerExports({ memory }),
     trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
       return ((sliceStart - viewportStart) / viewportSpan) * canvasWidth;
     },
@@ -1856,7 +2295,7 @@ async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
     canvas,
     queryOutPtr: 2048,
     queryWindow: 1000,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
   renderer.draw(1);
@@ -1878,13 +2317,11 @@ async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
       canvas,
       queryOutPtr: 2048,
       queryWindow: 1000,
-      renderPlannerExports: makeTraceRenderPlannerExports(),
+      renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
     },
   );
 
-  const rows = emptyRenderer.draw(2);
-
-  assert.equal(rows.length, 0);
+  assert.equal(emptyRenderer.draw(2), 0);
   assert.deepEqual(queryCalls, []);
   assert.equal(emptyRenderer.status().viewport, null);
 }
@@ -1893,7 +2330,6 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
   const memory = new WebAssembly.Memory({ initial: 1 });
   const queryCalls = [];
-  const decoded = [];
   const operations = [];
   const canvas = {
     height: 120,
@@ -1975,23 +2411,16 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   };
   const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
     canvas,
-    decodeQueryRows({ count, outPtr, trackId }) {
-      decoded.push({ count, outPtr, trackId });
-      return [{ dur: 8, depth: 0, start: 110, trackId }];
-    },
     queryOutPtr: 2048,
     queryRowCap: 1,
     queryWindow: 100,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
-  const rows = renderer.draw(123);
-
-  assert.equal(rows.length, 1);
+  assert.equal(renderer.draw(123), 1);
   assert.deepEqual(queryCalls, [
     { maxRows: 1, outPtr: 2048, trackId: 0, tsMax: 200, tsMin: 100 },
   ]);
-  assert.deepEqual(decoded, [{ count: 1, outPtr: 2048, trackId: 0 }]);
   assert.deepEqual(renderer.status().cappedQueries, [
     { matchedRows: 4096, trackId: 0, writtenRows: 1 },
   ]);
@@ -2067,20 +2496,20 @@ async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
   const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
     canvas,
     queryOutPtr: 2048,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderRowPtr: 4096,
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
-  const rows = renderer.draw(123);
+  assert.equal(renderer.draw(123), 3);
 
   assert.deepEqual(queryCalls, [
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 1000, tsMin: 0 },
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2000, tsMin: 1000 },
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2500, tsMin: 2000 },
   ]);
-  assert.equal(rows.length, 3);
-  assert.equal(
-    rows.some((row) => row.start === 2200),
-    true,
+  assert.deepEqual(
+    readTraceRenderRow(memory, 4096, 2),
+    { color: 0x2d74da, depth: 0, dur: 8, partial: false, start: 2200 },
     "later visible rows should still render when the viewport exceeds the default query window",
   );
 }
@@ -2139,10 +2568,11 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
     queryOutPtr: 2048,
     queryRangeBudget: 8,
     queryWindow: 1000,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderRowPtr: 4096,
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
-  const rows = renderer.draw(123);
+  assert.equal(renderer.draw(123), 8);
 
   assert.equal(queryCalls.length, 8);
   assert.deepEqual(queryCalls, [
@@ -2155,10 +2585,9 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
     { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 7500000, tsMin: 5000000 },
     { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 10000000, tsMin: 7500000 },
   ]);
-  assert.equal(rows.length, 8);
-  assert.equal(
-    rows.some((row) => row.start === 7500000 && row.trackId === 1),
-    true,
+  assert.deepEqual(
+    readTraceRenderRow(memory, 4096, 7),
+    { color: 0x2d74da, depth: 1, dur: 8, partial: false, start: 7500000 },
     "large viewports should still represent later visible data within the query budget",
   );
 }
@@ -2246,16 +2675,15 @@ async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhauste
     queryOutPtr: 2048,
     queryRangeBudget: 2,
     queryWindow: 100,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
-  const rows = renderer.draw(123);
+  assert.equal(renderer.draw(123), 2);
 
   assert.deepEqual(queryCalls, [
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 100, tsMin: 0 },
     { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 100, tsMin: 0 },
   ]);
-  assert.equal(rows.length, 2);
   assert.deepEqual(renderer.status().incompleteQueryRanges, [
     { end: 100, start: 0, trackId: 2 },
     { end: 100, start: 0, trackId: 3 },
@@ -2299,73 +2727,20 @@ async function checkProgressiveTraceRendererUsesWasmCanvasOpPlanner() {
     /renderer planner missing required Wasm exports/,
     "production renderer construction should fail closed without trace_render_* Wasm exports",
   );
-  const calls = [];
-  const planner = rendererModule.__test.createWasmCanvasOpPlanner({
-    trace_render_query_ranges_per_track(queryRangeBudget, trackCount) {
-      calls.push(["ranges", queryRangeBudget, trackCount]);
-      return 2;
-    },
-    trace_render_query_tile_span(viewportSpan, queryWindow, rangesPerTrack) {
-      calls.push(["tile", viewportSpan, queryWindow, rangesPerTrack]);
-      return 50;
-    },
-    trace_render_slice_end_x(sliceEnd, viewportStart, viewportSpan, canvasWidth) {
-      calls.push(["end-x", sliceEnd, viewportStart, viewportSpan, canvasWidth]);
-      return 80;
-    },
-    trace_render_slice_x(sliceStart, viewportStart, viewportSpan, canvasWidth) {
-      calls.push(["x", sliceStart, viewportStart, viewportSpan, canvasWidth]);
-      return 32;
-    },
-    trace_render_slice_y(depth, top, laneHeight, laneGap) {
-      calls.push(["y", depth, top, laneHeight, laneGap]);
-      return 24;
-    },
-  });
-
-  assert.deepEqual(
-    planner.queryOps({
-      queryRangeBudget: 3,
-      queryWindow: 1000,
-      trackCount: 2,
-      viewport: { end: 100, start: 0, valid: true },
-    }),
-    [
-      { end: 50, op: "query_range", start: 0, trackId: 0 },
-      { end: 100, op: "query_range", start: 50, trackId: 0 },
-      { end: 50, op: "query_range", start: 0, trackId: 1 },
-      { end: 100, op: "incomplete_query_range", start: 50, trackId: 1 },
-    ],
-  );
-  assert.deepEqual(
-    planner.rowCanvasOp({
-      height: 10,
-      laneGap: 3,
-      laneHeight: 10,
-      row: { depth: 1, dur: 20, start: 10 },
-      span: 100,
-      top: 18,
-      viewport: { end: 100, start: 0, valid: true },
-      width: 320,
-    }),
-    { height: 10, op: "slice_rect", width: 48, x: 32, y: 24 },
-  );
-  assert.deepEqual(calls, [
-    ["ranges", 3, 2],
-    ["tile", 100, 1000, 2],
-    ["x", 10, 0, 100, 320],
-    ["end-x", 30, 0, 100, 320],
-    ["y", 1, 18, 10, 3],
-  ]);
-
   const streamCalls = [];
   const streamOps = [
-    { end: 50, start: 0, tag: 1, trackId: 0 },
-    { end: 100, start: 50, tag: 2, trackId: 1 },
-    { tag: 0 },
+    { end: 50, start: 0, tag: TEST_TRACE_RENDER_COMMAND.QUERY_RANGE, trackId: 0 },
+    {
+      end: 100,
+      start: 50,
+      tag: TEST_TRACE_RENDER_COMMAND.INCOMPLETE_QUERY_RANGE,
+      trackId: 1,
+    },
+    { tag: TEST_TRACE_RENDER_COMMAND.END },
   ];
   let streamIndex = -1;
   const streamPlanner = rendererModule.__test.createWasmCanvasOpPlanner({
+    ...makeTraceRenderPlannerExports(),
     trace_render_plan_begin(viewportStart, viewportEnd, trackCount, queryRangeBudget, queryWindow) {
       streamCalls.push([
         "begin",
@@ -2407,9 +2782,9 @@ async function checkProgressiveTraceRendererUsesWasmCanvasOpPlanner() {
   );
   assert.deepEqual(streamCalls, [
     ["begin", 0, 100, 2, 3, 1000],
-    ["next", 1],
-    ["next", 2],
-    ["next", 0],
+    ["next", TEST_TRACE_RENDER_COMMAND.QUERY_RANGE],
+    ["next", TEST_TRACE_RENDER_COMMAND.INCOMPLETE_QUERY_RANGE],
+    ["next", TEST_TRACE_RENDER_COMMAND.END],
   ]);
 }
 
@@ -2503,7 +2878,7 @@ async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() 
     minViewportSpan: 10,
     queryOutPtr: 2048,
     queryWindow: 1000,
-    renderPlannerExports: makeTraceRenderPlannerExports(),
+    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
   });
 
   renderer.draw(1);
@@ -2656,6 +3031,11 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
     typeof rendererOptions?.renderPlannerExports?.trace_render_plan_begin,
     "function",
     "production runtime should pass app Wasm trace_render_* exports into the renderer",
+  );
+  assert.equal(
+    typeof rendererOptions?.renderPlannerExports?.trace_render_append_query_rows,
+    "function",
+    "production runtime should pass the Wasm render row append export into the renderer",
   );
 
   readerCoveredRange = { end: 120, start: 100, valid: true };
@@ -2852,6 +3232,7 @@ async function checkAppReadyFailsWhenDeferredRendererFails() {
 
 async function main() {
   await loadGeneratedIndexFormatSpec();
+  await loadGeneratedTraceRendererSpec();
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
   await checkRuntimeIgnoresStaleIngestWorkerMessages();

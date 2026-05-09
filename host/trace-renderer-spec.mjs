@@ -6,6 +6,12 @@ export const TRACE_RENDERER_QUERY_DEFAULTS = Object.freeze({
   DEFAULT_TRACE_QUERY_WINDOW: 1000,
   DEFAULT_TRACE_QUERY_ROW_CAP: 1024,
   DEFAULT_TRACE_QUERY_RANGE_BUDGET: 64,
+  DEFAULT_TRACE_RENDER_ROW_PTR: 65536,
+  DEFAULT_TRACE_RENDER_ROW_CAP: 4096,
+  DEFAULT_TRACE_RENDER_INCOMPLETE_RANGE_PTR: 196608,
+  DEFAULT_TRACE_RENDER_INCOMPLETE_RANGE_CAP: 4096,
+  DEFAULT_TRACE_RENDER_COMMAND_PTR: 262144,
+  DEFAULT_TRACE_RENDER_COMMAND_CAP: 8192,
 });
 
 export const TRACE_RENDERER_LAYOUT_DEFAULTS = Object.freeze({
@@ -19,7 +25,38 @@ export const TRACE_RENDERER_CANVAS_OPS = Object.freeze({
   END_TAG: 0,
   QUERY_RANGE_TAG: 1,
   INCOMPLETE_QUERY_RANGE_TAG: 2,
+  DRAW_FILL_RECT_TAG: 3,
+  DRAW_STROKE_LINE_TAG: 4,
+  DRAW_CLEAR_RECT_TAG: 5,
+  DRAW_HATCH_RECT_TAG: 6,
   TERMINATOR_OP_BUDGET: 1,
+  DRAW_COMMAND_BYTES: 36,
+  DRAW_COMMAND_TAG_OFFSET: 0,
+  DRAW_COMMAND_STYLE_KIND_OFFSET: 4,
+  DRAW_COMMAND_STYLE_VALUE_OFFSET: 8,
+  DRAW_COMMAND_X_OFFSET: 12,
+  DRAW_COMMAND_Y_OFFSET: 16,
+  DRAW_COMMAND_WIDTH_OFFSET: 20,
+  DRAW_COMMAND_HEIGHT_OFFSET: 24,
+  DRAW_COMMAND_X2_OFFSET: 28,
+  DRAW_COMMAND_Y2_OFFSET: 32,
+  DRAW_STYLE_ROLE_KIND: 1,
+  DRAW_STYLE_RGB_KIND: 2,
+  DRAW_STYLE_ROLE_BACKGROUND: 1,
+  DRAW_STYLE_ROLE_DEFAULT_SLICE: 2,
+  DRAW_STYLE_ROLE_PARTIAL_SLICE: 3,
+  DRAW_STYLE_ROLE_PARTIAL_HATCH: 4,
+  DRAW_STYLE_ROLE_UNKNOWN_FILL: 5,
+  DRAW_STYLE_ROLE_UNKNOWN_STRIPE: 6,
+  DRAW_STYLE_ROLE_INCOMPLETE_FILL: 7,
+  DRAW_STYLE_ROLE_INCOMPLETE_STRIPE: 8,
+});
+
+export const TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT = Object.freeze({
+  BYTES: 12,
+  START: 0,
+  END: 4,
+  TRACK_ID: 8,
 });
 
 export const TRACE_RENDERER_DRAW_DEFAULTS = Object.freeze({
@@ -43,6 +80,28 @@ export const TRACE_RENDERER_COLOR_DEFAULTS = Object.freeze({
   RGB_COLOR_MASK: 16777215,
   RGB_HEX_WIDTH: 6,
 });
+
+export const TRACE_RENDERER_REQUIRED_EXPORTS = Object.freeze([
+  "trace_render_append_query_rows",
+  "trace_render_commands_begin",
+  "trace_render_commands_overflow",
+  "trace_render_plan_begin",
+  "trace_render_plan_next",
+  "trace_render_plan_op_end",
+  "trace_render_plan_op_start",
+  "trace_render_plan_op_track_id",
+  "trace_render_query_ranges_per_track",
+  "trace_render_query_tile_span",
+  "trace_render_range_width",
+  "trace_render_range_x",
+  "trace_render_slice_end_x",
+  "trace_render_slice_x",
+  "trace_render_slice_y",
+  "trace_render_stripe_end",
+  "trace_render_stripe_start",
+  "trace_render_unknown_width",
+  "trace_render_unknown_x",
+]);
 
 export const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({
   BYTES: 28,

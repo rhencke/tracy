@@ -80,35 +80,89 @@
         "paths": [
           "appLoadBench.budgets.warmHttp.transferBytes",
           "appLoadBench.budgets.warmSw.transferBytes",
-          "traceRenderer.canvasOps.END_TAG"
+          "traceRenderer.canvasOps.END_TAG",
+          "traceRenderer.canvasOps.DRAW_COMMAND_TAG_OFFSET",
+          "traceRenderer.incompleteRangeLayout.START"
         ],
-        "description": "Warm HTTP cache and warm service-worker paths both require no protected-path network transfer, while the renderer canvas-op end tag is a separate Wasm planner sentinel."
+        "description": "Warm HTTP cache and warm service-worker paths both require no protected-path network transfer, while the renderer planner end tag, command tag offset, and incomplete-range start offset are separate renderer ABI values."
       },
       {
         "numericValue": 1,
         "paths": [
           "traceRenderer.canvasOps.QUERY_RANGE_TAG",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_KIND",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_BACKGROUND",
           "traceRenderer.canvasOps.TERMINATOR_OP_BUDGET",
           "traceRenderer.draw.DEFAULT_STROKE_WIDTH",
           "traceRenderer.layout.DEFAULT_MIN_VIEWPORT_SPAN"
         ],
-        "description": "These renderer constants are intentionally distinct: viewport clamp span, Wasm query-range tag, planner terminator budget, and canvas stroke width."
+        "description": "These renderer constants are intentionally distinct: viewport clamp span, Wasm query-range tag, planner terminator budget, canvas stroke width, and command-stream style role values."
+      },
+      {
+        "numericValue": 2,
+        "paths": [
+          "traceRenderer.canvasOps.INCOMPLETE_QUERY_RANGE_TAG",
+          "traceRenderer.canvasOps.DRAW_STYLE_RGB_KIND",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_DEFAULT_SLICE"
+        ],
+        "description": "The incomplete-query planner tag, RGB style-kind tag, and default-slice style role share a value but occupy distinct command-stream fields."
+      },
+      {
+        "numericValue": 3,
+        "paths": [
+          "traceRenderer.canvasOps.DRAW_FILL_RECT_TAG",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_PARTIAL_SLICE",
+          "traceRenderer.draw.DEFAULT_LANE_GAP"
+        ],
+        "description": "The fill-rect command tag, partial-slice style role, and lane gap are separate renderer contracts that happen to share a value."
+      },
+      {
+        "numericValue": 4,
+        "paths": [
+          "runtimeDefaults.DEFAULT_READER_CACHE_SLOTS",
+          "traceRenderer.canvasOps.DRAW_STROKE_LINE_TAG",
+          "traceRenderer.canvasOps.DRAW_COMMAND_STYLE_KIND_OFFSET",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_PARTIAL_HATCH",
+          "traceRenderer.incompleteRangeLayout.END"
+        ],
+        "description": "Reader cache slots, stroke-line command tag, command style-kind offset, partial-hatch style role, and incomplete-range end offset are unrelated contracts with the same numeric value."
+      },
+      {
+        "numericValue": 5,
+        "paths": [
+          "traceRenderer.canvasOps.DRAW_CLEAR_RECT_TAG",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_UNKNOWN_FILL"
+        ],
+        "description": "The clear-rect command tag and unknown-fill style role live in separate command-stream fields."
       },
       {
         "numericValue": 8,
         "paths": [
+          "traceRenderer.canvasOps.DRAW_COMMAND_STYLE_VALUE_OFFSET",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_INCOMPLETE_STRIPE",
           "traceRenderer.draw.DEFAULT_BAND_PADDING",
-          "traceRenderer.layout.DEFAULT_UNKNOWN_STRIPE_SPACING"
+          "traceRenderer.layout.DEFAULT_UNKNOWN_STRIPE_SPACING",
+          "traceRenderer.incompleteRangeLayout.TRACK_ID"
         ],
-        "description": "Band padding and unknown-range stripe spacing are separate renderer layout values that happen to match today."
+        "description": "Band padding, unknown-range stripe spacing, command style-value offset, incomplete-stripe style role, and incomplete-range track-id offset are distinct renderer contracts."
+      },
+      {
+        "numericValue": 12,
+        "paths": [
+          "traceRenderer.canvasOps.DRAW_COMMAND_X_OFFSET",
+          "traceRenderer.incompleteRangeLayout.BYTES"
+        ],
+        "description": "The command x-field offset and incomplete-range record width are separate renderer ABI values."
       },
       {
         "numericValue": 6,
         "paths": [
+          "traceRenderer.canvasOps.DRAW_HATCH_RECT_TAG",
           "traceRenderer.color.RGB_HEX_WIDTH",
+          "traceRenderer.canvasOps.DRAW_STYLE_ROLE_UNKNOWN_STRIPE",
           "traceRenderer.draw.DEFAULT_PARTIAL_HATCH_SPACING"
         ],
-        "description": "Hex color width and partial-slice hatch spacing are unrelated renderer values that happen to match today."
+        "description": "Hatch-rect command tag, hex color width, partial-slice hatch spacing, and unknown-stripe style role are unrelated renderer values that happen to match today."
       },
       {
         "numericValue": 10,
@@ -122,9 +176,19 @@
         "numericValue": 4096,
         "paths": [
           "runtimeDefaults.DEFAULT_INGEST_NAME_PTR",
-          "runtimeDefaults.DEFAULT_INGEST_NAME_MAX_BYTES"
+          "runtimeDefaults.DEFAULT_INGEST_NAME_MAX_BYTES",
+          "traceRenderer.query.DEFAULT_TRACE_RENDER_ROW_CAP",
+          "traceRenderer.query.DEFAULT_TRACE_RENDER_INCOMPLETE_RANGE_CAP"
         ],
-        "description": "The ingest source-name pointer and source-name byte capacity are intentionally equal today but describe different parts of the scratch-memory layout."
+        "description": "The ingest source-name pointer/capacity and renderer row/range caps are separate scratch-memory and command-buffer contracts."
+      },
+      {
+        "numericValue": 8192,
+        "paths": [
+          "runtimeDefaults.DEFAULT_READER_NAME_PTR",
+          "traceRenderer.query.DEFAULT_TRACE_RENDER_COMMAND_CAP"
+        ],
+        "description": "The reader-name scratch pointer and renderer command cap are separate runtime contracts that happen to share a value."
       },
       {
         "numericValue": 1024,
@@ -245,6 +309,27 @@
     }
   },
   "traceRenderer": {
+    "requiredExports": [
+      "trace_render_append_query_rows",
+      "trace_render_commands_begin",
+      "trace_render_commands_overflow",
+      "trace_render_plan_begin",
+      "trace_render_plan_next",
+      "trace_render_plan_op_end",
+      "trace_render_plan_op_start",
+      "trace_render_plan_op_track_id",
+      "trace_render_query_ranges_per_track",
+      "trace_render_query_tile_span",
+      "trace_render_range_width",
+      "trace_render_range_x",
+      "trace_render_slice_end_x",
+      "trace_render_slice_x",
+      "trace_render_slice_y",
+      "trace_render_stripe_end",
+      "trace_render_stripe_start",
+      "trace_render_unknown_width",
+      "trace_render_unknown_x"
+    ],
     "query": {
       "DEFAULT_TRACE_QUERY_OUT_PTR": {
         "value": 12288,
@@ -261,6 +346,48 @@
       "DEFAULT_TRACE_QUERY_RANGE_BUDGET": {
         "value": 64,
         "description": "Default maximum number of index query ranges the renderer may issue per draw."
+      },
+      "DEFAULT_TRACE_RENDER_ROW_PTR": {
+        "value": 65536,
+        "description": "Default scratch pointer for rows handed to the Wasm trace render command emitter."
+      },
+      "DEFAULT_TRACE_RENDER_ROW_CAP": {
+        "value": 4096,
+        "description": "Default maximum rows handed to the Wasm trace render command emitter."
+      },
+      "DEFAULT_TRACE_RENDER_INCOMPLETE_RANGE_PTR": {
+        "value": 196608,
+        "description": "Default scratch pointer for incomplete query ranges handed to the Wasm trace render command emitter."
+      },
+      "DEFAULT_TRACE_RENDER_INCOMPLETE_RANGE_CAP": {
+        "value": 4096,
+        "description": "Default maximum incomplete ranges handed to the Wasm trace render command emitter."
+      },
+      "DEFAULT_TRACE_RENDER_COMMAND_PTR": {
+        "value": 262144,
+        "description": "Default scratch pointer for the Wasm trace render command buffer."
+      },
+      "DEFAULT_TRACE_RENDER_COMMAND_CAP": {
+        "value": 8192,
+        "description": "Default maximum Wasm trace render commands emitted per frame."
+      }
+    },
+    "incompleteRangeLayout": {
+      "BYTES": {
+        "value": 12,
+        "description": "Byte length of one incomplete query range handed to the Wasm trace render command emitter."
+      },
+      "START": {
+        "value": 0,
+        "description": "Incomplete query range byte offset of the start timestamp."
+      },
+      "END": {
+        "value": 4,
+        "description": "Incomplete query range byte offset of the end timestamp."
+      },
+      "TRACK_ID": {
+        "value": 8,
+        "description": "Incomplete query range byte offset of the track id."
       }
     },
     "layout": {
@@ -294,9 +421,105 @@
         "value": 2,
         "description": "Wasm trace renderer planner tag for a visible incomplete query-range affordance."
       },
+      "DRAW_FILL_RECT_TAG": {
+        "value": 3,
+        "description": "Wasm trace render command tag for a Canvas2D fillRect operation."
+      },
+      "DRAW_STROKE_LINE_TAG": {
+        "value": 4,
+        "description": "Wasm trace render command tag for a Canvas2D stroked line operation."
+      },
+      "DRAW_CLEAR_RECT_TAG": {
+        "value": 5,
+        "description": "Wasm trace render command tag for a Canvas2D clearRect operation."
+      },
+      "DRAW_HATCH_RECT_TAG": {
+        "value": 6,
+        "description": "Wasm trace render command tag for filling a rectangular hatch visual."
+      },
       "TERMINATOR_OP_BUDGET": {
         "value": 1,
         "description": "Extra planner iteration budget reserved for the required terminating canvas operation."
+      },
+      "DRAW_COMMAND_BYTES": {
+        "value": 36,
+        "description": "Byte length of one Wasm trace render command."
+      },
+      "DRAW_COMMAND_TAG_OFFSET": {
+        "value": 0,
+        "description": "Trace render command byte offset of the operation tag."
+      },
+      "DRAW_COMMAND_STYLE_KIND_OFFSET": {
+        "value": 4,
+        "description": "Trace render command byte offset of the style kind."
+      },
+      "DRAW_COMMAND_STYLE_VALUE_OFFSET": {
+        "value": 8,
+        "description": "Trace render command byte offset of the style value."
+      },
+      "DRAW_COMMAND_X_OFFSET": {
+        "value": 12,
+        "description": "Trace render command byte offset of x or x1."
+      },
+      "DRAW_COMMAND_Y_OFFSET": {
+        "value": 16,
+        "description": "Trace render command byte offset of y or y1."
+      },
+      "DRAW_COMMAND_WIDTH_OFFSET": {
+        "value": 20,
+        "description": "Trace render command byte offset of width."
+      },
+      "DRAW_COMMAND_HEIGHT_OFFSET": {
+        "value": 24,
+        "description": "Trace render command byte offset of height."
+      },
+      "DRAW_COMMAND_X2_OFFSET": {
+        "value": 28,
+        "description": "Trace render command byte offset of x2."
+      },
+      "DRAW_COMMAND_Y2_OFFSET": {
+        "value": 32,
+        "description": "Trace render command byte offset of y2."
+      },
+      "DRAW_STYLE_ROLE_KIND": {
+        "value": 1,
+        "description": "Trace render command style kind for a generated semantic color role."
+      },
+      "DRAW_STYLE_RGB_KIND": {
+        "value": 2,
+        "description": "Trace render command style kind for a packed row RGB color."
+      },
+      "DRAW_STYLE_ROLE_BACKGROUND": {
+        "value": 1,
+        "description": "Trace render command color role for the trace background."
+      },
+      "DRAW_STYLE_ROLE_DEFAULT_SLICE": {
+        "value": 2,
+        "description": "Trace render command color role for rows without a resolved packed color."
+      },
+      "DRAW_STYLE_ROLE_PARTIAL_SLICE": {
+        "value": 3,
+        "description": "Trace render command color role for partial rows while ingest is active."
+      },
+      "DRAW_STYLE_ROLE_PARTIAL_HATCH": {
+        "value": 4,
+        "description": "Trace render command color role for partial-row hatch strokes."
+      },
+      "DRAW_STYLE_ROLE_UNKNOWN_FILL": {
+        "value": 5,
+        "description": "Trace render command color role for unknown-range fill."
+      },
+      "DRAW_STYLE_ROLE_UNKNOWN_STRIPE": {
+        "value": 6,
+        "description": "Trace render command color role for unknown-range stripes."
+      },
+      "DRAW_STYLE_ROLE_INCOMPLETE_FILL": {
+        "value": 7,
+        "description": "Trace render command color role for incomplete-query fill."
+      },
+      "DRAW_STYLE_ROLE_INCOMPLETE_STRIPE": {
+        "value": 8,
+        "description": "Trace render command color role for incomplete-query stripes."
       }
     },
     "draw": {
