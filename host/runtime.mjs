@@ -904,15 +904,17 @@ async function loadApp(memory, host, options = {}) {
   let progressiveTraceRendererModule = null;
   let progressiveTraceRendererPromise = null;
   let progressiveTraceRendererCreatePromise = null;
-  let firstFrameResolve = null;
-  let firstFrameSeen = false;
-  const firstFramePromise = new Promise((resolve) => {
-    firstFrameResolve = resolve;
-  });
-  requestAnimationFrame(() => {
-    firstFrameSeen = true;
-    firstFrameResolve();
-  });
+  let firstFrameResolve = () => {};
+  let firstFrameSeen = options.firstFramePromise !== undefined;
+  const firstFramePromise =
+    options.firstFramePromise ??
+    new Promise((resolve) => {
+      firstFrameResolve = resolve;
+      requestAnimationFrame(() => {
+        firstFrameSeen = true;
+        firstFrameResolve();
+      });
+    });
 
   function loadProgressiveTraceRendererModule() {
     if (options.progressiveTraceRenderer === false) {

@@ -1014,6 +1014,7 @@ function runSelfTest() {
   const traceRendererSpec = fs.readFileSync(path.join(ROOT_DIR, "host", "trace-renderer-spec.mjs"), "utf8");
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapShellPaintOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.appShellPaint)");
+  const bootstrapFirstFramePromiseOffset = bootstrap.indexOf("const firstFramePromise");
   const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
   const bootstrapRendererPreloadOffset = bootstrap.indexOf(
     "const importProgressiveTraceRenderer = () =>",
@@ -1048,10 +1049,16 @@ function runSelfTest() {
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.notEqual(bootstrapStartOffset, -1);
   assert.notEqual(bootstrapShellPaintOffset, -1);
+  assert.notEqual(bootstrapFirstFramePromiseOffset, -1);
   assert.equal(bootstrapCoreReadyOffset, -1);
   assert.ok(
     bootstrapStartOffset < bootstrapShellPaintOffset,
     "bootstrap should mark app shell paint after startup begins",
+  );
+  assert.ok(
+    bootstrapStartOffset < bootstrapFirstFramePromiseOffset &&
+      bootstrapFirstFramePromiseOffset < bootstrapRuntimeImportOffset,
+    "bootstrap should start waiting for the first animation frame before module startup waits",
   );
   assert.notEqual(bootstrapRendererPreloadOffset, -1);
   assert.notEqual(bootstrapRuntimeImportOffset, -1);
@@ -1079,6 +1086,10 @@ function runSelfTest() {
   assert.match(
     runtime,
     /const deferredRendererReadyPromise =[\s\S]+loadProgressiveTraceRendererModule\(\)/,
+  );
+  assert.match(
+    runtime,
+    /const firstFramePromise =[\s\S]+options\.firstFramePromise[\s\S]+\?\?/,
   );
   assert.match(
     runtime,
@@ -1151,6 +1162,10 @@ function runSelfTest() {
   assert.match(
     bootstrap,
     /importProgressiveTraceRenderer,/,
+  );
+  assert.match(
+    bootstrap,
+    /firstFramePromise,/,
   );
   assert.match(
     bootstrap,

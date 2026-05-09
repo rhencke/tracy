@@ -1,5 +1,6 @@
 import { APP_SHELL_COLORS, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_MARKS, RUNTIME_URLS } from "./host/startup-spec.mjs";
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
+const firstFramePromise = new Promise((resolve) => requestAnimationFrame(resolve));
 const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
 const warmProgressiveTraceRendererPromise = serviceWorkerController === null ? null : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const importProgressiveTraceRenderer = () => warmProgressiveTraceRendererPromise ?? import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
@@ -40,4 +41,4 @@ const mainAppWasmPromise = instantiateWasmModuleForThread("app", "main", { env: 
 mainAppWasmPromise.catch(() => {});
 const instantiateWasmModuleWithPreloadedApp = (id, thread, imports, options) => id === "app" && thread === "main" ? mainAppWasmPromise : instantiateWasmModuleForThread(id, thread, imports, options);
 const { runApp } = await runtimeModulePromise;
-runApp(memory, host, { importProgressiveTraceRenderer, instantiateWasmModuleForThread: instantiateWasmModuleWithPreloadedApp });
+runApp(memory, host, { firstFramePromise, importProgressiveTraceRenderer, instantiateWasmModuleForThread: instantiateWasmModuleWithPreloadedApp });

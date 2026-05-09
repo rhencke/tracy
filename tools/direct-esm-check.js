@@ -749,6 +749,14 @@ function main() {
   );
   assert.match(
     bootstrapSource,
+    /const firstFramePromise = new Promise\(\(resolve\) => requestAnimationFrame\(resolve\)\)/,
+  );
+  assert.match(
+    bootstrapSource,
+    /firstFramePromise,/,
+  );
+  assert.match(
+    bootstrapSource,
     /instantiateWasmModuleForThread/,
   );
   assert.match(
