@@ -3,61 +3,14 @@
 const assert = require("node:assert/strict");
 const { pathToFileURL } = require("node:url");
 const path = require("node:path");
-
-function installBrowserStubs() {
-  const canvasContext = {
-    set fillStyle(value) {
-      this.lastFillStyle = value;
-    },
-    fillRect() {},
-    setTransform() {},
-  };
-  const canvas = {
-    clientWidth: 320,
-    clientHeight: 240,
-    hidden: false,
-    width: 0,
-    height: 0,
-    getBoundingClientRect() {
-      return { left: 0, top: 0 };
-    },
-    getContext() {
-      return canvasContext;
-    },
-    addEventListener() {},
-  };
-
-  globalThis.document = {
-    body: {
-      appendChild() {},
-    },
-    createElement() {
-      return {
-        addEventListener() {},
-        removeAttribute() {},
-        removeEventListener() {},
-        set hidden(value) {
-          this.isHidden = value;
-        },
-      };
-    },
-    getElementById(id) {
-      return id === "tracy" ? canvas : null;
-    },
-  };
-  globalThis.window = {
-    devicePixelRatio: 1,
-    addEventListener() {},
-    removeEventListener() {},
-  };
-}
+const { installBrowserGlobals } = require("./browser-harness.js");
 
 function hostKeys(host) {
   return new Set(Object.keys(host));
 }
 
 async function main() {
-  installBrowserStubs();
+  installBrowserGlobals({ raf: false, jspi: false });
 
   const shimUrl = pathToFileURL(path.resolve(__dirname, "../host/shim.mjs")).href;
   const abiUrl = pathToFileURL(path.resolve(__dirname, "../host/abi.mjs")).href;
