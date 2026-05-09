@@ -416,7 +416,15 @@ async function checkBrowserInteractiveIngest() {
       `file chooser opened after ${chooserOpenedAt - clickStartedAt}ms`,
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await waitForPageCondition(
+      page,
+      () =>
+        (globalThis.__TRACY_BROWSER_INGEST__?.workerMessages ?? []).some(
+          (message) => message?.type === "preloaded",
+        ),
+      "browser did not preload worker wasm while file picker was open",
+      10_000,
+    );
     await chooser.accept([tracePath]);
     await waitForPageCondition(
       page,
