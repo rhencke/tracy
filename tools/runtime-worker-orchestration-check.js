@@ -304,6 +304,10 @@ async function checkRuntimeOrchestratesWorker() {
   const worker = FakeWorker.instances[0];
   assert.equal(worker.url, "worker.js");
   assert.deepEqual(worker.options, { type: "module" });
+  assert.deepEqual(worker.posted, [{ type: "preload" }]);
+  worker.emit("message", { type: "preloaded" });
+  await Promise.resolve();
+  await Promise.resolve();
   assert.deepEqual(instantiateCalls, [
     { hostImport: host.opfs_index_create, id: "app", memory, thread: "main" },
   ]);
@@ -329,6 +333,9 @@ async function checkRuntimeOrchestratesWorker() {
   ]);
   assert.equal(frames.length, 2, "startup frame gate and draw loop should be scheduled");
   assert.deepEqual(worker.posted, [
+    {
+      type: "preload",
+    },
     {
       ingestId: 1,
       indexName: "indexes/trace.idx",
@@ -443,8 +450,14 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   await Promise.resolve();
   await Promise.resolve();
 
+  const preloadWorker = controller.worker;
+  assert.deepEqual(preloadWorker.posted, [{ type: "preload" }]);
+  preloadWorker.emit("message", { type: "preloaded" });
+  await Promise.resolve();
+  await Promise.resolve();
+
   assert.equal(callbacks.length, 1);
-  assert.equal(controller.worker, null);
+  assert.equal(controller.worker, preloadWorker);
 
   callbacks[0]({ file: selectedFile, handle: 9 });
   await Promise.resolve();
@@ -457,6 +470,9 @@ async function checkRuntimeStartsIngestFromFileSelection() {
     "file selection should post worker ingest before any full OPFS copy",
   );
   assert.deepEqual(worker.posted, [
+    {
+      type: "preload",
+    },
     {
       ingestId: 1,
       indexName: "indexes/selected_trace.json.idx",
@@ -472,7 +488,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 
   callbacks[0]({ handle: -1 });
   await Promise.resolve();
-  assert.equal(worker.posted.length, 1, "cancelled picker should not start ingest");
+  assert.equal(worker.posted.length, 2, "cancelled picker should not start ingest");
 }
 
 async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
@@ -2681,6 +2697,8 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
   });
 
   runtime.runApp(memory, {}, {
+    indexReader: false,
+    preloadIngestDependencies: false,
     importProgressiveTraceRenderer: () => {
       rendererImportStarted = true;
       return rendererImport;
@@ -2757,6 +2775,8 @@ async function checkAppReadyFailsWhenDeferredRendererFails() {
   globalThis.__TRACY_APP_LOAD_ERROR__ = "";
   console.error = () => {};
   runtime.runApp(memory, {}, {
+    indexReader: false,
+    preloadIngestDependencies: false,
     importProgressiveTraceRenderer: async () => {
       throw new Error("deferred renderer unavailable");
     },

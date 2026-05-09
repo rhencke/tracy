@@ -52,6 +52,8 @@ export const RUNTIME_BRIDGE = Object.freeze({
     "COMPLETE": "complete",
     "COVERED_RANGE": "covered_range",
     "ERROR": "error",
+    "PRELOAD": "preload",
+    "PRELOADED": "preloaded",
     "PROGRESS": "progress",
     "START": "start"
   },

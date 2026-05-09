@@ -1,12 +1,17 @@
 import { makeWorkerThreadHost } from "./shim.mjs";
 import { HOST_IMPORT_NAME } from "./abi.mjs";
 import { RUNTIME_DEFAULTS } from "./startup-spec.mjs";
-import { instantiateWasmModuleForThread } from "./wasm-modules.mjs";
+import {
+  compileWasmModuleGraphForThread,
+  instantiateWasmModuleForThread,
+} from "./wasm-modules.mjs";
 
 export const INGEST_WORKER_MESSAGE = Object.freeze({
   COMPLETE: "complete",
   COVERED_RANGE: "covered_range",
   ERROR: "error",
+  PRELOAD: "preload",
+  PRELOADED: "preloaded",
   PROGRESS: "progress",
   START: "start",
 });
@@ -26,6 +31,7 @@ const {
   DEFAULT_INGEST_PROGRESS_WINDOW_MS,
 } = RUNTIME_DEFAULTS;
 const TOKEN_OUTPUT_BASE = 5 * 1024 * 1024;
+let preloadedWorkerWasmModules = null;
 
 function globalValue(value) {
   return value instanceof WebAssembly.Global ? value.value : value;
@@ -262,6 +268,7 @@ async function instantiateIngestModules(options, memory, host) {
     options.instantiateWasmModuleForThread ?? instantiateWasmModuleForThread;
   const moduleOptions = {
     baseUrl: options.baseUrl ?? "wasm/",
+    compile: options.compile ?? compilePreloadedWorkerWasmModule,
   };
 
   if (options.compile !== undefined) {
@@ -292,6 +299,34 @@ async function instantiateIngestModules(options, memory, host) {
     parser: parserLoaded.exports,
     parserState: parserLoaded.imports.parser_state,
   };
+}
+
+async function preloadWorkerWasmModules(options = {}) {
+  if (preloadedWorkerWasmModules !== null) {
+    return preloadedWorkerWasmModules;
+  }
+
+  preloadedWorkerWasmModules = compileWasmModuleGraphForThread(
+    "parser",
+    WORKER_THREAD,
+    {
+      baseUrl: options.baseUrl ?? "wasm/",
+      compile: options.compile,
+    },
+  );
+  return preloadedWorkerWasmModules;
+}
+
+async function compilePreloadedWorkerWasmModule(url, moduleId) {
+  const preloaded = preloadedWorkerWasmModules === null
+    ? null
+    : await preloadedWorkerWasmModules;
+
+  if (preloaded?.has(moduleId)) {
+    return preloaded.get(moduleId);
+  }
+
+  return WebAssembly.compileStreaming(fetch(url));
 }
 
 async function resolveSourceId({ data, host, memory, namePtr }) {
@@ -473,11 +508,16 @@ export function createIngestWorkerMessageHandler(options = {}) {
   return async function handleIngestWorkerMessage(event) {
     const data = event?.data ?? event;
 
-    if (data?.type !== INGEST_WORKER_MESSAGE.START) {
-      return;
-    }
-
     try {
+      if (data?.type === INGEST_WORKER_MESSAGE.PRELOAD) {
+        await preloadWorkerWasmModules(options);
+        postMessage({ type: INGEST_WORKER_MESSAGE.PRELOADED });
+        return;
+      }
+      if (data?.type !== INGEST_WORKER_MESSAGE.START) {
+        return;
+      }
+
       await runIngest(data, { ...options, postMessage });
     } catch (error) {
       const message = {

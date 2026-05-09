@@ -247,6 +247,11 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     /wasmModules\.instantiateWasmModuleForThread\(\s*"app",\s*"main"/,
     "interactive ingest check should instantiate production dist app.wasm for renderer planning",
   );
+  assert.doesNotMatch(
+    source,
+    /preloadDistWasmModules|compiledDistWasmModules|preloadIndexReader:\s*true/,
+    "interactive ingest check should not hide worker or main index reader wasm startup behind test-only preload shortcuts",
+  );
   assert.match(
     source,
     /assertProductionTraceRenderPlannerExports\(appWasm\.exports\)/,

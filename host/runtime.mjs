@@ -445,6 +445,9 @@ export function createIngestWorkerController(options = {}) {
   let worker = null;
   let activeIngestId = null;
   let nextIngestId = 1;
+  let preloadPromise = null;
+  let preloadResolve = null;
+  let preloadReject = null;
 
   function isActiveIngestMessage(message) {
     return Number.isInteger(message?.ingestId) && message.ingestId === activeIngestId;
@@ -452,6 +455,23 @@ export function createIngestWorkerController(options = {}) {
 
   function handleWorkerMessage(event) {
     const message = event?.data ?? event;
+
+    if (message?.type === INGEST_WORKER_MESSAGE.PRELOADED) {
+      preloadResolve?.(true);
+      preloadResolve = null;
+      preloadReject = null;
+      return;
+    }
+    if (
+      message?.type === INGEST_WORKER_MESSAGE.ERROR &&
+      !Number.isInteger(message?.ingestId) &&
+      preloadReject !== null
+    ) {
+      preloadReject(new Error(message.message ?? RUNTIME_ERRORS.WORKER_INGEST_FAILED));
+      preloadResolve = null;
+      preloadReject = null;
+      return;
+    }
 
     if (!isActiveIngestMessage(message)) {
       return;
@@ -490,6 +510,9 @@ export function createIngestWorkerController(options = {}) {
 
     status.state = WORKER_STATUS.ERROR;
     status.error = event?.message ?? RUNTIME_ERRORS.INGEST_WORKER_FAILED;
+    preloadReject?.(new Error(status.error));
+    preloadResolve = null;
+    preloadReject = null;
     notifyWorkerStatus(status, options, event);
   }
 
@@ -567,6 +590,26 @@ export function createIngestWorkerController(options = {}) {
         type: INGEST_WORKER_MESSAGE.START,
       });
       return true;
+    },
+    preload() {
+      if (preloadPromise !== null) {
+        return preloadPromise;
+      }
+
+      const activeWorker = ensureWorker();
+      if (activeWorker === null) {
+        preloadPromise = Promise.resolve(false);
+        return preloadPromise;
+      }
+
+      preloadPromise = new Promise((resolve, reject) => {
+        preloadResolve = resolve;
+        preloadReject = reject;
+      });
+      activeWorker.postMessage({
+        type: INGEST_WORKER_MESSAGE.PRELOAD,
+      });
+      return preloadPromise;
     },
     status() {
       return cloneWorkerStatus(status);
@@ -939,10 +982,13 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
-  installFilePickerGesture(host, options.ingestWorker, options);
-  if (options.preloadIndexReader === true) {
-    options.ingestWorker?.indexReader?.preload?.().catch(reportAppLoadError);
+  if (options.preloadIngestDependencies !== false) {
+    await Promise.all([
+      options.ingestWorker?.indexReader?.preload?.(),
+      options.ingestWorker?.preload?.(),
+    ]);
   }
+  installFilePickerGesture(host, options.ingestWorker, options);
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null

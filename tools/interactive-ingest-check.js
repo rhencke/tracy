@@ -11,7 +11,6 @@ let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
 
 const FIRST_EVENTS_BUDGET_MS = 100;
-const compiledDistWasmModules = new Map();
 const REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = Object.freeze([
   "trace_render_plan_begin",
   "trace_render_plan_next",
@@ -57,30 +56,11 @@ async function instantiateInteractiveIngestVerifier(memory) {
 }
 
 async function compileDistWasmModule(url) {
-  if (compiledDistWasmModules.has(url)) {
-    return compiledDistWasmModules.get(url);
-  }
-
   const bytes = await fs.readFile(
     path.resolve(__dirname, "..", url.replace(/^file:\/\//, "")),
   );
 
-  const compiled = WebAssembly.compile(bytes);
-
-  compiledDistWasmModules.set(url, compiled);
-  return compiled;
-}
-
-async function preloadDistWasmModules(wasmModules, threads) {
-  const urls = new Set();
-
-  for (const thread of threads) {
-    for (const id of wasmModules.wasmModuleIdsForThread(thread)) {
-      urls.add(wasmModules.wasmModuleUrl(id, "dist/wasm/"));
-    }
-  }
-
-  await Promise.all([...urls].map((url) => compileDistWasmModule(url)));
+  return WebAssembly.compile(bytes);
 }
 
 async function instantiateDistWasmModule(module, imports) {
@@ -690,7 +670,6 @@ async function checkInteractiveIngestGate() {
   const wasmModules = await import(moduleUrl("host/wasm-modules.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
   const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
-  await preloadDistWasmModules(wasmModules, ["main", "worker"]);
   const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
   const canvasHarness = makeCanvasHarness();
   const { frames } = installBrowserHarness(canvasHarness.canvas);
@@ -698,6 +677,8 @@ async function checkInteractiveIngestGate() {
   const workerStatuses = [];
   const importCalls = [];
   const frameDurations = [];
+  const wasmModuleWarmups = [];
+  const workerWasmCompileCache = new Map();
   let rendererInstance = null;
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
   const opfsHarness = makeProductionTopologyOpfsHarness(memory, abi.HOST_IMPORT_NAME);
@@ -738,6 +719,14 @@ async function checkInteractiveIngestGate() {
     constructor(url, options) {
       super(url, options);
       this.handler = ingestRuntime.createIngestWorkerMessageHandler({
+        baseUrl: "dist/wasm/",
+        compile: (url, id) => {
+          wasmModuleWarmups.push({ id, thread: "worker" });
+          if (!workerWasmCompileCache.has(id)) {
+            workerWasmCompileCache.set(id, compileDistWasmModule(url));
+          }
+          return workerWasmCompileCache.get(id);
+        },
         hostFactory: (workerMemory, files) => {
           assert.equal(workerMemory, memory);
           assert.ok(files instanceof Map, "worker host should receive selected files");
@@ -760,7 +749,8 @@ async function checkInteractiveIngestGate() {
             imports,
             {
               baseUrl: "dist/wasm/",
-              compile: compileDistWasmModule,
+              compile: (url, moduleId) =>
+                workerWasmCompileCache.get(moduleId) ?? compileDistWasmModule(url),
               instantiate: instantiateDistWasmModule,
             },
           );
@@ -799,7 +789,6 @@ async function checkInteractiveIngestGate() {
 
   const controller = runtime.runApp(memory, host, {
     document: globalThis.document,
-    preloadIndexReader: true,
     importProgressiveTraceRenderer: async () => {
       importCalls.push(performance.now());
       return {
@@ -857,24 +846,31 @@ async function checkInteractiveIngestGate() {
     false,
     "interactive ingest gate should not open the file picker during app load",
   );
-  assert.equal(
-    typeof canvasHarness.listeners.get("click"),
-    "function",
-    "interactive ingest gate should wire file picking to a user gesture",
+  await waitForAsyncCondition(
+    () => typeof canvasHarness.listeners.get("click") === "function",
+    "interactive ingest gate should wire file picking to a user gesture after production preload",
   );
-  assert.ok(
-    opfsHarness.calls.some(
+  await waitForAsyncCondition(
+    () => opfsHarness.calls.some(
       (call) => call.host === "main" && call.op === "set-file-selected-callback",
     ),
     "interactive ingest gate should install the production file-selection callback during startup",
   );
-  assert.ok(frames.length >= 1);
+  await waitForAsyncCondition(
+    () => frames.length >= 1,
+    "interactive ingest gate should schedule frames after production preload",
+  );
 
   await runFrame(frames, canvasHarness, 0);
   await flushAsyncWork();
   await waitForAsyncCondition(
     () => wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
-    "interactive ingest gate should preload the main-thread index reader before file selection",
+    "interactive ingest gate should production-preload the main-thread index reader before file selection",
+  );
+  await waitForAsyncCondition(
+    () => wasmModuleWarmups.some((call) => call.id === "parser" && call.thread === "worker") &&
+      wasmModuleWarmups.some((call) => call.id === "index" && call.thread === "worker"),
+    "interactive ingest gate should production-preload worker parser/index wasm before file selection",
   );
   if (frames.length > 0) {
     await runFrame(frames, canvasHarness, 0);
@@ -902,16 +898,18 @@ async function checkInteractiveIngestGate() {
   await flushMicrotasks(1);
   assert.notEqual(controller.status().state, "error", controller.status().error);
 
+  const ingestStarts = controller.worker.posted.filter(
+    (message) => message?.type === "start",
+  );
   const startPosted =
-    controller.worker.posted.length === 1 &&
-    controller.worker.posted[0]?.ingestId === 1 &&
-    controller.worker.posted[0]?.indexName === "indexes/throttled-100mb.json.idx" &&
-    controller.worker.posted[0]?.sourceFile === selectedFile &&
-    controller.worker.posted[0]?.sourceFileHandle === 77 &&
-    controller.worker.posted[0]?.sourceName === sourceName &&
-    controller.worker.posted[0]?.sourceSize === FIXTURE_SIZE_BYTES &&
-    controller.worker.posted[0]?.type === "start";
-  assert.deepEqual(controller.worker.posted, [
+    ingestStarts.length === 1 &&
+    ingestStarts[0]?.ingestId === 1 &&
+    ingestStarts[0]?.indexName === "indexes/throttled-100mb.json.idx" &&
+    ingestStarts[0]?.sourceFile === selectedFile &&
+    ingestStarts[0]?.sourceFileHandle === 77 &&
+    ingestStarts[0]?.sourceName === sourceName &&
+    ingestStarts[0]?.sourceSize === FIXTURE_SIZE_BYTES;
+  assert.deepEqual(ingestStarts, [
     {
       ingestId: 1,
       indexName: "indexes/throttled-100mb.json.idx",
