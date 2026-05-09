@@ -300,12 +300,19 @@ async function checkRuntimeOrchestratesWorker() {
   await Promise.resolve();
   await Promise.resolve();
 
+  assert.equal(FakeWorker.instances.length, 0);
+  assert.ok(frames.length >= 1, "draw loop should be scheduled before ingest preload");
+  frames[0](0);
+  await Promise.resolve();
+  await Promise.resolve();
+
   assert.equal(FakeWorker.instances.length, 1);
   const worker = FakeWorker.instances[0];
   assert.equal(worker.url, "worker.js");
   assert.deepEqual(worker.options, { type: "module" });
   assert.deepEqual(worker.posted, [{ type: "preload" }]);
   worker.emit("message", { type: "preloaded" });
+  await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
   assert.deepEqual(instantiateCalls, [
@@ -330,8 +337,15 @@ async function checkRuntimeOrchestratesWorker() {
       end: "tracy.main.end",
     },
     { kind: "mark", name: "tracy.core.ready" },
+    { kind: "mark", name: "tracy.app.ready" },
+    {
+      kind: "measure",
+      name: "tracy.app.load",
+      start: "tracy.bootstrap.start",
+      end: "tracy.app.ready",
+    },
   ]);
-  assert.equal(frames.length, 2, "startup frame gate and draw loop should be scheduled");
+  assert.equal(frames.length, 2, "startup frame gate and draw loop should continue");
   assert.deepEqual(worker.posted, [
     {
       type: "preload",
@@ -410,7 +424,7 @@ async function checkRuntimeOrchestratesWorker() {
 }
 
 async function checkRuntimeStartsIngestFromFileSelection() {
-  installBrowserStubs();
+  const { frames } = installBrowserStubs();
 
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
@@ -447,6 +461,11 @@ async function checkRuntimeStartsIngestFromFileSelection() {
     },
   });
 
+  await Promise.resolve();
+  await Promise.resolve();
+
+  assert.equal(controller.worker, null);
+  frames[0](0);
   await Promise.resolve();
   await Promise.resolve();
 

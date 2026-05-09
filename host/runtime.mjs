@@ -982,18 +982,29 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
-  if (options.preloadIngestDependencies !== false) {
-    await Promise.all([
-      options.ingestWorker?.indexReader?.preload?.(),
-      options.ingestWorker?.preload?.(),
-    ]);
-  }
-  installFilePickerGesture(host, options.ingestWorker, options);
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
       ? loadProgressiveTraceRendererModule()
       : Promise.resolve(null);
+  const ingestDependenciesReadyPromise =
+    options.preloadIngestDependencies === false
+      ? Promise.resolve(null)
+      : firstFramePromise.then(() =>
+          Promise.all([
+            options.ingestWorker?.indexReader?.preload?.(),
+            options.ingestWorker?.preload?.(),
+          ]),
+        );
+
+  ingestDependenciesReadyPromise.then(() => {
+    installFilePickerGesture(host, options.ingestWorker, options);
+    if (options.ingest !== undefined) {
+      options.ingestWorker?.start(
+        options.ingest === true ? {} : options.ingest,
+      );
+    }
+  }).catch(reportAppLoadError);
 
   Promise.all([firstFramePromise, deferredRendererReadyPromise]).then(() => {
     markPerformance(PERFORMANCE_MARKS.appReady, options);
@@ -1043,11 +1054,6 @@ async function loadApp(memory, host, options = {}) {
 
   requestAnimationFrame(loop);
 
-  if (options.ingest !== undefined) {
-    options.ingestWorker?.start(
-      options.ingest === true ? {} : options.ingest,
-    );
-  }
 }
 
 export function runApp(memory, host, options = {}) {

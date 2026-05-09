@@ -847,6 +847,12 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should not open the file picker during app load",
   );
   await waitForAsyncCondition(
+    () => frames.length >= 1,
+    "interactive ingest gate should schedule frames before production preload",
+  );
+  await runFrame(frames, canvasHarness, 0);
+  await flushAsyncWork();
+  await waitForAsyncCondition(
     () => typeof canvasHarness.listeners.get("click") === "function",
     "interactive ingest gate should wire file picking to a user gesture after production preload",
   );
@@ -861,8 +867,6 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should schedule frames after production preload",
   );
 
-  await runFrame(frames, canvasHarness, 0);
-  await flushAsyncWork();
   await waitForAsyncCondition(
     () => wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
     "interactive ingest gate should production-preload the main-thread index reader before file selection",
