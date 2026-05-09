@@ -56,9 +56,10 @@ function installBrowserStubs() {
   };
   globalThis.WebAssembly.Suspending = class Suspending {
     constructor(fn) {
-      return { fn };
+      return fn;
     }
   };
+  globalThis.WebAssembly.promising = (fn) => fn;
 
   return { frames };
 }
@@ -234,7 +235,7 @@ async function checkRuntimeOrchestratesWorker() {
   const instantiateCalls = [];
   const performanceEntries = [];
   const ticks = [];
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const indexReaderOpenCalls = [];
   const host = {
     opfs_index_create() {
@@ -305,7 +306,10 @@ async function checkRuntimeOrchestratesWorker() {
   frames[0](0);
   await flushMicrotasks();
   assert.equal(FakeWorker.instances.length, 0);
-  assert.ok(frames.length >= 2, "app-ready follow-up frame should be scheduled before ingest preload");
+  assert.ok(
+    frames.length >= 2,
+    "app-ready follow-up frame should be scheduled before ingest preload",
+  );
   const appReadyFrameCallbacks = frames.splice(0);
   for (const frame of appReadyFrameCallbacks) {
     frame(16);
@@ -434,7 +438,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const sourceName = "sources/selected trace.json";
   const callbacks = [];
   const workerStatus = [];
@@ -646,7 +650,7 @@ async function checkFileSelectionSetupErrorsReportStatus() {
 
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   let callback;
   const workerStatus = [];
   const host = {
@@ -690,7 +694,7 @@ async function checkFileSelectionSetupErrorsReportStatus() {
 async function checkMainThreadIndexReaderQueriesCommittedPages() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
   const pageCatalog = [];
@@ -912,12 +916,13 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.deepEqual(readerInitIds, [70, 70]);
   assert.deepEqual(readPages, [0]);
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
-  assert.equal(reader.queryRange(4, 100, 140, 4096).count, 3);
+  assert.equal((await reader.queryRange(4, 100, 140, 4096)).count, 3);
   assert.deepEqual(readPages, [0], "unchanged catalog should not rebuild per query");
 
   visiblePageCount = 2;
+  await reader.open("indexes/trace.idx");
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 180 });
-  assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
+  assert.equal((await reader.queryRange(4, 100, 180, 4096)).count, 5);
   assert.deepEqual(
     readPages,
     [0, 1],
@@ -926,8 +931,9 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
   assert.deepEqual(readerInitIds, [70, 70, 70]);
 
   visiblePageCount = 3;
+  await reader.open("indexes/trace.idx");
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 220 });
-  assert.equal(reader.queryRange(4, 100, 220, 4096).count, 9);
+  assert.equal((await reader.queryRange(4, 100, 220, 4096)).count, 9);
   assert.deepEqual(
     readPages,
     [0, 1, 2],
@@ -942,7 +948,7 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
 async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   let opened = false;
   const host = {
     [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN]() {
@@ -983,7 +989,7 @@ async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
 async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
   const pageCatalog = [];
@@ -1141,38 +1147,39 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
   assert.deepEqual(
     readPages,
-    [0, 1],
-    "covered-range polling should probe appended pages until a miss",
+    [0],
+    "covered range should report the currently refreshed catalog",
   );
-  assert.equal(reader.queryRange(4, 100, 140, 4096).count, 3);
+  assert.equal((await reader.queryRange(4, 100, 140, 4096)).count, 3);
   assert.deepEqual(
     readPages,
-    [0, 1, 1],
-    "stale-size hosts should probe one appended page until a miss",
+    [0],
+    "unchanged stale-size catalog should not rebuild per query",
   );
   assert.deepEqual(readerInitIds, [70, 70]);
 
   readablePageCount = 2;
+  await reader.open("indexes/trace.idx");
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 180 });
   assert.deepEqual(
     readPages,
-    [0, 1, 1, 1, 2],
-    "covered-range polling should discover worker-published pages",
+    [0, 1],
+    "ready reader refresh should discover worker-published pages by probing",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
-  assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
+  assert.equal((await reader.queryRange(4, 100, 180, 4096)).count, 5);
   assert.deepEqual(
     readPages,
-    [0, 1, 1, 1, 2, 2],
-    "stale-size hosts should discover worker-published pages by probing",
+    [0, 1],
+    "stale-size hosts should not rebuild per query after refresh",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
 
-  assert.equal(reader.queryRange(4, 100, 180, 4096).count, 5);
+  assert.equal((await reader.queryRange(4, 100, 180, 4096)).count, 5);
   assert.deepEqual(
     readPages,
-    [0, 1, 1, 1, 2, 2, 2],
-    "stale-size hosts should not reset below already discovered pages",
+    [0, 1],
+    "stale-size hosts should keep the refreshed catalog stable across queries",
   );
   assert.deepEqual(readerInitIds, [70, 70, 70]);
 }
@@ -1180,7 +1187,7 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
 async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
   const pageCatalog = [];
@@ -1290,22 +1297,23 @@ async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
   await reader.open("indexes/trace.idx");
   assert.deepEqual(readPages, [0]);
   assert.deepEqual(reader.coveredRange(), { valid: false, start: 0, end: 0 });
-  assert.deepEqual(readPages, [0, 0]);
+  assert.deepEqual(readPages, [0]);
 
   pageIsQueryable = true;
+  await reader.open("indexes/trace.idx");
   assert.deepEqual(reader.coveredRange(), { valid: true, start: 100, end: 140 });
   assert.deepEqual(
     readPages,
-    [0, 0, 0],
-    "covered-range polling should reread an unqueryable partial page whose page count did not change",
+    [0, 0],
+    "ready reader refresh should reread an unqueryable partial page whose page count did not change",
   );
-  assert.deepEqual(readerInitIds, [70, 70, 70, 70, 70, 70]);
+  assert.deepEqual(readerInitIds, [70, 70, 70, 70]);
 }
 
 async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
   const catalog = await import(moduleUrl("host/index-reader-catalog.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
   const addedPages = [];
@@ -1350,7 +1358,7 @@ async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
     },
   };
 
-  const result = catalog.rebuildMainThreadSliceCatalog(memory, host, index, 70);
+  const result = await catalog.rebuildMainThreadSliceCatalog(memory, host, index, 70);
 
   assert.deepEqual(result, { catalogFull: true, pageCount: 2, rebuilt: true });
   assert.deepEqual(addedPages, [
@@ -1367,7 +1375,7 @@ async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
 async function checkMainThreadIndexReaderFailsOnCatalogOverflow() {
   const runtime = await import(moduleUrl("host/runtime.mjs"));
   const abi = await import(moduleUrl("host/abi.mjs"));
-  const memory = new WebAssembly.Memory({ initial: 1 });
+  const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
   const host = {
@@ -2637,6 +2645,8 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   );
 
   frames[2](3);
+  await flushMicrotasks();
+  frames[3](4);
   assert.equal(
     drawCalls,
     1,
@@ -2650,7 +2660,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
 
   readerCoveredRange = { end: 120, start: 100, valid: true };
   coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
-  frames[3](4);
+  frames[4](5);
   assert.equal(
     importCalls,
     1,
@@ -2658,7 +2668,7 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
   );
 
   await flushMicrotasks();
-  frames[4](5);
+  frames[5](6);
   assert.equal(importCalls, 1);
   assert.equal(drawCalls, 3);
 }

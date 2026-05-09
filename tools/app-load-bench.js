@@ -509,7 +509,12 @@ function launchBrowser(browserPath) {
               child.kill();
             }
             await waitForExit();
-            fs.rmSync(userDataDir, { recursive: true, force: true });
+            fs.rmSync(userDataDir, {
+              force: true,
+              maxRetries: 5,
+              recursive: true,
+              retryDelay: 100,
+            });
           },
           webSocketUrl: match[1],
         });
@@ -992,7 +997,12 @@ function runSelfTest() {
     );
     assert.doesNotThrow(() => assertDistReady(tmpDist));
   } finally {
-    fs.rmSync(tmpDist, { recursive: true, force: true });
+    fs.rmSync(tmpDist, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    });
   }
 
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, "package.json"), "utf8"));

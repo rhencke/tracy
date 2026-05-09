@@ -52,7 +52,7 @@ export function makeOpfsSourceHost(memoryView, files = new Map(), options = {}) 
   }
 
   async function opfsRoot() {
-    return navigator.storage?.getDirectory?.() ?? null;
+    return globalThis.navigator?.storage?.getDirectory?.() ?? null;
   }
 
   function decodeName(operation, namePtr, nameLen) {

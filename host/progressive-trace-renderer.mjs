@@ -258,6 +258,14 @@ function normalizeQueryResult(result) {
   };
 }
 
+function isPromiseLike(value) {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    typeof value.then === "function"
+  );
+}
+
 function normalizedRowCap(value, fallback) {
   const numeric = Number(value);
 
@@ -699,6 +707,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     userInteracted: false,
     viewport: normalizeRange(options.initialViewport),
   };
+  let pendingDraw = null;
 
   function currentCoveredRange(reader, readerStatus, workerStatus) {
     const workerRange = normalizeRange(workerStatus.coveredRange);
@@ -830,7 +839,7 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
 
   installInteractions();
 
-  function draw() {
+  function drawOnce() {
     const reader = options.indexReader ?? ingestWorker?.indexReader;
     const workerStatus = ingestWorker?.status?.() ?? {};
     const readerStatus = reader?.status?.() ?? {};
@@ -857,57 +866,51 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
     const incompleteQueryRanges = [];
     const rows = [];
 
-    try {
-      for (const op of renderPlanner.queryOps({
-        queryRangeBudget,
-        queryWindow,
-        trackCount,
-        viewport,
-      })) {
-        if (op.op === CANVAS_OP.INCOMPLETE_QUERY_RANGE) {
-          incompleteQueryRanges.push({
-            end: op.end,
-            start: op.start,
-            trackId: op.trackId,
-          });
-          continue;
-        }
-        if (op.op === CANVAS_OP.QUERY_RANGE) {
-          const result = normalizeQueryResult(
-            reader.queryRange(
-              op.trackId,
-              op.start,
-              op.end,
-              queryOutPtr,
-              queryRowCap,
-            ),
-          );
+    function appendQueryResult(op, rawResult) {
+      const result = normalizeQueryResult(rawResult);
 
-          rows.push(
-            ...readQueryRows(
-              memory,
-              reader,
-              queryOutPtr,
-              result.count,
-              op.trackId,
-              options,
-            ),
-          );
-          if (result.capped || result.matchedRows > result.writtenRows) {
-            cappedQueries.push({
-              matchedRows: result.matchedRows,
-              trackId: op.trackId,
-              writtenRows: result.writtenRows,
-            });
-            incompleteQueryRanges.push({
-              end: op.end,
-              start: op.start,
-              trackId: op.trackId,
-            });
-          }
-        }
+      rows.push(
+        ...readQueryRows(
+          memory,
+          reader,
+          queryOutPtr,
+          result.count,
+          op.trackId,
+          options,
+        ),
+      );
+      if (result.capped || result.matchedRows > result.writtenRows) {
+        cappedQueries.push({
+          matchedRows: result.matchedRows,
+          trackId: op.trackId,
+          writtenRows: result.writtenRows,
+        });
+        incompleteQueryRanges.push({
+          end: op.end,
+          start: op.start,
+          trackId: op.trackId,
+        });
+      }
+    }
+
+    function runQuery(op) {
+      const result = reader.queryRange(
+        op.trackId,
+        op.start,
+        op.end,
+        queryOutPtr,
+        queryRowCap,
+      );
+
+      if (isPromiseLike(result)) {
+        return result.then((resolved) => appendQueryResult(op, resolved));
       }
 
+      appendQueryResult(op, result);
+      return null;
+    }
+
+    function finishDraw() {
       state.error = null;
       state.cappedQueries = cappedQueries;
       state.incompleteQueryRanges = incompleteQueryRanges;
@@ -926,12 +929,67 @@ export function createProgressiveTraceRenderer(memory, ingestWorker, options = {
         renderPlanner,
         options,
       );
-    } catch (error) {
-      state.error = errorMessage(error);
-      options.onError?.(error);
+      return state.lastRows;
     }
 
-    return state.lastRows;
+    function failDraw(error) {
+      state.error = errorMessage(error);
+      options.onError?.(error);
+      return state.lastRows;
+    }
+
+    try {
+      let pendingQueries = null;
+
+      for (const op of renderPlanner.queryOps({
+        queryRangeBudget,
+        queryWindow,
+        trackCount,
+        viewport,
+      })) {
+        if (op.op === CANVAS_OP.INCOMPLETE_QUERY_RANGE) {
+          incompleteQueryRanges.push({
+            end: op.end,
+            start: op.start,
+            trackId: op.trackId,
+          });
+          continue;
+        }
+        if (op.op === CANVAS_OP.QUERY_RANGE) {
+          if (pendingQueries !== null) {
+            pendingQueries = pendingQueries.then(() => runQuery(op));
+            continue;
+          }
+
+          const maybePendingQuery = runQuery(op);
+          if (isPromiseLike(maybePendingQuery)) {
+            pendingQueries = maybePendingQuery;
+          }
+        }
+      }
+
+      return pendingQueries === null
+        ? finishDraw()
+        : pendingQueries.then(finishDraw, failDraw);
+    } catch (error) {
+      return failDraw(error);
+    }
+  }
+
+  function draw() {
+    if (pendingDraw !== null) {
+      return pendingDraw;
+    }
+
+    const result = drawOnce();
+    if (!isPromiseLike(result)) {
+      return result;
+    }
+
+    pendingDraw = result.finally(() => {
+      pendingDraw = null;
+    });
+    return pendingDraw;
   }
 
   return {

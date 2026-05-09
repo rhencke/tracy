@@ -23,6 +23,7 @@
     "test:host-shim": "node tools/host-shim-check.js",
     "test:ingest-worker-runtime": "node tools/ingest-worker-runtime-check.js",
     "test:runtime-worker": "node tools/runtime-worker-orchestration-check.js",
+    "test:interactive-ingest-browser": "node tools/interactive-ingest-browser-check.js",
     "test:direct-esm": "node tools/direct-esm-check.js",
     "test:service-worker": "node tools/service-worker-check.js",
     "test:dist-budget": "node tools/dist-budget-check.js --self-test",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@lhci/cli": "0.15.1",
-    "@playwright/test": "1.59.1"
+    "@playwright/test": "1.59.1",
+    "puppeteer-core": "24.43.0"
   }
 }

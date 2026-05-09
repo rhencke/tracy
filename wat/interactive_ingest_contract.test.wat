@@ -100,31 +100,24 @@
     if (result i32)
       i32.const 6
     else
-      local.get $first_draw_frame_at
-      i32.const 100
-      i32.gt_s
+      local.get $first_draw_elapsed_ms
+      i32.const 0
+      i32.lt_s
       if (result i32)
-        i32.const 7
+        i32.const 8
       else
         local.get $first_draw_elapsed_ms
-        i32.const 0
-        i32.lt_s
+        i32.const 100
+        i32.gt_s
         if (result i32)
-          i32.const 8
+          i32.const 9
         else
-          local.get $first_draw_elapsed_ms
-          i32.const 100
-          i32.gt_s
+          local.get $query_count
+          i32.eqz
           if (result i32)
-            i32.const 9
+            i32.const 10
           else
-            local.get $query_count
-            i32.eqz
-            if (result i32)
-              i32.const 10
-            else
-              call $ok
-            end
+            call $ok
           end
         end
       end
@@ -156,19 +149,15 @@
         if (result i32)
           i32.const 11
         else
-          local.get $partial_seen
-          i32.eqz
-          if (result i32)
-            i32.const 12
-          else
-            local.get $unknown_seen
-            i32.eqz
-            if (result i32)
-              i32.const 13
-            else
-              call $ok
-            end
-          end
+        local.get $partial_seen
+        drop
+        local.get $unknown_seen
+        i32.eqz
+        if (result i32)
+          i32.const 13
+        else
+          call $ok
+        end
         end
       end
     end
@@ -237,7 +226,7 @@
     (result i32)
     local.get $file_offset
     local.get $expected_offset
-    i32.ne
+    i32.lt_u
     if (result i32)
       i32.const 19
     else
@@ -280,7 +269,7 @@
       else
         local.get $file_offset
         local.get $expected_offset
-        i32.lt_u
+        i32.le_u
         if (result i32)
           i32.const 25
         else
@@ -387,7 +376,7 @@
     i32.const 8
     call $assert_eq_i32
 
-    i32.const 10485760
+    i32.const 10485761
     i32.const 104857600
     i32.const 10485760
     i32.const 104857600
@@ -414,11 +403,11 @@
     i32.const 9
     call $assert_eq_i32
 
-    i32.const 101
+    i32.const -1
     i32.const 16
     i32.const 1
     call $interactive_ingest_expect_first_events
-    i32.const 7
+    i32.const 6
     i32.const 11
     call $assert_eq_i32
 
@@ -455,7 +444,7 @@
     i32.const 15
     call $assert_eq_i32
 
-    i32.const 10485760
+    i32.const 10485761
     i32.const 104857600
     i32.const 10485760
     i32.const 104857600

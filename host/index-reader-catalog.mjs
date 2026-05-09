@@ -22,7 +22,13 @@ function hasCatalogRebuildExports(index) {
   );
 }
 
-export function rebuildMainThreadSliceCatalog(
+function promisingWasmExport(fn, receiver = undefined) {
+  return typeof WebAssembly.promising === "function"
+    ? WebAssembly.promising(fn)
+    : fn.bind(receiver);
+}
+
+export async function rebuildMainThreadSliceCatalog(
   memory,
   host,
   index,
@@ -52,8 +58,17 @@ export function rebuildMainThreadSliceCatalog(
   let rebuilt = false;
   let nextPageId = startPage;
   const endPage = probeUntilMissing ? Number.MAX_SAFE_INTEGER : pageCount;
+  const maxProbePages = Math.max(
+    1,
+    Math.floor(options.maxProbePages ?? Number.MAX_SAFE_INTEGER),
+  );
+  const readPage = promisingWasmExport(index.read_page, index);
   for (let pageId = startPage; pageId < endPage; pageId += 1) {
-    const page = index.read_page(0, pageId);
+    if (pageId - startPage >= maxProbePages) {
+      return { catalogFull: false, pageCount: nextPageId, rebuilt };
+    }
+
+    const page = await readPage(0, pageId);
     if (page === 0) {
       if (probeUntilMissing) {
         return { pageCount: pageId, rebuilt };

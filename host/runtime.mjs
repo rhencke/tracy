@@ -1,4 +1,5 @@
-import { HOST_IMPORT_NAME } from "./abi.mjs";
+import { HOST_ASYNC_IMPORTS, HOST_IMPORT_NAME } from "./abi.mjs";
+import { INDEX_FORMAT } from "./index-format-spec.mjs";
 import {
   APP_SHELL_COLORS,
   PERFORMANCE_MARKS,
@@ -26,6 +27,7 @@ const {
   DEFAULT_READER_NAME_PTR,
   DEFAULT_READER_QUERY_ROW_CAP,
 } = RUNTIME_DEFAULTS;
+const DEFAULT_STALE_CATALOG_PROBE_PAGES = 1;
 
 let defaultProgressiveTraceRendererModulePromise = null;
 
@@ -50,6 +52,26 @@ function measurePerformance(name, start, end, options) {
   try {
     performance?.measure?.(name, start, end);
   } catch {}
+}
+
+function wasmHostImports(host) {
+  if (!supportsJSPI()) {
+    return host;
+  }
+
+  const wrapped = { ...host };
+  for (const name of HOST_ASYNC_IMPORTS) {
+    if (typeof host[name] === "function") {
+      wrapped[name] = new WebAssembly.Suspending(host[name]);
+    }
+  }
+  return wrapped;
+}
+
+function promisingWasmExport(fn, receiver = undefined) {
+  return typeof WebAssembly.promising === "function"
+    ? WebAssembly.promising(fn)
+    : fn.bind(receiver);
 }
 
 function reportAppLoadError(error) {
@@ -86,6 +108,27 @@ function normalizedRowCap(value, fallback) {
   return Number.isFinite(numeric) && numeric >= 0
     ? Math.floor(numeric)
     : fallback;
+}
+
+function growMemoryToFit(memory, byteLength) {
+  const pageSize = INDEX_FORMAT.OPFS_PAGE_SIZE;
+  const neededPages = Math.ceil(byteLength / pageSize);
+  const currentPages = Math.floor(memory.buffer.byteLength / pageSize);
+
+  if (neededPages <= currentPages) {
+    return;
+  }
+
+  memory.grow(neededPages - currentPages);
+}
+
+function ensureIndexReaderCacheMemory(memory, slotCount) {
+  const slots = Math.max(1, Math.floor(Number(slotCount)));
+
+  growMemoryToFit(
+    memory,
+    INDEX_FORMAT.MEM_INDEX_CACHE_BASE + slots * INDEX_FORMAT.OPFS_PAGE_SIZE,
+  );
 }
 
 function readCoveredRange(index) {
@@ -158,6 +201,29 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     rebuildSliceCatalog: null,
     state: READER_STATUS.IDLE,
   };
+  let operationQueue = Promise.resolve();
+  let queuedOpenName = null;
+  let queuedOpenPromise = null;
+
+  function runExclusive(operation) {
+    const nextOperation = operationQueue.then(operation, operation);
+
+    operationQueue = nextOperation.catch(() => {});
+    return nextOperation;
+  }
+
+  function queueOpen(indexName) {
+    if (queuedOpenPromise !== null && queuedOpenName === indexName) {
+      return queuedOpenPromise;
+    }
+
+    queuedOpenName = indexName;
+    queuedOpenPromise = runExclusive(() => open(indexName)).finally(() => {
+      queuedOpenName = null;
+      queuedOpenPromise = null;
+    });
+    return queuedOpenPromise;
+  }
 
   function cloneReaderStatus() {
     return {
@@ -188,7 +254,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     const loaded = await instantiate(
       RUNTIME_MODULES.INDEX,
       MAIN_THREAD,
-      { env: { memory }, host },
+      { env: { memory }, host: wasmHostImports(host) },
       {
         baseUrl: options.baseUrl ?? RUNTIME_MODULES.DEFAULT_BASE_URL,
         compile: options.compile,
@@ -212,7 +278,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     return readerState.rebuildSliceCatalog;
   }
 
-  function refreshSliceCatalog(index, indexId, { force = false } = {}) {
+  async function refreshSliceCatalog(index, indexId, { force = false } = {}) {
     if (readerState.rebuildSliceCatalog === null) {
       return false;
     }
@@ -226,22 +292,34 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     const shouldProbe =
       readerState.rebuildSliceCatalog.shouldProbeMainThreadSliceCatalog(host);
     if (
-      !force &&
       shouldProbe &&
-      previousPageCount !== null &&
-      pageCount <= previousPageCount
+      (
+        force ||
+        (
+          previousPageCount !== null &&
+          pageCount <= previousPageCount
+        )
+      )
     ) {
+      const resetCatalog =
+        force || previousPageCount === null || pageCount < previousPageCount;
+      const startPage = resetCatalog ? 0 : previousPageCount;
+      if (resetCatalog && previousPageCount !== null) {
+        index.index_reader_init(indexId);
+      }
       const probed =
-        readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
+        await readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
           memory,
           host,
           index,
           indexId,
           {
             pageCount,
+            maxProbePages:
+              options.staleCatalogProbePages ?? DEFAULT_STALE_CATALOG_PROBE_PAGES,
             probeUntilMissing: true,
-            reset: false,
-            startPage: previousPageCount,
+            reset: resetCatalog,
+            startPage,
           },
         );
       readerState.catalogPageCount = probed.pageCount;
@@ -269,7 +347,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       index.index_reader_init(indexId);
     }
     const rebuilt =
-      readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
+      await readerState.rebuildSliceCatalog.rebuildMainThreadSliceCatalog(
         memory,
         host,
         index,
@@ -300,7 +378,26 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       readerState.state === READER_STATUS.READY &&
       readerState.indexName === indexName
     ) {
-      return true;
+      if (readerState.openPromise !== null) {
+        return readerState.openPromise;
+      }
+
+      readerState.openPromise = (async () => {
+        try {
+          await refreshSliceCatalog(readerState.exports, readerState.indexId, {
+            force: readCoveredRange(readerState.exports).valid === false,
+          });
+          return true;
+        } catch (error) {
+          readerState.error = errorMessage(error);
+          readerState.state = READER_STATUS.ERROR;
+          throw error;
+        } finally {
+          readerState.openPromise = null;
+        }
+      })();
+
+      return readerState.openPromise;
     }
     if (
       readerState.state === READER_STATUS.OPENING &&
@@ -329,12 +426,14 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
           nameLen,
         );
 
-        index.index_reader_configure_cache?.(
-          options.readerCacheSlots ?? DEFAULT_READER_CACHE_SLOTS,
-        );
+        const readerCacheSlots =
+          options.readerCacheSlots ?? DEFAULT_READER_CACHE_SLOTS;
+
+        ensureIndexReaderCacheMemory(memory, readerCacheSlots);
+        index.index_reader_configure_cache?.(readerCacheSlots);
         index.index_reader_init(indexId);
         await loadSliceCatalogRebuild();
-        refreshSliceCatalog(index, indexId, { force: true });
+        await refreshSliceCatalog(index, indexId, { force: true });
         readerState.indexId = indexId;
         readerState.state = READER_STATUS.READY;
         return true;
@@ -355,22 +454,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       if (readerState.exports === null) {
         return { valid: false, start: 0, end: 0 };
       }
-      if (readerState.state === READER_STATUS.READY) {
-        refreshSliceCatalog(readerState.exports, readerState.indexId);
-      }
-
-      const coveredRange = readCoveredRange(readerState.exports);
-      if (
-        coveredRange.valid === false &&
-        readerState.state === READER_STATUS.READY
-      ) {
-        refreshSliceCatalog(readerState.exports, readerState.indexId, {
-          force: true,
-        });
-        return readCoveredRange(readerState.exports);
-      }
-
-      return coveredRange;
+      return readCoveredRange(readerState.exports);
     },
     exports() {
       return readerState.exports;
@@ -381,9 +465,9 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       return true;
     },
     async open(indexName) {
-      return open(indexName);
+      return queueOpen(indexName);
     },
-    queryRange(
+    async queryRange(
       trackId,
       tsMin,
       tsMax,
@@ -397,27 +481,32 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
         throw new Error(RUNTIME_ERRORS.MAIN_THREAD_INDEX_READER_NOT_READY);
       }
 
-      refreshSliceCatalog(readerState.exports, readerState.indexId);
-      const rowCap = normalizedRowCap(maxRows, DEFAULT_READER_QUERY_ROW_CAP);
-      const count = readerState.exports.index_query_range(
-        trackId,
-        tsMin,
-        tsMax,
-        outPtr,
-        rowCap,
-      );
+      return runExclusive(async () => {
+        const rowCap = normalizedRowCap(maxRows, DEFAULT_READER_QUERY_ROW_CAP);
+        const queryRange = promisingWasmExport(
+          readerState.exports.index_query_range,
+          readerState.exports,
+        );
+        const count = await queryRange(
+          trackId,
+          tsMin,
+          tsMax,
+          outPtr,
+          rowCap,
+        );
 
-      return {
-        capped:
-          globalValue(readerState.exports.index_query_range_capped()) !== 0,
-        count,
-        matchedRows: Number(
-          globalValue(readerState.exports.index_query_range_matched_rows()),
-        ),
-        writtenRows: Number(
-          globalValue(readerState.exports.index_query_range_written_rows()),
-        ),
-      };
+        return {
+          capped:
+            globalValue(readerState.exports.index_query_range_capped()) !== 0,
+          count,
+          matchedRows: Number(
+            globalValue(readerState.exports.index_query_range_matched_rows()),
+          ),
+          writtenRows: Number(
+            globalValue(readerState.exports.index_query_range_written_rows()),
+          ),
+        };
+      });
     },
     status() {
       return cloneReaderStatus();
@@ -633,7 +722,10 @@ export function createIngestWorkerController(options = {}) {
 }
 
 function supportsJSPI() {
-  return typeof WebAssembly.Suspending === "function";
+  return (
+    typeof WebAssembly.Suspending === "function" &&
+    typeof WebAssembly.promising === "function"
+  );
 }
 
 function showError(message) {
@@ -886,6 +978,19 @@ function shouldDrawProgressiveTraceRenderer(ingestWorker) {
   );
 }
 
+function drawProgressiveTraceRenderer(renderer, options, ts) {
+  try {
+    const drawn = renderer?.draw?.(ts);
+    drawn?.catch?.((error) => {
+      options.ingestWorker?.fail?.(error);
+      reportAppLoadError(error);
+    });
+  } catch (error) {
+    options.ingestWorker?.fail?.(error);
+    reportAppLoadError(error);
+  }
+}
+
 async function loadApp(memory, host, options = {}) {
   markPerformance(PERFORMANCE_MARKS.coreStart, options);
 
@@ -896,7 +1001,7 @@ async function loadApp(memory, host, options = {}) {
     return;
   }
 
-  const imports = { env: { memory }, host };
+  const imports = { env: { memory }, host: wasmHostImports(host) };
   let progressiveTraceRenderer =
     options.progressiveTraceRenderer === false
       ? null
@@ -1007,26 +1112,30 @@ async function loadApp(memory, host, options = {}) {
 
   const afterAppReadyFrame = () =>
     new Promise((resolve) => requestAnimationFrame(resolve));
+  const filePickerGestureReadyPromise = appReadyPromise.then(afterAppReadyFrame);
+  const filePickerInstalledPromise = filePickerGestureReadyPromise.then(() => {
+    installFilePickerGesture(host, options.ingestWorker, options);
+  });
   const ingestDependenciesReadyPromise =
     options.preloadIngestDependencies === false
       ? Promise.resolve(null)
-      : appReadyPromise
-          .then(afterAppReadyFrame)
-          .then(() =>
-            Promise.all([
-              options.ingestWorker?.indexReader?.preload?.(),
-              options.ingestWorker?.preload?.(),
-            ]),
-          );
+      : filePickerInstalledPromise.then(() =>
+          Promise.all([
+            options.ingestWorker?.indexReader?.preload?.(),
+            options.ingestWorker?.preload?.(),
+          ]),
+        );
 
-  ingestDependenciesReadyPromise.then(() => {
-    installFilePickerGesture(host, options.ingestWorker, options);
+  filePickerInstalledPromise.then(() => {
     if (options.ingest !== undefined) {
-      options.ingestWorker?.start(
-        options.ingest === true ? {} : options.ingest,
-      );
+      ingestDependenciesReadyPromise.then(() => {
+        options.ingestWorker?.start(
+          options.ingest === true ? {} : options.ingest,
+        );
+      }).catch(reportAppLoadError);
     }
   }).catch(reportAppLoadError);
+  ingestDependenciesReadyPromise.catch(reportAppLoadError);
 
   const loop = (ts) => {
     tracy_tick(ts);
@@ -1035,7 +1144,7 @@ async function loadApp(memory, host, options = {}) {
       firstFrameResolve();
     }
     if (progressiveTraceRenderer !== null) {
-      progressiveTraceRenderer.draw?.(ts);
+      drawProgressiveTraceRenderer(progressiveTraceRenderer, options, ts);
     } else if (
       options.progressiveTraceRenderer !== false &&
       progressiveTraceRendererCreatePromise === null &&
@@ -1052,7 +1161,7 @@ async function loadApp(memory, host, options = {}) {
           },
         );
         if (shouldDrawProgressiveTraceRenderer(options.ingestWorker)) {
-          progressiveTraceRenderer.draw?.();
+          drawProgressiveTraceRenderer(progressiveTraceRenderer, options);
         }
         return progressiveTraceRenderer;
       }).catch((error) => {

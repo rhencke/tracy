@@ -73,7 +73,11 @@ function assertInteractiveContractOk(contract, name, args) {
   const fn = contract?.[name];
 
   assert.equal(typeof fn, "function", `missing Wasm interactive ingest contract export ${name}`);
-  assert.equal(fn(...args), 0, `Wasm interactive ingest contract ${name} rejected observations`);
+  assert.equal(
+    fn(...args),
+    0,
+    `Wasm interactive ingest contract ${name} rejected observations ${JSON.stringify(args)}`,
+  );
 }
 
 function flag(value) {
@@ -107,9 +111,10 @@ function installBrowserHarness(canvas) {
   };
   globalThis.WebAssembly.Suspending = class Suspending {
     constructor(fn) {
-      return { fn };
+      return fn;
     }
   };
+  globalThis.WebAssembly.promising = (fn) => fn;
 
   return { frames };
 }
@@ -150,7 +155,7 @@ function makeTraceFile() {
     { ph: "X", name: "second", ts: 140, dur: 60, pid: 1, tid: 2 },
     { ph: "X", name: "third", ts: 260, dur: 80, pid: 1, tid: 1 },
   ].map((event) => JSON.stringify(event)).join(",");
-  const firstChunkPrefix = `{"traceEvents":[${firstChunkEvents},`;
+  const firstChunkPrefix = `[${firstChunkEvents},`;
   const secondChunkEvent = JSON.stringify({
     ph: "X",
     name: "tail",
@@ -160,14 +165,13 @@ function makeTraceFile() {
     tid: 2,
   });
   const prefixBytes = encoder.encode(firstChunkPrefix);
-  const tailBytes = encoder.encode(`${secondChunkEvent}]}`);
-  const streamedBytes = INGEST_WINDOW_BYTES;
-  const paddingLength = streamedBytes - prefixBytes.byteLength - tailBytes.byteLength;
+  const tailBytes = encoder.encode(`${secondChunkEvent}]`);
+  const paddingLength = FIXTURE_SIZE_BYTES - prefixBytes.byteLength - tailBytes.byteLength;
 
   assert.ok(paddingLength > 0, "interactive ingest fixture padding must be positive");
   assert.ok(
-    streamedBytes < FIXTURE_SIZE_BYTES,
-    "interactive ingest fixture should advertise a larger virtual trace than the first streamed window",
+    INGEST_WINDOW_BYTES < FIXTURE_SIZE_BYTES,
+    "interactive ingest fixture should cover a first ingest window within a larger trace",
   );
 
   function copyRange(target, targetStart, source, sourceStart, sourceEnd) {
@@ -189,8 +193,8 @@ function makeTraceFile() {
     name: "throttled-100mb.json",
     size: FIXTURE_SIZE_BYTES,
     readAt(offset, len) {
-      const start = Math.min(Number(offset), streamedBytes);
-      const end = Math.min(streamedBytes, start + len);
+      const start = Math.min(Number(offset), FIXTURE_SIZE_BYTES);
+      const end = Math.min(FIXTURE_SIZE_BYTES, start + len);
       const bytes = new Uint8Array(Math.max(0, end - start));
 
       bytes.fill(0x20);
@@ -199,8 +203,8 @@ function makeTraceFile() {
         bytes,
         start,
         tailBytes,
-        streamedBytes - tailBytes.byteLength,
-        streamedBytes,
+        FIXTURE_SIZE_BYTES - tailBytes.byteLength,
+        FIXTURE_SIZE_BYTES,
       );
       return bytes;
     },
@@ -764,7 +768,7 @@ async function checkInteractiveIngestGate() {
       );
       this.handler = ingestRuntime.createIngestWorkerMessageHandler({
         afterParserYield: async () => {
-          if (this.didYieldForFrame) {
+          if (this.didYieldForFrame && canvasHarness.firstTraceDrawAt() !== null) {
             return;
           }
           this.didYieldForFrame = true;
@@ -829,6 +833,13 @@ async function checkInteractiveIngestGate() {
           this.emit("message", message);
         },
       });
+    }
+
+    flushComplete() {
+      if (this.pendingComplete !== undefined) {
+        this.emit("message", this.pendingComplete);
+        this.pendingComplete = undefined;
+      }
     }
 
     postMessage(message) {
@@ -927,7 +938,7 @@ async function checkInteractiveIngestGate() {
   await flushAsyncWork();
   await waitForAsyncCondition(
     () => typeof canvasHarness.listeners.get("click") === "function",
-    "interactive ingest gate should wire file picking to a user gesture after production preload",
+    "interactive ingest gate should wire file picking to a user gesture without waiting for ingest preload",
   );
   await waitForAsyncCondition(
     () => opfsHarness.calls.some(
@@ -935,29 +946,6 @@ async function checkInteractiveIngestGate() {
     ),
     "interactive ingest gate should install the production file-selection callback during startup",
   );
-  await waitForAsyncCondition(
-    () => frames.length >= 1,
-    "interactive ingest gate should schedule frames after production preload",
-  );
-
-  await waitForAsyncCondition(
-    () => wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
-    "interactive ingest gate should production-preload the main-thread index reader before file selection",
-  );
-  await waitForAsyncCondition(
-    () => wasmModuleWarmups.some((call) => call.id === "parser" && call.thread === "worker") &&
-      wasmModuleWarmups.some((call) => call.id === "index" && call.thread === "worker"),
-    "interactive ingest gate should production-preload worker parser/index wasm before file selection",
-  );
-  if (frames.length > 0) {
-    await runFrame(frames, canvasHarness, 0);
-  }
-  assertInteractiveContractOk(
-    interactiveContract,
-    "interactive_ingest_expect_renderer_preload",
-    [importCalls.length, flag(rendererInstance !== null)],
-  );
-
   const selectedFile = makeTraceFile();
 
   canvasHarness.listeners.get("click")({ preventDefault() {} });
@@ -967,6 +955,28 @@ async function checkInteractiveIngestGate() {
       (call) => call.host === "main" && call.op === "file-picker-open",
     ),
     "interactive ingest gate should open the production file picker path from a user gesture",
+  );
+
+  await waitForAsyncCondition(
+    () => wasmModuleCalls.some((call) => call.id === "index" && call.thread === "main"),
+    "interactive ingest gate should production-preload the main-thread index reader while the file picker is open",
+  );
+  await waitForAsyncCondition(
+    () => wasmModuleWarmups.some((call) => call.id === "parser" && call.thread === "worker") &&
+      wasmModuleWarmups.some((call) => call.id === "index" && call.thread === "worker"),
+    "interactive ingest gate should production-preload worker parser/index wasm while the file picker is open",
+  );
+  await waitForAsyncCondition(
+    () => frames.length >= 1,
+    "interactive ingest gate should schedule frames after production preload",
+  );
+  if (frames.length > 0) {
+    await runFrame(frames, canvasHarness, 0);
+  }
+  assertInteractiveContractOk(
+    interactiveContract,
+    "interactive_ingest_expect_renderer_preload",
+    [importCalls.length, flag(rendererInstance !== null)],
   );
 
   const fileSelectionStartedAt = performance.now();
@@ -1226,7 +1236,7 @@ async function checkInteractiveIngestGate() {
   );
   const largeTraceCheckpoint = progressStatuses.find(
     (entry) =>
-      entry.message.fileOffset >= INGEST_WINDOW_BYTES &&
+      entry.message.fileOffset > INGEST_WINDOW_BYTES &&
       entry.message.fileOffset < FIXTURE_SIZE_BYTES,
   );
 
@@ -1250,11 +1260,18 @@ async function checkInteractiveIngestGate() {
     interactiveContract,
     "interactive_ingest_expect_progress_eta",
     [
-      controller.status().progress.fileOffset,
+      largeTraceCheckpoint.message.fileOffset,
       INGEST_WINDOW_BYTES,
       flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds === null)),
       flag(progressStatuses.some((entry) => entry.status.progress?.etaSeconds > 0)),
     ],
+  );
+
+  controller.worker.flushComplete();
+  assert.equal(
+    controller.status().state,
+    "complete",
+    "interactive ingest gate should release the deferred worker completion after active-ingest assertions",
   );
 
   assert.ok(frameDurations.length > 0, "interactive ingest gate should record real frame durations");

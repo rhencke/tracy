@@ -1,5 +1,5 @@
 import { makeWorkerThreadHost } from "./shim.mjs";
-import { HOST_IMPORT_NAME } from "./abi.mjs";
+import { HOST_ASYNC_IMPORTS, HOST_IMPORT_NAME } from "./abi.mjs";
 import { RUNTIME_DEFAULTS } from "./startup-spec.mjs";
 import {
   compileWasmModuleGraphForThread,
@@ -39,6 +39,33 @@ function globalValue(value) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function supportsWasmJspi() {
+  return (
+    typeof WebAssembly.Suspending === "function" &&
+    typeof WebAssembly.promising === "function"
+  );
+}
+
+function wasmHostImports(host) {
+  if (!supportsWasmJspi()) {
+    return host;
+  }
+
+  const wrapped = { ...host };
+  for (const name of HOST_ASYNC_IMPORTS) {
+    if (typeof host[name] === "function") {
+      wrapped[name] = new WebAssembly.Suspending(host[name]);
+    }
+  }
+  return wrapped;
+}
+
+function promisingWasmExport(fn, receiver = undefined) {
+  return typeof WebAssembly.promising === "function"
+    ? WebAssembly.promising(fn)
+    : fn.bind(receiver);
 }
 
 function makeDefaultMemory() {
@@ -231,7 +258,7 @@ function postProgress(state, phase) {
   });
 }
 
-function drainExtractedEvents({ index, parser }) {
+async function drainExtractedEvents({ addEvent, index, parser }) {
   let extractedEvents = 0;
   const ingestOk = globalValue(index.INDEX_INGEST_STATUS_OK);
   const ingestIgnored = globalValue(index.INDEX_INGEST_STATUS_IGNORED);
@@ -242,7 +269,7 @@ function drainExtractedEvents({ index, parser }) {
       return extractedEvents;
     }
 
-    const appendStatus = index.index_add_event(eventPtr);
+    const appendStatus = await addEvent(eventPtr);
     if (appendStatus !== ingestOk && appendStatus !== ingestIgnored) {
       throw new Error(`index ingest failed with status ${appendStatus}`);
     }
@@ -281,13 +308,13 @@ async function instantiateIngestModules(options, memory, host) {
   const parserLoaded = await instantiate(
     "parser",
     WORKER_THREAD,
-    { env: { memory }, host },
+    { env: { memory }, host: wasmHostImports(host) },
     moduleOptions,
   );
   const indexLoaded = await instantiate(
     "index",
     WORKER_THREAD,
-    { env: { memory }, host },
+    { env: { memory }, host: wasmHostImports(host) },
     moduleOptions,
   );
 
@@ -444,18 +471,24 @@ export async function runWorkerIngest(data, options = {}) {
   postProgress(workerState, "parse");
 
   let extractedEvents = 0;
+  const parseWithBudget = promisingWasmExport(parser.parser_parse_with_budget, parser);
+  const addEvent = promisingWasmExport(index.index_add_event, index);
+  const publishPartial = typeof index.index_writer_publish_partial === "function"
+    ? promisingWasmExport(index.index_writer_publish_partial, index)
+    : null;
+  const flushWriter = promisingWasmExport(index.index_writer_flush, index);
   while (true) {
     const parserByteBudget =
       byteBudget > 0
         ? Math.min(byteBudget, DEFAULT_BYTE_BUDGET)
         : byteBudget;
-    const status = parser.parser_parse_with_budget(
+    const status = await parseWithBudget(
       statePtr,
       chunkBytes,
       parserByteBudget,
     );
 
-    extractedEvents += drainExtractedEvents({ index, parser });
+    extractedEvents += await drainExtractedEvents({ addEvent, index, parser });
 
     if (status === globalValue(parserState.PARSER_STATUS_DONE)) {
       break;
@@ -466,7 +499,7 @@ export async function runWorkerIngest(data, options = {}) {
 
     releaseParserOutput({ parser, parserState, statePtr });
 
-    const publishStatus = index.index_writer_publish_partial?.();
+    const publishStatus = publishPartial === null ? undefined : await publishPartial();
     if (publishStatus !== globalValue(index.INDEX_WRITER_STATUS_OK)) {
       throw new Error(`index partial publish failed with status ${publishStatus}`);
     }
@@ -479,7 +512,7 @@ export async function runWorkerIngest(data, options = {}) {
 
   postProgress(workerState, "index");
 
-  const flushStatus = index.index_writer_flush();
+  const flushStatus = await flushWriter();
   if (flushStatus !== globalValue(index.INDEX_WRITER_STATUS_OK)) {
     throw new Error(`index flush failed with status ${flushStatus}`);
   }

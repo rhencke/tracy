@@ -125,6 +125,9 @@ function renderMemTest() {
 }
 
 function renderIndexFormatSpecModule() {
+  const indexCacheRegion = spec.memoryRegions.find(
+    (entry) => entry.baseConstant === "MEM_INDEX_CACHE_BASE",
+  );
   const decodeHints = Object.entries(spec.index.decodeHints).map(
     ([name, entry]) => [
       name.replace(/^INDEX_DECODE_HINT_/, ""),
@@ -155,6 +158,8 @@ function renderIndexFormatSpecModule() {
     "});",
     "",
     "export const INDEX_FORMAT = Object.freeze({",
+    `  MEM_INDEX_CACHE_BASE: ${indexCacheRegion.base},`,
+    `  MEM_INDEX_CACHE_SIZE: ${indexCacheRegion.size},`,
     `  OPFS_PAGE_SIZE: ${OPFS_PAGE_SIZE},`,
     "});",
     "",

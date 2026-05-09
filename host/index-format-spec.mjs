@@ -8,6 +8,8 @@ export const INDEX_FORMAT_CONTRACT = Object.freeze({
 });
 
 export const INDEX_FORMAT = Object.freeze({
+  MEM_INDEX_CACHE_BASE: 22020096,
+  MEM_INDEX_CACHE_SIZE: 268435456,
   OPFS_PAGE_SIZE: 65536,
 });
 
