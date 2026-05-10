@@ -314,14 +314,14 @@ async function checkTypedScenarioHelpers() {
     fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
     selectedFileHandle,
   );
-  assert.equal(await picker, 91);
+  assert.equal(await picker, selectedFileHandle);
   await Promise.resolve();
-  assert.deepEqual(selected, [{ file: selectedFile, handle: 91 }]);
+  assert.deepEqual(selected, [{ file: selectedFile, handle: selectedFileHandle }]);
   assert.ok(
     fixture.calls.some(
       (call) => call.host === "main" &&
         call.op === OP.selectedFileIngest &&
-        call.handle === 91,
+        call.handle === selectedFileHandle,
     ),
     "typed selected-file ingest helper should record the named scenario operation",
   );
