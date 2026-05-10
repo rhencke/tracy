@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs/promises");
-const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { pathToFileURL } = require("node:url");
+const {
+  compileDistWasmModule,
+  distWasmModuleOptions,
+  instantiateDistWasmModule,
+  moduleUrl,
+} = require("./acceptance-wasm-helpers.js");
 const {
   flushMicrotasks,
   installBrowserGlobals,
@@ -20,14 +23,6 @@ let REQUIRED_TRACE_RENDER_PLANNER_EXPORTS;
 
 const FIRST_EVENTS_BUDGET_MS = 100;
 
-function moduleUrl(relativePath) {
-  return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
-}
-
-function repoPath(relativePath) {
-  return path.resolve(__dirname, "..", relativePath);
-}
-
 async function loadGeneratedInteractiveIngestCheckSpec() {
   const { INTERACTIVE_INGEST_CHECK } = await import(moduleUrl("host/startup-spec.mjs"));
   const { TRACE_RENDERER_REQUIRED_EXPORTS } = await import(
@@ -41,32 +36,17 @@ async function loadGeneratedInteractiveIngestCheckSpec() {
 }
 
 async function instantiateInteractiveIngestVerifier(memory) {
-  const bytes = await fs.readFile(
-    repoPath("dist/wasm/interactive_ingest_contract.test.wasm"),
-  );
   const imports = {
     env: { memory },
     watwat: {
       assert_eq_i32() {},
     },
   };
-  const { instance } = await WebAssembly.instantiate(bytes, imports);
-
-  return instance.exports;
-}
-
-async function compileDistWasmModule(url) {
-  const bytes = await fs.readFile(
-    path.resolve(__dirname, "..", url.replace(/^file:\/\//, "")),
+  const module = await compileDistWasmModule(
+    "dist/wasm/interactive_ingest_contract.test.wasm",
   );
 
-  return WebAssembly.compile(bytes);
-}
-
-async function instantiateDistWasmModule(module, imports) {
-  const instance = await WebAssembly.instantiate(module, imports);
-
-  return instance.exports;
+  return instantiateDistWasmModule(module, imports);
 }
 
 function assertInteractiveContractOk(contract, name, args) {
@@ -720,11 +700,7 @@ async function checkInteractiveIngestGate() {
     "app",
     "main",
     { env: { memory }, host },
-    {
-      baseUrl: "dist/wasm/",
-      compile: compileDistWasmModule,
-      instantiate: instantiateDistWasmModule,
-    },
+    distWasmModuleOptions(),
   );
   assertProductionTraceRenderPlannerExports(appWasm.exports);
 
@@ -746,14 +722,15 @@ async function checkInteractiveIngestGate() {
           this.didYieldForFrame = true;
           await new Promise((resolve) => setTimeout(resolve, 0));
         },
-        baseUrl: "dist/wasm/",
-        compile: (url, id) => {
-          wasmModuleWarmups.push({ id, thread: "worker" });
-          if (!workerWasmCompileCache.has(id)) {
-            workerWasmCompileCache.set(id, compileDistWasmModule(url));
-          }
-          return workerWasmCompileCache.get(id);
-        },
+        ...distWasmModuleOptions({
+          compile: (url, id) => {
+            wasmModuleWarmups.push({ id, thread: "worker" });
+            if (!workerWasmCompileCache.has(id)) {
+              workerWasmCompileCache.set(id, compileDistWasmModule(url));
+            }
+            return workerWasmCompileCache.get(id);
+          },
+        }),
         hostFactory: (workerMemory, files) => {
           assert.equal(workerMemory, this.memory);
           assert.notEqual(
@@ -786,12 +763,10 @@ async function checkInteractiveIngestGate() {
             id,
             thread,
             imports,
-            {
-              baseUrl: "dist/wasm/",
+            distWasmModuleOptions({
               compile: (url, moduleId) =>
                 workerWasmCompileCache.get(moduleId) ?? compileDistWasmModule(url),
-              instantiate: instantiateDistWasmModule,
-            },
+            }),
           );
         },
         memoryFactory: () => this.memory,
@@ -862,11 +837,7 @@ async function checkInteractiveIngestGate() {
           id,
           thread,
           { env: { memory }, host },
-          {
-            baseUrl: "dist/wasm/",
-            compile: compileDistWasmModule,
-            instantiate: instantiateDistWasmModule,
-          },
+          distWasmModuleOptions(),
         );
       }
 

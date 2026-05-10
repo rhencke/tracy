@@ -1,12 +1,7 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
-const path = require("node:path");
-const { pathToFileURL } = require("node:url");
-
-function moduleUrl(relativePath) {
-  return pathToFileURL(path.resolve(__dirname, "..", relativePath)).href;
-}
+const { moduleUrl } = require("./acceptance-wasm-helpers.js");
 
 function decodeString(memory, ptr, len) {
   return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
