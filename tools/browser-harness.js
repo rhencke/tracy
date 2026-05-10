@@ -138,13 +138,22 @@ function installBrowserGlobals(options = {}) {
 
 function installRuntimeBrowserGlobals(options = {}) {
   const {
-    canvas = {},
+    canvas,
     createElement = () => makeFakeElement(),
     ...browserOptions
   } = options;
+  const canvasOverrides = { hidden: false, id: "tracy", ...canvas };
+  const runtimeCanvas =
+    typeof canvas?.getContext === "function"
+      ? canvas
+      : makeFakeCanvas({
+          elementOverrides: canvasOverrides,
+          height: canvas?.height,
+          width: canvas?.width,
+        });
 
   return installBrowserGlobals({
-    canvas: { hidden: false, id: "tracy", ...canvas },
+    canvas: runtimeCanvas,
     createElement,
     ...browserOptions,
   });

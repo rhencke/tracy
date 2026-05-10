@@ -3,13 +3,37 @@
 const assert = require("node:assert/strict");
 const { pathToFileURL } = require("node:url");
 const path = require("node:path");
-const { installBrowserGlobals } = require("./browser-harness.js");
+const {
+  installBrowserGlobals,
+  installRuntimeBrowserGlobals,
+} = require("./browser-harness.js");
 
 function hostKeys(host) {
   return new Set(Object.keys(host));
 }
 
 async function main() {
+  const runtimeGlobals = installRuntimeBrowserGlobals({ raf: false, jspi: false });
+
+  assert.equal(runtimeGlobals.canvas.id, "tracy");
+  assert.equal(runtimeGlobals.canvas.hidden, false);
+  assert.equal(typeof runtimeGlobals.canvas.getContext, "function");
+  assert.equal(typeof runtimeGlobals.canvas.getBoundingClientRect, "function");
+  assert.equal(typeof runtimeGlobals.canvas.addEventListener, "function");
+  assert.equal(runtimeGlobals.canvas.clientWidth, 320);
+  assert.equal(runtimeGlobals.canvas.clientHeight, 240);
+
+  const partialRuntimeGlobals = installRuntimeBrowserGlobals({
+    canvas: { height: 180, width: 360 },
+    raf: false,
+    jspi: false,
+  });
+
+  assert.equal(partialRuntimeGlobals.canvas.id, "tracy");
+  assert.equal(typeof partialRuntimeGlobals.canvas.getContext, "function");
+  assert.equal(partialRuntimeGlobals.canvas.clientWidth, 360);
+  assert.equal(partialRuntimeGlobals.canvas.clientHeight, 180);
+
   installBrowserGlobals({ raf: false, jspi: false });
 
   const shimUrl = pathToFileURL(path.resolve(__dirname, "../host/shim.mjs")).href;
