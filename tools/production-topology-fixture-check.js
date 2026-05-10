@@ -106,7 +106,7 @@ async function checkSelectedFileAndDurableSourceReads() {
 
   fixture.mainHost.setFileSelectedCallback((event) => selected.push(event));
   const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](8, acceptLen);
-  fixture.mainHost.selectPickedFile(77, mainFile);
+  fixture.scenario.selectedFileIngest({ file: mainFile, handle: 77 });
   assert.equal(await picker, 77);
   await Promise.resolve();
   assert.deepEqual(selected, [{ file: mainFile, handle: 77 }]);
@@ -115,10 +115,24 @@ async function checkSelectedFileAndDurableSourceReads() {
 
   assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_SIZE](mainSelectedSourceId), 5n);
 
-  fixture.selectedFiles.set(88, workerFile);
-  const workerHost = fixture.createWorkerHost({
-    files: new Map(fixture.selectedFiles),
+  const sourceName = "sources/trace.json";
+  const sourceNameLen = writeString(mainMemory, 48, sourceName);
+  const mainSourceId = fixture.mainHost[HOST.OPFS_SOURCE_OPEN](48, sourceNameLen);
+
+  assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_READ](mainSourceId, 2n, 2, 64), 2);
+  assert.deepEqual(readBytes(mainMemory, 64, 3), [13, 14, 0]);
+
+  const workerFixture = makeProductionTopologyFixture({
+    mainMemory: new WebAssembly.Memory({ initial: 2 }),
   });
+  const workerAcceptLen = writeString(workerFixture.mainMemory, 8, ".json");
+
+  workerFixture.mainHost.setFileSelectedCallback(() => {});
+  const workerPicker = workerFixture.mainHost[HOST.FILE_PICKER_OPEN](8, workerAcceptLen);
+  workerFixture.scenario.selectedFileIngest({ file: workerFile, handle: 88 });
+  assert.equal(await workerPicker, 88);
+  const workerSourceName = "sources/worker-trace.json";
+  const workerHost = workerFixture.createWorkerHost();
 
   assert.equal(Object.hasOwn(workerHost, "undefined"), false);
   assert.equal(typeof workerHost.opfs_create_from_file, "function");
@@ -127,19 +141,10 @@ async function checkSelectedFileAndDurableSourceReads() {
   assert.equal(workerHost[HOST.OPFS_SOURCE_SIZE](sourceId), 5n);
   assert.equal(workerHost[HOST.OPFS_READ_CHUNK](sourceId, 1n, 3, 32), 3);
   assert.deepEqual(readBytes(workerHost.memory, 32, 4), [22, 23, 24, 0]);
-
-  const sourceName = "sources/trace.json";
-  const sourceNameLen = writeString(mainMemory, 48, sourceName);
-  const mainSourceId = fixture.mainHost[HOST.OPFS_SOURCE_OPEN](48, sourceNameLen);
-
-  assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_READ](mainSourceId, 2n, 2, 64), 2);
-  assert.deepEqual(readBytes(mainMemory, 64, 3), [13, 14, 0]);
-
-  const workerSourceName = "sources/worker-trace.json";
-  const workerSourceNameLen = writeString(mainMemory, 80, workerSourceName);
+  const workerSourceNameLen = writeString(workerFixture.mainMemory, 80, workerSourceName);
 
   assert.throws(
-    () => fixture.mainHost[HOST.OPFS_SOURCE_OPEN](80, workerSourceNameLen),
+    () => workerFixture.mainHost[HOST.OPFS_SOURCE_OPEN](80, workerSourceNameLen),
     /OPFS source sources\/worker-trace\.json should exist before open/,
     "worker-created selected-file sources should not be durable in the main host",
   );
@@ -150,33 +155,28 @@ async function checkDurableIndexAcrossHosts() {
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/trace.idx";
-  const workerNameLen = writeString(workerHost.memory, 16, indexName);
-  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, workerNameLen);
+  const workerIndexId = await fixture.scenario.workerPublication({
+    bytes: new Uint8Array([21, 22, 23, 24]),
+    indexName,
+    offset: 2n,
+    workerHost,
+  });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
-  new Uint8Array(workerHost.memory.buffer, 96, 4).set([21, 22, 23, 24]);
-  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](workerIndexId, 2n, 96, 4), 4);
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), 0);
-
-  const mainNameLen = writeString(mainMemory, 16, indexName);
-  const mainIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](16, mainNameLen);
-
+  assert.equal(workerIndexId, 222);
   assert.equal(fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId), 6n);
-  assert.equal(fixture.mainHost[HOST.OPFS_INDEX_READ](mainIndexId, 0n, 6, 120), 6);
+  assert.equal(fixture.scenario.mainThreadIndexRead({ indexId: mainIndexId, len: 6 }), 6);
   assert.deepEqual(readBytes(mainMemory, 120, 6), [0, 0, 21, 22, 23, 24]);
   assert.deepEqual(
     fixture.calls.filter((call) => [
-      OP.indexCreate,
-      OP.indexFlush,
-      OP.indexOpen,
-      OP.indexRead,
-      OP.indexWrite,
+      OP.workerPublication,
+      OP.mainThreadIndexOpen,
+      OP.mainThreadIndexRead,
     ].includes(call.op)).map((call) => [call.host, call.op, call.name]),
     [
-      ["worker", OP.indexCreate, indexName],
-      ["worker", OP.indexWrite, indexName],
-      ["worker", OP.indexFlush, indexName],
-      ["main", OP.indexOpen, indexName],
-      ["main", OP.indexRead, indexName],
+      ["worker", OP.workerPublication, indexName],
+      ["main", OP.mainThreadIndexOpen, indexName],
+      ["main", OP.mainThreadIndexRead, indexName],
     ],
   );
 }

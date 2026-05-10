@@ -255,6 +255,25 @@ async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
   assert.ok(callback(), label);
 }
 
+async function waitForAsyncAction(callback, label, timeoutMs = 2000) {
+  const deadline = performance.now() + timeoutMs;
+  let lastError = null;
+
+  while (performance.now() < deadline) {
+    try {
+      return await callback();
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1));
+    await flushAsyncWork();
+  }
+
+  assert.fail(
+    `${label}; lastError=${lastError?.message ?? String(lastError)}`,
+  );
+}
+
 async function checkInteractiveIngestGate() {
   await loadGeneratedInteractiveIngestCheckSpec();
   const runtime = await importRepoModule("host/runtime.mjs");
@@ -395,14 +414,17 @@ async function checkInteractiveIngestGate() {
             return;
           }
 
-          this.emit("message", message);
+          opfsHarness.scenario.workerMessageDelivery({ message, worker: this });
         },
       });
     }
 
     flushComplete() {
       if (this.pendingComplete !== undefined) {
-        this.emit("message", this.pendingComplete);
+        opfsHarness.scenario.workerMessageDelivery({
+          message: this.pendingComplete,
+          worker: this,
+        });
         this.pendingComplete = undefined;
       }
     }
@@ -541,7 +563,7 @@ async function checkInteractiveIngestGate() {
 
   const fileSelectionStartedAt = performance.now();
 
-  host.selectPickedFile(77, selectedFile);
+  opfsHarness.scenario.selectedFileIngest({ file: selectedFile, handle: 77 });
   await flushMicrotasks(1);
   assert.notEqual(controller.status().state, "error", controller.status().error);
 
@@ -610,17 +632,16 @@ async function checkInteractiveIngestGate() {
     firstTraceDrawElapsedMs <= FIRST_EVENTS_BUDGET_MS,
     `first visible events took ${firstTraceDrawElapsedMs}ms after file selection`,
   );
-  await waitForAsyncCondition(
+  const workerIndexId = await waitForAsyncAction(
     () =>
-      opfsHarness.calls.some(
-        (call) => call.host === "worker" &&
-          call.op === OP.indexCreate &&
-          call.name === "indexes/throttled-100mb.json.idx",
-      ) || controller.status().state === "error",
-    `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
+      opfsHarness.scenario.workerPublication({
+        indexName: "indexes/throttled-100mb.json.idx",
+      }),
+    `worker should publish the real OPFS index through the scenario helper; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
     2000,
   );
   assert.notEqual(controller.status().state, "error", controller.status().error);
+  assert.equal(workerIndexId, 222);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_worker_start",
@@ -653,8 +674,19 @@ async function checkInteractiveIngestGate() {
   );
   assert.ok(
     opfsHarness.calls.some(
+      (call) => call.host === "worker" &&
+        call.op === OP.workerMessageDelivery,
+    ),
+    "worker should deliver progress through the typed message-delivery helper",
+  );
+  const mainThreadIndexId = opfsHarness.scenario.mainThreadIndexOpen({
+    indexName: "indexes/throttled-100mb.json.idx",
+    observeOnly: true,
+  });
+  assert.ok(
+    opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === OP.indexOpen &&
+        call.op === OP.mainThreadIndexOpen &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "main-thread reader should open the worker-written OPFS index",
@@ -682,31 +714,23 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "worker" &&
-        call.op === OP.indexWrite &&
+        call.op === OP.workerPublication &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "worker should publish index bytes through the named OPFS index",
   );
+  opfsHarness.scenario.mainThreadIndexRead({
+    indexId: mainThreadIndexId,
+    len: 1,
+    observeOnly: true,
+  });
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === OP.indexRead &&
+        call.op === OP.mainThreadIndexRead &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "main thread should read worker-published bytes through the named OPFS index",
-  );
-  assert.ok(
-    opfsHarness.calls.findIndex(
-      (call) => call.host === "worker" &&
-        call.op === OP.indexWrite &&
-        call.name === "indexes/throttled-100mb.json.idx",
-    ) <
-      opfsHarness.calls.findIndex(
-        (call) => call.host === "main" &&
-          call.op === OP.indexOpen &&
-          call.name === "indexes/throttled-100mb.json.idx",
-      ),
-    "main-thread reader should discover the named index after worker publication",
   );
   assert.equal(
     controller.indexReader.status().state,

@@ -629,10 +629,32 @@ function makeProductionTopologyFixture(options = {}) {
     mainThreadIndexOpen({
       indexName,
       namePtr = DEFAULT_SCENARIO_NAME_PTR,
+      observeOnly = false,
     }) {
       const name = requireIndexName(indexName, FIXTURE_OPERATION.mainThreadIndexOpen);
+      const opened = calls.find(
+        (call) => call.host === "main" &&
+          call.op === FIXTURE_OPERATION.indexOpen &&
+          call.name === name,
+      );
 
       requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
+      if (opened !== undefined) {
+        mainThreadIndexOpens.set(opened.id, name);
+        calls.push({
+          host: "main",
+          id: opened.id,
+          name,
+          op: FIXTURE_OPERATION.mainThreadIndexOpen,
+        });
+        return opened.id;
+      }
+
+      assert.equal(
+        observeOnly,
+        false,
+        `${FIXTURE_OPERATION.mainThreadIndexOpen}: production must open OPFS index ${name}`,
+      );
       const nameLen = writeString(mainMemory, namePtr, name);
       const indexId = mainHost[HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen);
 
@@ -649,6 +671,7 @@ function makeProductionTopologyFixture(options = {}) {
       destPtr = DEFAULT_SCENARIO_DEST_PTR,
       indexId,
       len,
+      observeOnly = false,
       offset = 0n,
     }) {
       const name = mainThreadIndexOpens.get(indexId);
@@ -656,6 +679,30 @@ function makeProductionTopologyFixture(options = {}) {
       assert.ok(
         name !== undefined,
         `${FIXTURE_OPERATION.mainThreadIndexRead}: main thread must open OPFS index before read`,
+      );
+      const readCall = calls.find(
+        (call) => call.host === "main" &&
+          call.id === indexId &&
+          call.op === FIXTURE_OPERATION.indexRead &&
+          Number(call.offset) === Number(offset) &&
+          call.len >= len,
+      );
+      if (readCall !== undefined) {
+        calls.push({
+          host: "main",
+          id: indexId,
+          len,
+          name,
+          offset: Number(offset),
+          op: FIXTURE_OPERATION.mainThreadIndexRead,
+        });
+        return len;
+      }
+
+      assert.equal(
+        observeOnly,
+        false,
+        `${FIXTURE_OPERATION.mainThreadIndexRead}: production must read OPFS index ${name}`,
       );
       const read = mainHost[HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr);
 
