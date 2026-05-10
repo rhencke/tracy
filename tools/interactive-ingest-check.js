@@ -346,7 +346,7 @@ async function checkInteractiveIngestGate() {
 
           assert.notEqual(
             workerHost,
-            host,
+            opfsHarness.mainHost,
             "interactive ingest gate must use separate main and worker OPFS hosts",
           );
           return workerHost;
@@ -647,7 +647,9 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should create an isolated worker OPFS host",
   );
   assert.ok(
-    opfsHarness.mainHost.createdWorkerHosts.every((workerHost) => workerHost !== host),
+    opfsHarness.mainHost.createdWorkerHosts.every(
+      (workerHost) => workerHost !== opfsHarness.mainHost,
+    ),
     "main-thread reader must not share its OPFS host object with the worker",
   );
   assert.ok(
