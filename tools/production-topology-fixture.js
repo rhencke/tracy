@@ -357,9 +357,12 @@ function makeProductionTopologyFixture(options = {}) {
         durableIndexes.set(name, { bytes: new Uint8Array(0), name });
         indexes.set(indexId, { id: indexId, name });
         if (host === "worker") {
-          const handoff = workerIndexHandoff(name);
-
-          handoff.lastIndexId = indexId;
+          workerIndexHandoffs.set(name, {
+            flushed: false,
+            lastIndexId: indexId,
+            published: false,
+            writeCount: 0,
+          });
         }
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexCreate });
         return indexId;
@@ -420,7 +423,9 @@ function makeProductionTopologyFixture(options = {}) {
         if (host === "worker") {
           const handoff = workerIndexHandoff(index.name);
 
+          handoff.flushed = false;
           handoff.lastIndexId = indexId;
+          handoff.published = false;
           handoff.writeCount += 1;
         }
         calls.push({

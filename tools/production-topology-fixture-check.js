@@ -313,6 +313,44 @@ async function checkTypedScenarioOrderGuards() {
   );
 }
 
+async function checkWorkerHandoffGenerationReset() {
+  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/reused-worker.idx";
+  const nameLen = writeString(workerHost.memory, 16, indexName);
+  const firstIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, nameLen);
+
+  new Uint8Array(workerHost.memory.buffer, 96, 2).set([61, 62]);
+  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](firstIndexId, 0n, 96, 2), 2);
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](firstIndexId), 0);
+  assert.equal(await fixture.scenario.workerPublication({ indexName }), firstIndexId);
+
+  new Uint8Array(workerHost.memory.buffer, 100, 2).set([63, 64]);
+  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](firstIndexId, 0n, 100, 2), 2);
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName }),
+    /worker must flush OPFS index indexes\/reused-worker\.idx before main-thread handoff/,
+    "worker writes should clear flushed state from a previously published generation",
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](firstIndexId), 0);
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName }),
+    /worker must publish OPFS index indexes\/reused-worker\.idx before main-thread handoff/,
+    "worker writes should clear published state from a previously published generation",
+  );
+  assert.equal(await fixture.scenario.workerPublication({ indexName }), firstIndexId);
+
+  const secondIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, nameLen);
+
+  assert.notEqual(secondIndexId, firstIndexId);
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName }),
+    /worker must flush OPFS index indexes\/reused-worker\.idx before main-thread handoff/,
+    "worker index recreate should reset flushed and published handoff state",
+  );
+}
+
 async function main() {
   checkHostImportNameGuard();
   await checkDefaultSeparation();
@@ -320,6 +358,7 @@ async function main() {
   await checkDurableIndexAcrossHosts();
   await checkTypedScenarioHelpers();
   await checkTypedScenarioOrderGuards();
+  await checkWorkerHandoffGenerationReset();
 }
 
 main().catch((error) => {
