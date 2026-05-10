@@ -247,6 +247,35 @@ function makeProductionTopologyFixture(options = {}) {
     return handoff;
   }
 
+  function canRecordMainThreadIndexOpen(name) {
+    const handoff = workerIndexHandoffs.get(name);
+
+    return handoff !== undefined && handoff.flushed && handoff.published;
+  }
+
+  function recordMainThreadIndexOpen(indexId, name, sourceCallIndex) {
+    mainThreadIndexOpens.set(indexId, name);
+    calls.push({
+      host: "main",
+      id: indexId,
+      name,
+      op: FIXTURE_OPERATION.mainThreadIndexOpen,
+      sourceCallIndex,
+    });
+  }
+
+  function recordMainThreadIndexRead({ indexId, len, name, offset, sourceCallIndex }) {
+    calls.push({
+      host: "main",
+      id: indexId,
+      len,
+      name,
+      offset: Number(offset),
+      op: FIXTURE_OPERATION.mainThreadIndexRead,
+      sourceCallIndex,
+    });
+  }
+
   function sourceFromSelectedFile(host, sources, files, fileHandle) {
     const file = files.get(fileHandle);
     const sourceId = host === "main" ? nextMainSourceId : nextWorkerSourceId;
@@ -381,6 +410,11 @@ function makeProductionTopologyFixture(options = {}) {
         durableIndex(name);
         indexes.set(indexId, { id: indexId, name });
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexOpen });
+        const sourceCallIndex = calls.length - 1;
+
+        if (host === "main" && canRecordMainThreadIndexOpen(name)) {
+          recordMainThreadIndexOpen(indexId, name, sourceCallIndex);
+        }
         return indexId;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
@@ -402,6 +436,15 @@ function makeProductionTopologyFixture(options = {}) {
           offset: start,
           op: FIXTURE_OPERATION.indexRead,
         });
+        if (host === "main" && mainThreadIndexOpens.has(indexId)) {
+          recordMainThreadIndexRead({
+            indexId,
+            len,
+            name: index.name,
+            offset: start,
+            sourceCallIndex: calls.length - 1,
+          });
+        }
         copyToMemory(memory, chunk, destPtr, len);
         return chunk.byteLength;
       },
@@ -639,6 +682,11 @@ function makeProductionTopologyFixture(options = {}) {
       const name = requireIndexName(indexName, FIXTURE_OPERATION.mainThreadIndexOpen);
       const opened = calls.find(
         (call) => call.host === "main" &&
+          call.op === FIXTURE_OPERATION.mainThreadIndexOpen &&
+          call.name === name,
+      );
+      const rawOpenCallIndex = calls.findIndex(
+        (call) => call.host === "main" &&
           call.op === FIXTURE_OPERATION.indexOpen &&
           call.name === name,
       );
@@ -646,13 +694,13 @@ function makeProductionTopologyFixture(options = {}) {
       requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
       if (opened !== undefined) {
         mainThreadIndexOpens.set(opened.id, name);
-        calls.push({
-          host: "main",
-          id: opened.id,
-          name,
-          op: FIXTURE_OPERATION.mainThreadIndexOpen,
-        });
         return opened.id;
+      }
+      if (rawOpenCallIndex !== -1) {
+        const rawOpenCall = calls[rawOpenCallIndex];
+
+        recordMainThreadIndexOpen(rawOpenCall.id, name, rawOpenCallIndex);
+        return rawOpenCall.id;
       }
 
       assert.equal(
@@ -663,13 +711,6 @@ function makeProductionTopologyFixture(options = {}) {
       const nameLen = writeString(mainMemory, namePtr, name);
       const indexId = mainHost[HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen);
 
-      mainThreadIndexOpens.set(indexId, name);
-      calls.push({
-        host: "main",
-        id: indexId,
-        name,
-        op: FIXTURE_OPERATION.mainThreadIndexOpen,
-      });
       return indexId;
     },
     mainThreadIndexRead({
@@ -688,18 +729,27 @@ function makeProductionTopologyFixture(options = {}) {
       const readCall = calls.find(
         (call) => call.host === "main" &&
           call.id === indexId &&
+          call.op === FIXTURE_OPERATION.mainThreadIndexRead &&
+          Number(call.offset) === Number(offset) &&
+          call.len >= len,
+      );
+      const rawReadCallIndex = calls.findIndex(
+        (call) => call.host === "main" &&
+          call.id === indexId &&
           call.op === FIXTURE_OPERATION.indexRead &&
           Number(call.offset) === Number(offset) &&
           call.len >= len,
       );
       if (readCall !== undefined) {
-        calls.push({
-          host: "main",
-          id: indexId,
+        return len;
+      }
+      if (rawReadCallIndex !== -1) {
+        recordMainThreadIndexRead({
+          indexId,
           len,
           name,
-          offset: Number(offset),
-          op: FIXTURE_OPERATION.mainThreadIndexRead,
+          offset,
+          sourceCallIndex: rawReadCallIndex,
         });
         return len;
       }
@@ -711,14 +761,6 @@ function makeProductionTopologyFixture(options = {}) {
       );
       const read = mainHost[HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr);
 
-      calls.push({
-        host: "main",
-        id: indexId,
-        len,
-        name,
-        offset: Number(offset),
-        op: FIXTURE_OPERATION.mainThreadIndexRead,
-      });
       return read;
     },
     workerMessageDelivery({ message, worker }) {

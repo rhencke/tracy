@@ -351,6 +351,109 @@ async function checkWorkerHandoffGenerationReset() {
   );
 }
 
+async function checkTypedScenarioChronology() {
+  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const earlyIndexName = "indexes/early-open.idx";
+  const earlyNameLen = writeString(workerHost.memory, 16, earlyIndexName);
+  const earlyWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, earlyNameLen);
+
+  new Uint8Array(workerHost.memory.buffer, 96, 1).set([71]);
+  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](earlyWorkerIndexId, 0n, 96, 1), 1);
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](earlyWorkerIndexId), 0);
+  const earlyMainNameLen = writeString(mainMemory, 16, earlyIndexName);
+
+  const earlyMainIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](16, earlyMainNameLen);
+  const earlyRawOpenIndex = fixture.calls.findIndex(
+    (call) => call.host === "main" &&
+      call.op === OP.indexOpen &&
+      call.name === earlyIndexName,
+  );
+  assert.equal(await fixture.scenario.workerPublication({ indexName: earlyIndexName }), earlyWorkerIndexId);
+  const earlyPublicationIndex = fixture.calls.findIndex(
+    (call) => call.host === "worker" &&
+      call.op === OP.workerPublication &&
+      call.name === earlyIndexName,
+  );
+
+  assert.equal(
+    fixture.scenario.mainThreadIndexOpen({
+      indexName: earlyIndexName,
+      observeOnly: true,
+    }),
+    earlyMainIndexId,
+  );
+  const typedEarlyOpen = fixture.calls.find(
+    (call) => call.host === "main" &&
+      call.op === OP.mainThreadIndexOpen &&
+      call.name === earlyIndexName,
+  );
+
+  assert.equal(
+    typedEarlyOpen.sourceCallIndex,
+    earlyRawOpenIndex,
+    "observe-only open should carry the original raw open index",
+  );
+  assert.ok(
+    typedEarlyOpen.sourceCallIndex < earlyPublicationIndex,
+    "typed open metadata should reveal a raw open that ran before worker publication",
+  );
+
+  const readIndexName = "indexes/read-order.idx";
+  const readWorkerNameLen = writeString(workerHost.memory, 48, readIndexName);
+  const readWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](48, readWorkerNameLen);
+
+  new Uint8Array(workerHost.memory.buffer, 104, 1).set([72]);
+  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](readWorkerIndexId, 0n, 104, 1), 1);
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](readWorkerIndexId), 0);
+  assert.equal(await fixture.scenario.workerPublication({ indexName: readIndexName }), readWorkerIndexId);
+  const readMainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName: readIndexName });
+
+  assert.equal(fixture.mainHost[HOST.OPFS_INDEX_READ](readMainIndexId, 0n, 1, 120), 1);
+  const laterIndexName = "indexes/later-marker.idx";
+
+  await fixture.scenario.workerPublication({
+    bytes: new Uint8Array([73]),
+    indexName: laterIndexName,
+    workerHost,
+  });
+  assert.equal(
+    fixture.scenario.mainThreadIndexRead({
+      indexId: readMainIndexId,
+      len: 1,
+      observeOnly: true,
+    }),
+    1,
+  );
+  const typedOps = fixture.calls.filter((call) => [
+    OP.mainThreadIndexRead,
+    OP.workerPublication,
+  ].includes(call.op));
+  const readIndex = typedOps.findIndex(
+    (call) => call.op === OP.mainThreadIndexRead && call.name === readIndexName,
+  );
+  const laterPublicationIndex = typedOps.findIndex(
+    (call) => call.op === OP.workerPublication && call.name === laterIndexName,
+  );
+
+  assert.notEqual(readIndex, -1, "raw main-thread read should record typed metadata at read time");
+  assert.notEqual(laterPublicationIndex, -1, "later publication marker should be present");
+  assert.ok(
+    readIndex < laterPublicationIndex,
+    "typed-only filtering should preserve the raw read chronology",
+  );
+  assert.equal(
+    typedOps[readIndex].sourceCallIndex,
+    fixture.calls.findIndex(
+      (call) => call.host === "main" &&
+        call.op === OP.indexRead &&
+        call.name === readIndexName,
+    ),
+    "typed read metadata should carry the original raw read index",
+  );
+}
+
 async function main() {
   checkHostImportNameGuard();
   await checkDefaultSeparation();
@@ -359,6 +462,7 @@ async function main() {
   await checkTypedScenarioHelpers();
   await checkTypedScenarioOrderGuards();
   await checkWorkerHandoffGenerationReset();
+  await checkTypedScenarioChronology();
 }
 
 main().catch((error) => {

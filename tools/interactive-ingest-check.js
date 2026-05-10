@@ -590,6 +590,17 @@ async function checkInteractiveIngestGate() {
     },
   ]);
 
+  const workerIndexId = await waitForAsyncAction(
+    () =>
+      opfsHarness.scenario.workerPublication({
+        indexName: "indexes/throttled-100mb.json.idx",
+      }),
+    `worker should publish the real OPFS index through the scenario helper; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
+    2000,
+  );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
+  assert.equal(workerIndexId, 222);
+
   let nextFrameAt = 10;
   while (
     performance.now() - fileSelectionStartedAt <= FIRST_EVENTS_BUDGET_MS &&
@@ -632,16 +643,17 @@ async function checkInteractiveIngestGate() {
     firstTraceDrawElapsedMs <= FIRST_EVENTS_BUDGET_MS,
     `first visible events took ${firstTraceDrawElapsedMs}ms after file selection`,
   );
-  const workerIndexId = await waitForAsyncAction(
-    () =>
-      opfsHarness.scenario.workerPublication({
-        indexName: "indexes/throttled-100mb.json.idx",
-      }),
-    `worker should publish the real OPFS index through the scenario helper; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
-    2000,
+  assert.equal(
+    await waitForAsyncAction(
+      () =>
+        opfsHarness.scenario.workerPublication({
+          indexName: "indexes/throttled-100mb.json.idx",
+        }),
+      `worker should publish the final OPFS index generation before main-thread open; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
+      2000,
+    ),
+    workerIndexId,
   );
-  assert.notEqual(controller.status().state, "error", controller.status().error);
-  assert.equal(workerIndexId, 222);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_worker_start",
