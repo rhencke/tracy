@@ -285,11 +285,13 @@ async function checkDurableIndexAcrossHosts() {
 }
 
 async function checkTypedScenarioHelpers() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixtureMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: fixtureMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const selected = [];
+  const selectedFileBytes = new Uint8Array([31, 32, 33, 34]);
   const selectedFile = {
-    bytes: new Uint8Array([31, 32, 33, 34]),
+    bytes: selectedFileBytes,
     name: "scenario.json",
   };
   const acceptLen = writeString(mainMemory, 8, ".json");
