@@ -560,18 +560,41 @@ async function checkWorkerHandoffGenerationReset() {
 }
 
 async function checkWorkerPublicationRequiresWrittenBytes() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const workerPublicationMemoryPageCount = 2;
+  const workerIndexName = "indexes/zero-byte-write.idx";
+  const workerIndexNamePointer = 16;
+  const indexWriteOffset = 0n;
+  const zeroByteWritePointer = 96;
+  const zeroByteWriteLength = 0;
+  const expectedZeroByteWriteCount = zeroByteWriteLength;
+  const expectedFlushResult = 0;
+  const escapedWorkerIndexName = workerIndexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedPublicationWithoutBytesError = new RegExp(
+    `worker publication requires worker OPFS index ${escapedWorkerIndexName} to contain bytes`,
+  );
+  const mainMemory = new WebAssembly.Memory({ initial: workerPublicationMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
-  const indexName = "indexes/zero-byte-write.idx";
-  const nameLen = writeString(workerHost.memory, 16, indexName);
-  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, nameLen);
+  const createWorkerIndex = () => {
+    const nameLen = writeString(workerHost.memory, workerIndexNamePointer, workerIndexName);
 
-  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](workerIndexId, 0n, 96, 0), 0);
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), 0);
+    return workerHost[HOST.OPFS_INDEX_CREATE](workerIndexNamePointer, nameLen);
+  };
+  const workerIndexId = createWorkerIndex();
+
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      zeroByteWritePointer,
+      zeroByteWriteLength,
+    ),
+    expectedZeroByteWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
   await assert.rejects(
-    () => fixture.scenario.workerPublication({ indexName }),
-    /worker publication requires worker OPFS index indexes\/zero-byte-write\.idx to contain bytes/,
+    () => fixture.scenario.workerPublication({ indexName: workerIndexName }),
+    expectedPublicationWithoutBytesError,
     "zero-length worker writes should not satisfy the publication contains-bytes guard",
   );
 }
