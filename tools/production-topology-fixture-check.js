@@ -298,6 +298,7 @@ async function checkTypedScenarioHelpers() {
     bytes: selectedFileBytes,
     name: selectedFileName,
   };
+  const expectedSelectedFileSourceName = `sources/${selectedFileName}`;
   const acceptLen = writeString(
     mainMemory,
     selectedFileAcceptPointer,
@@ -367,7 +368,7 @@ async function checkTypedScenarioHelpers() {
       OP.mainThreadIndexRead,
     ].includes(call.op)).map((call) => [call.host, call.op, call.name ?? call.messageType]),
     [
-      ["main", OP.selectedFileIngest, "sources/scenario.json"],
+      ["main", OP.selectedFileIngest, expectedSelectedFileSourceName],
       ["worker", OP.workerPublication, workerPublicationIndexName],
       ["main", OP.mainThreadIndexOpen, workerPublicationIndexName],
       ["main", OP.mainThreadIndexRead, workerPublicationIndexName],
@@ -375,21 +376,26 @@ async function checkTypedScenarioHelpers() {
   );
 
   let delivered = null;
+  const workerMessageIngestId = 1;
+  const workerMessageType = "progress";
+  const workerMessage = { ingestId: workerMessageIngestId, type: workerMessageType };
+  const expectedWorkerMessageDeliveryResult = true;
+  const expectedWorkerMessageEmitType = "message";
 
   assert.equal(
     fixture.scenario.workerMessageDelivery({
-      message: { ingestId: 1, type: "progress" },
+      message: workerMessage,
       worker: {
         emit(type, message) {
           delivered = { message, type };
         },
       },
     }),
-    true,
+    expectedWorkerMessageDeliveryResult,
   );
   assert.deepEqual(delivered, {
-    message: { ingestId: 1, type: "progress" },
-    type: "message",
+    message: workerMessage,
+    type: expectedWorkerMessageEmitType,
   });
 }
 
