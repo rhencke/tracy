@@ -213,10 +213,10 @@ function makeProductionTopologyFixture(options = {}) {
 
     if (handoff === undefined) {
       handoff = {
+        bytesWritten: 0,
         flushed: false,
         lastIndexId: null,
         published: false,
-        writeCount: 0,
       };
       workerIndexHandoffs.set(name, handoff);
     }
@@ -395,10 +395,10 @@ function makeProductionTopologyFixture(options = {}) {
         indexes.set(indexId, { id: indexId, name });
         if (host === "worker") {
           workerIndexHandoffs.set(name, {
+            bytesWritten: 0,
             flushed: false,
             lastIndexId: indexId,
             published: false,
-            writeCount: 0,
           });
         }
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexCreate });
@@ -478,9 +478,9 @@ function makeProductionTopologyFixture(options = {}) {
           const handoff = workerIndexHandoff(index.name);
 
           handoff.flushed = false;
+          handoff.bytesWritten += len;
           handoff.lastIndexId = indexId;
           handoff.published = false;
-          handoff.writeCount += 1;
         }
         calls.push({
           host,
@@ -669,7 +669,7 @@ function makeProductionTopologyFixture(options = {}) {
       const handoff = requireWorkerIndexHandoff(name, FIXTURE_OPERATION.workerPublication);
 
       assert.ok(
-        handoff.writeCount > 0,
+        handoff.bytesWritten > 0,
         `worker publication requires worker OPFS index ${name} to contain bytes`,
       );
       assert.ok(

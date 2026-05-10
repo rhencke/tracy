@@ -351,6 +351,23 @@ async function checkWorkerHandoffGenerationReset() {
   );
 }
 
+async function checkWorkerPublicationRequiresWrittenBytes() {
+  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/zero-byte-write.idx";
+  const nameLen = writeString(workerHost.memory, 16, indexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, nameLen);
+
+  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](workerIndexId, 0n, 96, 0), 0);
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), 0);
+  await assert.rejects(
+    () => fixture.scenario.workerPublication({ indexName }),
+    /worker publication requires worker OPFS index indexes\/zero-byte-write\.idx to contain bytes/,
+    "zero-length worker writes should not satisfy the publication contains-bytes guard",
+  );
+}
+
 async function checkTypedScenarioChronology() {
   const mainMemory = new WebAssembly.Memory({ initial: 2 });
   const fixture = makeProductionTopologyFixture({ mainMemory });
@@ -513,6 +530,7 @@ async function main() {
   await checkTypedScenarioHelpers();
   await checkTypedScenarioOrderGuards();
   await checkWorkerHandoffGenerationReset();
+  await checkWorkerPublicationRequiresWrittenBytes();
   await checkTypedScenarioChronology();
   await checkObservedIndexReadPreservesRawReadCount();
 }
