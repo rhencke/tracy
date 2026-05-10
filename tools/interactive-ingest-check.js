@@ -17,6 +17,10 @@ const {
   makeFakeCanvasContext,
   runAnimationFrame,
 } = require("./browser-harness.js");
+const {
+  FIXTURE_OPERATION: OP,
+  makeProductionTopologyFixture,
+} = require("./production-topology-fixture.js");
 
 let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
@@ -70,10 +74,6 @@ function makeInteractiveIngestMemory() {
 }
 
 const FakeWorker = createFakeWorkerClass();
-
-function decodeString(memory, ptr, len) {
-  return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
-}
 
 function makeTraceFile() {
   const encoder = new TextEncoder();
@@ -135,370 +135,6 @@ function makeTraceFile() {
       );
       return bytes;
     },
-  };
-}
-
-function makeProductionTopologyOpfsHarness(memory, HOST_IMPORT_NAME) {
-  const mainFiles = new Map();
-  const durableIndexes = new Map();
-  const calls = [];
-  let fileSelectedCallback = null;
-  let pendingFilePickerOpen = null;
-  let nextMainSourceId = 112;
-  let nextMainIndexId = 122;
-  let nextWorkerSourceId = 212;
-  let nextWorkerIndexId = 222;
-  const createdWorkerHosts = [];
-
-  function putNameFrom(targetMemory, ptr, len) {
-    return decodeString(targetMemory, ptr, len);
-  }
-
-  function copyToMemory(targetMemory, src, destPtr, len) {
-    const dest = new Uint8Array(targetMemory.buffer, destPtr, len);
-
-    dest.fill(0);
-    dest.set(src.subarray(0, len));
-  }
-
-  function durableIndex(name) {
-    const index = durableIndexes.get(name);
-
-    assert.ok(index !== undefined, `OPFS index ${name} should exist before open`);
-    return index;
-  }
-
-  function makeMainHost() {
-    const sources = new Map();
-    const indexes = new Map();
-
-    function requireSource(sourceId) {
-      const source = sources.get(sourceId);
-
-      assert.ok(source !== undefined, `unknown main OPFS source id ${sourceId}`);
-      return source;
-    }
-
-    function requireIndex(indexId) {
-      const index = indexes.get(indexId);
-
-      assert.ok(index !== undefined, `unknown main OPFS index id ${indexId}`);
-      return index;
-    }
-
-    const mainHost = {
-      calls,
-      createdWorkerHosts,
-      selectPickedFile(handle, file) {
-        assert.notEqual(
-          pendingFilePickerOpen,
-          null,
-          "interactive ingest gate must start from a production file_picker_open call",
-        );
-        const callback =
-          typeof fileSelectedCallback === "function"
-            ? fileSelectedCallback
-            : fileSelectedCallback?.fn;
-        assert.equal(
-          typeof callback,
-          "function",
-          `interactive ingest gate must install the production file-selection callback; calls=${JSON.stringify(calls)}`,
-        );
-        mainFiles.set(handle, file);
-        queueMicrotask(() => callback({ file, handle }));
-        pendingFilePickerOpen.resolve(handle);
-        pendingFilePickerOpen = null;
-      },
-      setFileSelectedCallback(callback) {
-        calls.push({
-          callbackType: typeof callback,
-          host: "main",
-          op: "set-file-selected-callback",
-        });
-        fileSelectedCallback = callback;
-      },
-      [HOST_IMPORT_NAME.FILE_PICKER_OPEN](acceptPtr, acceptLen) {
-        assert.equal(
-          pendingFilePickerOpen,
-          null,
-          "interactive ingest gate should not open multiple file pickers at once",
-        );
-        calls.push({
-          accept: putNameFrom(memory, acceptPtr, acceptLen),
-          host: "main",
-          op: "file-picker-open",
-        });
-        return new Promise((resolve) => {
-          pendingFilePickerOpen = { resolve };
-        });
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
-        const file = mainFiles.get(fileHandle);
-        const sourceId = nextMainSourceId;
-
-        assert.ok(file !== undefined, `unknown selected file handle ${fileHandle}`);
-        nextMainSourceId += 1;
-        calls.push({ handle: fileHandle, host: "main", op: "source-from-file" });
-        sources.set(sourceId, {
-          file,
-          name: `sources/${file.name}`,
-          size: file.size,
-        });
-        return sourceId;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN](sourceId) {
-        return new TextEncoder().encode(requireSource(sourceId).name).byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_NAME](sourceId, destPtr, destLen) {
-        const encoded = new TextEncoder().encode(requireSource(sourceId).name);
-
-        assert.ok(destLen >= encoded.byteLength);
-        new Uint8Array(memory.buffer, destPtr, destLen).set(encoded);
-        return encoded.byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
-        const name = putNameFrom(memory, namePtr, nameLen);
-        const sourceId = nextMainSourceId;
-
-        nextMainSourceId += 1;
-        calls.push({ host: "main", name, op: "source-open" });
-        sources.set(sourceId, {
-          file: makeTraceFile(),
-          name,
-          size: FIXTURE_SIZE_BYTES,
-        });
-        return sourceId;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
-        return BigInt(requireSource(sourceId).size);
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, offset, len, destPtr) {
-        const source = requireSource(sourceId);
-        const start = Number(offset);
-        const chunk = source.file.readAt(start, len);
-
-        copyToMemory(memory, chunk, destPtr, len);
-        return chunk.byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
-        const name = putNameFrom(memory, namePtr, nameLen);
-        const indexId = nextMainIndexId;
-
-        nextMainIndexId += 1;
-        calls.push({ host: "main", id: indexId, name, op: "index-create" });
-        durableIndexes.set(name, { bytes: new Uint8Array(0), name });
-        indexes.set(indexId, { id: indexId, name });
-        return indexId;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
-        const name = putNameFrom(memory, namePtr, nameLen);
-        const indexId = nextMainIndexId;
-
-        durableIndex(name);
-        nextMainIndexId += 1;
-        calls.push({ host: "main", id: indexId, name, op: "index-open" });
-        indexes.set(indexId, { id: indexId, name });
-        return indexId;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
-        const index = requireIndex(indexId);
-
-        return BigInt(durableIndex(index.name).bytes.byteLength);
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr) {
-        const index = requireIndex(indexId);
-        const start = Number(offset);
-        const bytes = durableIndex(index.name).bytes;
-        const chunk = bytes.subarray(start, Math.min(bytes.byteLength, start + len));
-
-        calls.push({
-          host: "main",
-          id: indexId,
-          len,
-          name: index.name,
-          offset: start,
-          op: "index-read",
-        });
-        copyToMemory(memory, chunk, destPtr, len);
-        return chunk.byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_WRITE](indexId, offset, srcPtr, len) {
-        const index = requireIndex(indexId);
-        const start = Number(offset);
-        const end = start + len;
-        const durable = durableIndex(index.name);
-        const nextBytes =
-          end > durable.bytes.byteLength
-            ? new Uint8Array(end)
-            : new Uint8Array(durable.bytes);
-
-        if (end > durable.bytes.byteLength) {
-          nextBytes.set(durable.bytes);
-        }
-        nextBytes.set(new Uint8Array(memory.buffer, srcPtr, len), start);
-        durable.bytes = nextBytes;
-        calls.push({
-          host: "main",
-          id: indexId,
-          len,
-          name: index.name,
-          offset: start,
-          op: "index-write",
-        });
-        return len;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
-        const index = requireIndex(indexId);
-
-        calls.push({ host: "main", id: indexId, name: index.name, op: "index-flush" });
-        return 0;
-      },
-    };
-
-    return mainHost;
-  }
-
-  function makeWorkerHost(files, workerMemory) {
-    const sources = new Map();
-    const indexes = new Map();
-
-    function requireSource(sourceId) {
-      const source = sources.get(sourceId);
-
-      assert.ok(source !== undefined, `unknown worker OPFS source id ${sourceId}`);
-      return source;
-    }
-
-    function requireIndex(indexId) {
-      const index = indexes.get(indexId);
-
-      assert.ok(index !== undefined, `unknown worker OPFS index id ${indexId}`);
-      return index;
-    }
-
-    const workerHost = {
-      [HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](fileHandle) {
-        const file = files.get(fileHandle);
-        const sourceId = nextWorkerSourceId;
-
-        assert.ok(file !== undefined, `unknown worker selected file handle ${fileHandle}`);
-        nextWorkerSourceId += 1;
-        calls.push({ handle: fileHandle, host: "worker", op: "source-from-file" });
-        sources.set(sourceId, {
-          file,
-          name: `sources/${file.name}`,
-          size: file.size,
-        });
-        return sourceId;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_NAME_LEN](sourceId) {
-        return new TextEncoder().encode(requireSource(sourceId).name).byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_NAME](sourceId, destPtr, destLen) {
-        const encoded = new TextEncoder().encode(requireSource(sourceId).name);
-
-        assert.ok(destLen >= encoded.byteLength);
-        new Uint8Array(memory.buffer, destPtr, destLen).set(encoded);
-        return encoded.byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_OPEN](namePtr, nameLen) {
-        const name = putNameFrom(workerMemory, namePtr, nameLen);
-
-        calls.push({ host: "worker", name, op: "source-open" });
-        throw new Error(`worker OPFS source ${name} should come from selected File`);
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_SIZE](sourceId) {
-        return BigInt(requireSource(sourceId).size);
-      },
-      [HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, offset, len, destPtr) {
-        const source = requireSource(sourceId);
-        const start = Number(offset);
-        const chunk = source.file.readAt(start, len);
-
-        copyToMemory(workerMemory, chunk, destPtr, len);
-        return chunk.byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen) {
-        const name = putNameFrom(workerMemory, namePtr, nameLen);
-        const indexId = nextWorkerIndexId;
-
-        nextWorkerIndexId += 1;
-        durableIndexes.set(name, { bytes: new Uint8Array(0), name });
-        indexes.set(indexId, { id: indexId, name });
-        calls.push({ host: "worker", id: indexId, name, op: "index-create" });
-        return indexId;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
-        const name = putNameFrom(workerMemory, namePtr, nameLen);
-        const indexId = nextWorkerIndexId;
-
-        durableIndex(name);
-        nextWorkerIndexId += 1;
-        indexes.set(indexId, { id: indexId, name });
-        calls.push({ host: "worker", id: indexId, name, op: "index-open" });
-        return indexId;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
-        const index = requireIndex(indexId);
-
-        return BigInt(durableIndex(index.name).bytes.byteLength);
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr) {
-        const index = requireIndex(indexId);
-        const start = Number(offset);
-        const bytes = durableIndex(index.name).bytes;
-        const chunk = bytes.subarray(start, Math.min(bytes.byteLength, start + len));
-
-        calls.push({ host: "worker", id: indexId, len, name: index.name, offset: start, op: "index-read" });
-        copyToMemory(workerMemory, chunk, destPtr, len);
-        return chunk.byteLength;
-      },
-      [HOST_IMPORT_NAME.OPFS_INDEX_WRITE](indexId, offset, srcPtr, len) {
-        const index = requireIndex(indexId);
-        const start = Number(offset);
-        const end = start + len;
-        const durable = durableIndex(index.name);
-        const nextBytes =
-          end > durable.bytes.byteLength
-            ? new Uint8Array(end)
-            : new Uint8Array(durable.bytes);
-
-        if (end > durable.bytes.byteLength) {
-          nextBytes.set(durable.bytes);
-        }
-        nextBytes.set(new Uint8Array(workerMemory.buffer, srcPtr, len), start);
-        durable.bytes = nextBytes;
-        calls.push({ host: "worker", id: indexId, len, name: index.name, offset: start, op: "index-write" });
-        return len;
-      },
-      async [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
-        const index = requireIndex(indexId);
-
-        if (
-          !calls.some(
-            (call) => call.host === "worker" &&
-              call.id === indexId &&
-              call.name === index.name &&
-              call.op === "index-flush",
-          )
-        ) {
-          calls.push({ host: "worker", id: indexId, name: index.name, op: "index-flush" });
-        }
-        await new Promise((resolve) => setImmediate(resolve));
-        return 0;
-      },
-    };
-
-    createdWorkerHosts.push(workerHost);
-    return workerHost;
-  }
-
-  const mainHost = makeMainHost();
-
-  return {
-    calls,
-    mainHost,
-    makeWorkerHost,
   };
 }
 
@@ -639,7 +275,10 @@ async function checkInteractiveIngestGate() {
   let workerHostSawIndependentMemory = false;
   let workerImportSawIndependentMemory = false;
   const interactiveContract = await instantiateInteractiveIngestVerifier(memory);
-  const opfsHarness = makeProductionTopologyOpfsHarness(memory, abi.HOST_IMPORT_NAME);
+  const opfsHarness = makeProductionTopologyFixture({
+    HOST_IMPORT_NAME: abi.HOST_IMPORT_NAME,
+    mainMemory: memory,
+  });
   const host = {
     ...opfsHarness.mainHost,
     [abi.HOST_IMPORT_NAME.CANVAS_GET_SIZE]() {
@@ -647,15 +286,18 @@ async function checkInteractiveIngestGate() {
     },
     [abi.HOST_IMPORT_NAME.CANVAS_LISTEN_RESIZE]() {},
     [abi.HOST_IMPORT_NAME.POINTER_LISTEN]() {},
-    [abi.HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]() {
-      return 0;
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_READ_CHUNK]() {
-      return 0;
-    },
-    [abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]: true,
   };
   assert.equal(typeof host.setFileSelectedCallback, "function");
+  assert.equal(
+    opfsHarness.mainHost[abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+    abi.OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale,
+    "production topology fixture main host should expose the OPFS stale-size marker",
+  );
+  assert.equal(
+    host[abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+    abi.OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale,
+    "interactive ingest host should inherit the OPFS stale-size marker from the fixture",
+  );
   assert.equal(
     typeof host[abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE],
     "function",
@@ -706,12 +348,23 @@ async function checkInteractiveIngestGate() {
           workerHostSawIndependentMemory = true;
           assert.ok(files instanceof Map, "worker host should receive selected files");
           assert.equal(files.size, 1, "worker host should receive the selected File by handle");
-          const workerHost = opfsHarness.makeWorkerHost(files, workerMemory);
+          const workerHost = opfsHarness.createWorkerHost({
+            files,
+            memory: workerMemory,
+          });
 
           assert.notEqual(
             workerHost,
-            host,
+            opfsHarness.mainHost,
             "interactive ingest gate must use separate main and worker OPFS hosts",
+          );
+          assert.equal(
+            Object.hasOwn(
+              workerHost,
+              abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker,
+            ),
+            false,
+            "worker OPFS hosts must not expose the main-thread stale-size marker",
           );
           return workerHost;
         },
@@ -823,7 +476,7 @@ async function checkInteractiveIngestGate() {
   await flushAsyncWork();
   assert.equal(
     opfsHarness.calls.some(
-      (call) => call.host === "main" && call.op === "file-picker-open",
+      (call) => call.host === "main" && call.op === OP.filePickerOpen,
     ),
     false,
     "interactive ingest gate should not open the file picker during app load",
@@ -849,7 +502,7 @@ async function checkInteractiveIngestGate() {
   );
   await waitForAsyncCondition(
     () => opfsHarness.calls.some(
-      (call) => call.host === "main" && call.op === "set-file-selected-callback",
+      (call) => call.host === "main" && call.op === OP.setFileSelectedCallback,
     ),
     "interactive ingest gate should install the production file-selection callback during startup",
   );
@@ -859,7 +512,7 @@ async function checkInteractiveIngestGate() {
   await flushAsyncWork();
   assert.ok(
     opfsHarness.calls.some(
-      (call) => call.host === "main" && call.op === "file-picker-open",
+      (call) => call.host === "main" && call.op === OP.filePickerOpen,
     ),
     "interactive ingest gate should open the production file picker path from a user gesture",
   );
@@ -961,7 +614,7 @@ async function checkInteractiveIngestGate() {
     () =>
       opfsHarness.calls.some(
         (call) => call.host === "worker" &&
-          call.op === "index-create" &&
+          call.op === OP.indexCreate &&
           call.name === "indexes/throttled-100mb.json.idx",
       ) || controller.status().state === "error",
     `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
@@ -976,14 +629,14 @@ async function checkInteractiveIngestGate() {
       flag(
         opfsHarness.calls.some(
           (call) => call.host === "worker" &&
-            call.op === "source-from-file" &&
+            call.op === OP.sourceFromFile &&
             call.handle === 77,
         ),
       ),
       flag(
         opfsHarness.calls.some(
           (call) => call.host === "worker" &&
-            call.op === "index-create" &&
+            call.op === OP.indexCreate &&
             call.name === "indexes/throttled-100mb.json.idx",
         ),
       ),
@@ -1001,7 +654,7 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === "index-open" &&
+        call.op === OP.indexOpen &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "main-thread reader should open the worker-written OPFS index",
@@ -1011,13 +664,25 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should create an isolated worker OPFS host",
   );
   assert.ok(
-    opfsHarness.mainHost.createdWorkerHosts.every((workerHost) => workerHost !== host),
+    opfsHarness.mainHost.createdWorkerHosts.every(
+      (workerHost) => workerHost !== opfsHarness.mainHost,
+    ),
     "main-thread reader must not share its OPFS host object with the worker",
+  );
+  assert.ok(
+    opfsHarness.mainHost.createdWorkerHosts.every(
+      (workerHost) =>
+        !Object.hasOwn(
+          workerHost,
+          abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker,
+        ),
+    ),
+    "worker OPFS hosts must not expose the main-thread stale-size marker",
   );
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "worker" &&
-        call.op === "index-write" &&
+        call.op === OP.indexWrite &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "worker should publish index bytes through the named OPFS index",
@@ -1025,7 +690,7 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === "index-read" &&
+        call.op === OP.indexRead &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "main thread should read worker-published bytes through the named OPFS index",
@@ -1033,12 +698,12 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.findIndex(
       (call) => call.host === "worker" &&
-        call.op === "index-write" &&
+        call.op === OP.indexWrite &&
         call.name === "indexes/throttled-100mb.json.idx",
     ) <
       opfsHarness.calls.findIndex(
         (call) => call.host === "main" &&
-          call.op === "index-open" &&
+          call.op === OP.indexOpen &&
           call.name === "indexes/throttled-100mb.json.idx",
       ),
     "main-thread reader should discover the named index after worker publication",

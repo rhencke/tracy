@@ -393,6 +393,8 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
     [/flushAsyncWork/, "async flushing"],
     [/runAnimationFrame/, "frame execution"],
     [/importRepoModule/, "repo module imports"],
+    [/production-topology-fixture\.js/, "production topology fixture"],
+    [/makeProductionTopologyFixture/, "production topology fixture factory"],
   ]) {
     assert.match(
       source,
@@ -409,12 +411,70 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
     [/moduleUrl\(/, "direct moduleUrl imports"],
     [/installBrowserGlobals/, "low-level browser global installation"],
     [/makeFakeElement/, "local fake element wiring"],
+    [/function\s+makeProductionTopologyOpfsHarness\b/, "a local production topology harness"],
+    [
+      /\[abi\.OPFS_BRIDGE_CONTRACT\.indexSizeMayBeStaleMarker\]\s*:\s*true/,
+      "a manual OPFS stale-size marker patch",
+    ],
     [/globalThis\.requestAnimationFrame\s*=/, "local RAF installation"],
   ]) {
     assert.doesNotMatch(
       source,
       pattern,
       `interactive ingest check should not own ${message}`,
+    );
+  }
+}
+
+function assertProductionTopologyFixtureUsesHostAbiSpec() {
+  const source = readRepoFile("tools/production-topology-fixture.js");
+
+  assert.match(
+    source,
+    /require\("\.\.\/abi\/host\.json"\)/,
+    "production topology fixture should read host import names from abi/host.json",
+  );
+  assert.match(
+    source,
+    /hostAbi\.hostImports/,
+    "production topology fixture should derive host import names from the host ABI spec",
+  );
+  assert.match(
+    source,
+    /hostAbi\.opfsBridge\.fixtureOperations/,
+    "production topology fixture should derive observable operation names from the host ABI spec",
+  );
+  assert.match(
+    source,
+    /hostAbi\.opfsBridge\.indexSizeMayBeStaleMarker/,
+    "production topology fixture should derive the OPFS stale-size marker key from the host ABI spec",
+  );
+  assert.match(
+    source,
+    /hostAbi\.opfsBridge\.mainIndexSizeMayBeStale/,
+    "production topology fixture should derive the OPFS stale-size marker value from the host ABI spec",
+  );
+
+  for (const [pattern, message] of [
+    [/const\s+DEFAULT_HOST_IMPORT_NAME\s*=\s*Object\.freeze\(\{/, "default host import table"],
+    [/FILE_PICKER_OPEN:\s*"file_picker_open"/, "file picker import name"],
+    [/OPFS_CREATE_FROM_FILE:\s*"opfs_create_from_file"/, "OPFS create-from-file import name"],
+    [/OPFS_INDEX_CREATE:\s*"opfs_index_create"/, "OPFS index-create import name"],
+    [/op:\s*"source-from-file"/, "source-from-file operation name"],
+    [/op:\s*"source-open"/, "source-open operation name"],
+    [/op:\s*"index-create"/, "index-create operation name"],
+    [/op:\s*"index-open"/, "index-open operation name"],
+    [/op:\s*"index-read"/, "index-read operation name"],
+    [/op:\s*"index-write"/, "index-write operation name"],
+    [/op:\s*"index-flush"/, "index-flush operation name"],
+    [/op:\s*"set-file-selected-callback"/, "file-selection callback operation name"],
+    [/op:\s*"file-picker-open"/, "file-picker-open operation name"],
+    [/op:\s*"same-host-test-shortcut"/, "same-host shortcut operation name"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `production topology fixture should not own a duplicated ${message}`,
     );
   }
 }
@@ -898,6 +958,10 @@ function main() {
     packageJson.scripts["test:palette-spec"],
     "node tools/generate-palette-spec.js --check",
   );
+  assert.equal(
+    packageJson.scripts["test:production-topology-fixture"],
+    "node tools/production-topology-fixture-check.js",
+  );
   assert.equal(packageJson.scripts.test, "make test");
   assert.equal(packageJson.devDependencies?.["es" + "build"], undefined);
   assert.match(makefile, /node tools\/direct-esm-check\.js/);
@@ -910,6 +974,13 @@ function main() {
     "tools/runtime-worker-orchestration-check.js",
   ]) {
     assertTracked(relativePath);
+  }
+
+  for (const relativePath of [
+    "tools/production-topology-fixture.js",
+    "tools/production-topology-fixture-check.js",
+  ]) {
+    assert(fs.existsSync(path.join(ROOT_DIR, relativePath)));
   }
 
   for (const relativePath of [
@@ -965,6 +1036,7 @@ function main() {
   assertRuntimeWorkerCheckUsesSharedHarness();
   assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
   assertInteractiveIngestCheckUsesSharedHarness();
+  assertProductionTopologyFixtureUsesHostAbiSpec();
 }
 
 try {

@@ -332,6 +332,18 @@
       "separator": "-",
       "suffix": ".bin"
     },
+    "fixtureOperations": {
+      "filePickerOpen": "file-picker-open",
+      "indexCreate": "index-create",
+      "indexFlush": "index-flush",
+      "indexOpen": "index-open",
+      "indexRead": "index-read",
+      "indexWrite": "index-write",
+      "sameHostTestShortcut": "same-host-test-shortcut",
+      "setFileSelectedCallback": "set-file-selected-callback",
+      "sourceFromFile": "source-from-file",
+      "sourceOpen": "source-open"
+    },
     "mainIndexSizeMayBeStale": true,
     "workerPersistsFileSources": false,
     "defaultPersistsFileSources": true
