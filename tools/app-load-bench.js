@@ -17,6 +17,7 @@ const RUNTIME_SPEC = JSON.parse(
 );
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
+const FAILED_REQUEST_TRANSFER_BYTES = 0;
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
   latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -694,6 +695,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     }
     loadingBytes.set(event.requestId, event.encodedDataLength ?? 0);
   });
+  const offLoadingFailed = cdp.on("Network.loadingFailed", (event, sessionId) => {
+    if (sessionId !== page.sessionId) {
+      return;
+    }
+    loadingBytes.set(event.requestId, FAILED_REQUEST_TRANSFER_BYTES);
+  });
 
   if (options.fast3g) {
     await cdp.send("Network.emulateNetworkConditions", {
@@ -810,6 +817,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   offCache();
   offResponse();
   offLoading();
+  offLoadingFailed();
 
   return metrics;
 }
@@ -1240,6 +1248,14 @@ function runSelfTest() {
   assert.match(
     navigateAndMeasure.toString(),
     /unfinishedTransferRequestIds\(coreRequestIds, cachedRequestIds, loadingBytes\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /Network\.loadingFailed/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /loadingBytes\.set\(event\.requestId, FAILED_REQUEST_TRANSFER_BYTES\)/,
   );
   assert.match(
     navigateAndMeasure.toString(),
