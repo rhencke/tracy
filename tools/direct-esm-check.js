@@ -393,6 +393,8 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
     [/flushAsyncWork/, "async flushing"],
     [/runAnimationFrame/, "frame execution"],
     [/importRepoModule/, "repo module imports"],
+    [/production-topology-fixture\.js/, "production topology fixture"],
+    [/makeProductionTopologyFixture/, "production topology fixture factory"],
   ]) {
     assert.match(
       source,
@@ -409,6 +411,7 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
     [/moduleUrl\(/, "direct moduleUrl imports"],
     [/installBrowserGlobals/, "low-level browser global installation"],
     [/makeFakeElement/, "local fake element wiring"],
+    [/function\s+makeProductionTopologyOpfsHarness\b/, "a local production topology harness"],
     [/globalThis\.requestAnimationFrame\s*=/, "local RAF installation"],
   ]) {
     assert.doesNotMatch(
