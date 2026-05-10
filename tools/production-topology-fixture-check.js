@@ -454,6 +454,57 @@ async function checkTypedScenarioChronology() {
   );
 }
 
+async function checkObservedIndexReadPreservesRawReadCount() {
+  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/short-read.idx";
+  const requestedLen = 4;
+  const actualBytes = new Uint8Array([81, 82]);
+
+  await fixture.scenario.workerPublication({
+    bytes: actualBytes,
+    indexName,
+    workerHost,
+  });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+
+  assert.equal(
+    fixture.mainHost[HOST.OPFS_INDEX_READ](mainIndexId, 0n, requestedLen, 120),
+    actualBytes.byteLength,
+    "raw index read should report the bytes actually copied",
+  );
+  assert.equal(
+    fixture.scenario.mainThreadIndexRead({
+      indexId: mainIndexId,
+      len: requestedLen,
+      observeOnly: true,
+    }),
+    actualBytes.byteLength,
+    "observe-only typed read should preserve the raw read count",
+  );
+
+  const rawRead = fixture.calls.find(
+    (call) => call.host === "main" &&
+      call.id === mainIndexId &&
+      call.op === OP.indexRead &&
+      call.name === indexName,
+  );
+  const typedRead = fixture.calls.find(
+    (call) => call.host === "main" &&
+      call.id === mainIndexId &&
+      call.op === OP.mainThreadIndexRead &&
+      call.name === indexName,
+  );
+
+  assert.ok(rawRead !== undefined, "raw index read call should be logged");
+  assert.ok(typedRead !== undefined, "typed index read observation should be logged");
+  assert.equal(rawRead.len, requestedLen);
+  assert.equal(rawRead.readCount, actualBytes.byteLength);
+  assert.equal(typedRead.len, requestedLen);
+  assert.equal(typedRead.readCount, actualBytes.byteLength);
+}
+
 async function main() {
   checkHostImportNameGuard();
   await checkDefaultSeparation();
@@ -463,6 +514,7 @@ async function main() {
   await checkTypedScenarioOrderGuards();
   await checkWorkerHandoffGenerationReset();
   await checkTypedScenarioChronology();
+  await checkObservedIndexReadPreservesRawReadCount();
 }
 
 main().catch((error) => {

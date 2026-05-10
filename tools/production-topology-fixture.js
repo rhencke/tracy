@@ -264,7 +264,14 @@ function makeProductionTopologyFixture(options = {}) {
     });
   }
 
-  function recordMainThreadIndexRead({ indexId, len, name, offset, sourceCallIndex }) {
+  function recordMainThreadIndexRead({
+    indexId,
+    len,
+    name,
+    offset,
+    readCount,
+    sourceCallIndex,
+  }) {
     calls.push({
       host: "main",
       id: indexId,
@@ -272,6 +279,7 @@ function makeProductionTopologyFixture(options = {}) {
       name,
       offset: Number(offset),
       op: FIXTURE_OPERATION.mainThreadIndexRead,
+      readCount,
       sourceCallIndex,
     });
   }
@@ -427,6 +435,7 @@ function makeProductionTopologyFixture(options = {}) {
         const start = Number(offset);
         const bytes = durableIndex(index.name).bytes;
         const chunk = bytes.subarray(start, Math.min(bytes.byteLength, start + len));
+        const readCount = chunk.byteLength;
 
         calls.push({
           host,
@@ -435,6 +444,7 @@ function makeProductionTopologyFixture(options = {}) {
           name: index.name,
           offset: start,
           op: FIXTURE_OPERATION.indexRead,
+          readCount,
         });
         if (host === "main" && mainThreadIndexOpens.has(indexId)) {
           recordMainThreadIndexRead({
@@ -442,11 +452,12 @@ function makeProductionTopologyFixture(options = {}) {
             len,
             name: index.name,
             offset: start,
+            readCount,
             sourceCallIndex: calls.length - 1,
           });
         }
         copyToMemory(memory, chunk, destPtr, len);
-        return chunk.byteLength;
+        return readCount;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_WRITE](indexId, offset, srcPtr, len) {
         const index = requireIndex(indexId);
@@ -741,17 +752,20 @@ function makeProductionTopologyFixture(options = {}) {
           call.len >= len,
       );
       if (readCall !== undefined) {
-        return len;
+        return readCall.readCount;
       }
       if (rawReadCallIndex !== -1) {
+        const rawReadCall = calls[rawReadCallIndex];
+
         recordMainThreadIndexRead({
           indexId,
-          len,
+          len: rawReadCall.len,
           name,
-          offset,
+          offset: rawReadCall.offset,
+          readCount: rawReadCall.readCount,
           sourceCallIndex: rawReadCallIndex,
         });
-        return len;
+        return rawReadCall.readCount;
       }
 
       assert.equal(
