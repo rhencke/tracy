@@ -898,6 +898,10 @@ function main() {
     packageJson.scripts["test:palette-spec"],
     "node tools/generate-palette-spec.js --check",
   );
+  assert.equal(
+    packageJson.scripts["test:production-topology-fixture"],
+    "node tools/production-topology-fixture-check.js",
+  );
   assert.equal(packageJson.scripts.test, "make test");
   assert.equal(packageJson.devDependencies?.["es" + "build"], undefined);
   assert.match(makefile, /node tools\/direct-esm-check\.js/);
@@ -910,6 +914,13 @@ function main() {
     "tools/runtime-worker-orchestration-check.js",
   ]) {
     assertTracked(relativePath);
+  }
+
+  for (const relativePath of [
+    "tools/production-topology-fixture.js",
+    "tools/production-topology-fixture-check.js",
+  ]) {
+    assert(fs.existsSync(path.join(ROOT_DIR, relativePath)));
   }
 
   for (const relativePath of [

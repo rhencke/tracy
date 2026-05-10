@@ -23,6 +23,7 @@
     "test:host-shim": "node tools/host-shim-check.js",
     "test:ingest-worker-runtime": "node tools/ingest-worker-runtime-check.js",
     "test:runtime-worker": "node tools/runtime-worker-orchestration-check.js",
+    "test:production-topology-fixture": "node tools/production-topology-fixture-check.js",
     "test:interactive-ingest-browser": "node tools/interactive-ingest-browser-check.js",
     "test:direct-esm": "node tools/direct-esm-check.js",
     "test:service-worker": "node tools/service-worker-check.js",
