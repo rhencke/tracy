@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 
 const DEFAULT_HOST_IMPORT_NAME = Object.freeze({
   FILE_PICKER_OPEN: "file_picker_open",
+  OPFS_CREATE_FROM_FILE: "opfs_create_from_file",
   OPFS_INDEX_CREATE: "opfs_index_create",
   OPFS_INDEX_FLUSH: "opfs_index_flush",
   OPFS_INDEX_OPEN: "opfs_index_open",
@@ -18,6 +19,38 @@ const DEFAULT_HOST_IMPORT_NAME = Object.freeze({
   OPFS_SOURCE_READ: "opfs_source_read",
   OPFS_SOURCE_SIZE: "opfs_source_size",
 });
+const REQUIRED_HOST_IMPORT_KEYS = Object.freeze([
+  "FILE_PICKER_OPEN",
+  "OPFS_CREATE_FROM_FILE",
+  "OPFS_INDEX_CREATE",
+  "OPFS_INDEX_FLUSH",
+  "OPFS_INDEX_OPEN",
+  "OPFS_INDEX_READ",
+  "OPFS_INDEX_SIZE",
+  "OPFS_INDEX_WRITE",
+  "OPFS_READ_CHUNK",
+  "OPFS_SOURCE_FROM_FILE",
+  "OPFS_SOURCE_NAME",
+  "OPFS_SOURCE_NAME_LEN",
+  "OPFS_SOURCE_OPEN",
+  "OPFS_SOURCE_READ",
+  "OPFS_SOURCE_SIZE",
+]);
+
+function assertHostImportNames(HOST_IMPORT_NAME) {
+  for (const key of REQUIRED_HOST_IMPORT_KEYS) {
+    assert.equal(
+      typeof HOST_IMPORT_NAME[key],
+      "string",
+      `production topology fixture host import ${key} must be defined`,
+    );
+    assert.notEqual(
+      HOST_IMPORT_NAME[key].length,
+      0,
+      `production topology fixture host import ${key} must not be empty`,
+    );
+  }
+}
 
 function makeDefaultMemory() {
   return new WebAssembly.Memory({ initial: 2 });
@@ -94,6 +127,9 @@ function defaultSourceName(file) {
 
 function makeProductionTopologyFixture(options = {}) {
   const HOST_IMPORT_NAME = options.HOST_IMPORT_NAME ?? DEFAULT_HOST_IMPORT_NAME;
+
+  assertHostImportNames(HOST_IMPORT_NAME);
+
   const mainMemory = options.mainMemory ?? makeDefaultMemory();
   const workerMemoryFactory = options.workerMemoryFactory ?? makeDefaultMemory;
   const calls = [];

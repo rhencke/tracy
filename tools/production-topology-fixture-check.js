@@ -19,6 +19,24 @@ function readBytes(memory, ptr, len) {
   return Array.from(new Uint8Array(memory.buffer, ptr, len));
 }
 
+function withoutImportName(importNames, key) {
+  const copy = { ...importNames };
+
+  delete copy[key];
+  return copy;
+}
+
+function checkHostImportNameGuard() {
+  assert.equal(HOST.OPFS_CREATE_FROM_FILE, "opfs_create_from_file");
+  assert.throws(
+    () => makeProductionTopologyFixture({
+      HOST_IMPORT_NAME: withoutImportName(HOST, "OPFS_CREATE_FROM_FILE"),
+    }),
+    /OPFS_CREATE_FROM_FILE must be defined/,
+    "fixture should fail before creating a host with an undefined computed import key",
+  );
+}
+
 async function checkDefaultSeparation() {
   const mainMemory = new WebAssembly.Memory({ initial: 2 });
   const fixture = makeProductionTopologyFixture({ mainMemory });
@@ -71,6 +89,9 @@ async function checkSelectedFileAndDurableSourceReads() {
   const workerHost = fixture.createWorkerHost({
     files: new Map(fixture.selectedFiles),
   });
+
+  assert.equal(Object.hasOwn(workerHost, "undefined"), false);
+  assert.equal(typeof workerHost.opfs_create_from_file, "function");
   const sourceId = workerHost[HOST.OPFS_CREATE_FROM_FILE](77);
 
   assert.equal(workerHost[HOST.OPFS_SOURCE_SIZE](sourceId), 5n);
@@ -120,6 +141,7 @@ async function checkDurableIndexAcrossHosts() {
 }
 
 async function main() {
+  checkHostImportNameGuard();
   await checkDefaultSeparation();
   await checkSelectedFileAndDurableSourceReads();
   await checkDurableIndexAcrossHosts();
