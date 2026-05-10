@@ -422,6 +422,34 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
   }
 }
 
+function assertProductionTopologyFixtureUsesHostAbiSpec() {
+  const source = readRepoFile("tools/production-topology-fixture.js");
+
+  assert.match(
+    source,
+    /require\("\.\.\/abi\/host\.json"\)/,
+    "production topology fixture should read host import names from abi/host.json",
+  );
+  assert.match(
+    source,
+    /hostAbi\.hostImports/,
+    "production topology fixture should derive host import names from the host ABI spec",
+  );
+
+  for (const [pattern, message] of [
+    [/const\s+DEFAULT_HOST_IMPORT_NAME\s*=\s*Object\.freeze\(\{/, "default host import table"],
+    [/FILE_PICKER_OPEN:\s*"file_picker_open"/, "file picker import name"],
+    [/OPFS_CREATE_FROM_FILE:\s*"opfs_create_from_file"/, "OPFS create-from-file import name"],
+    [/OPFS_INDEX_CREATE:\s*"opfs_index_create"/, "OPFS index-create import name"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `production topology fixture should not own a duplicated ${message}`,
+    );
+  }
+}
+
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
   const source = readRepoFile("host/ingest-worker-runtime.mjs");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
@@ -979,6 +1007,7 @@ function main() {
   assertRuntimeWorkerCheckUsesSharedHarness();
   assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
   assertInteractiveIngestCheckUsesSharedHarness();
+  assertProductionTopologyFixtureUsesHostAbiSpec();
 }
 
 try {

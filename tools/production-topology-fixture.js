@@ -1,41 +1,22 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const hostAbi = require("../abi/host.json");
 
-const DEFAULT_HOST_IMPORT_NAME = Object.freeze({
-  FILE_PICKER_OPEN: "file_picker_open",
-  OPFS_CREATE_FROM_FILE: "opfs_create_from_file",
-  OPFS_INDEX_CREATE: "opfs_index_create",
-  OPFS_INDEX_FLUSH: "opfs_index_flush",
-  OPFS_INDEX_OPEN: "opfs_index_open",
-  OPFS_INDEX_READ: "opfs_index_read",
-  OPFS_INDEX_SIZE: "opfs_index_size",
-  OPFS_INDEX_WRITE: "opfs_index_write",
-  OPFS_READ_CHUNK: "opfs_read_chunk",
-  OPFS_SOURCE_FROM_FILE: "opfs_source_from_file",
-  OPFS_SOURCE_NAME: "opfs_source_name",
-  OPFS_SOURCE_NAME_LEN: "opfs_source_name_len",
-  OPFS_SOURCE_OPEN: "opfs_source_open",
-  OPFS_SOURCE_READ: "opfs_source_read",
-  OPFS_SOURCE_SIZE: "opfs_source_size",
-});
-const REQUIRED_HOST_IMPORT_KEYS = Object.freeze([
-  "FILE_PICKER_OPEN",
-  "OPFS_CREATE_FROM_FILE",
-  "OPFS_INDEX_CREATE",
-  "OPFS_INDEX_FLUSH",
-  "OPFS_INDEX_OPEN",
-  "OPFS_INDEX_READ",
-  "OPFS_INDEX_SIZE",
-  "OPFS_INDEX_WRITE",
-  "OPFS_READ_CHUNK",
-  "OPFS_SOURCE_FROM_FILE",
-  "OPFS_SOURCE_NAME",
-  "OPFS_SOURCE_NAME_LEN",
-  "OPFS_SOURCE_OPEN",
-  "OPFS_SOURCE_READ",
-  "OPFS_SOURCE_SIZE",
-]);
+function hostImportConstantName(name) {
+  return name.toUpperCase();
+}
+
+function makeHostImportNameMap(hostImports) {
+  return Object.freeze(
+    Object.fromEntries(
+      hostImports.map((entry) => [hostImportConstantName(entry.name), entry.name]),
+    ),
+  );
+}
+
+const DEFAULT_HOST_IMPORT_NAME = makeHostImportNameMap(hostAbi.hostImports);
+const REQUIRED_HOST_IMPORT_KEYS = Object.freeze(Object.keys(DEFAULT_HOST_IMPORT_NAME));
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
