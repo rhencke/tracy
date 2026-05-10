@@ -327,24 +327,38 @@ async function checkTypedScenarioHelpers() {
   );
 
   const workerHost = fixture.createWorkerHost();
-  const indexName = "indexes/scenario.idx";
+  const workerPublicationIndexName = "indexes/scenario.idx";
+  const workerPublicationBytes = new Uint8Array([41, 42, 43, 44]);
+  const expectedWorkerPublicationIndexId = 222;
+  const expectedMainThreadIndexId = 122;
+  const mainThreadReadLength = workerPublicationBytes.byteLength;
+  const mainThreadReadDestinationPointer = 120;
+  const expectedMainThreadReadBytes = Array.from(workerPublicationBytes);
 
   assert.equal(
     await fixture.scenario.workerPublication({
-      bytes: new Uint8Array([41, 42, 43, 44]),
-      indexName,
+      bytes: workerPublicationBytes,
+      indexName: workerPublicationIndexName,
       workerHost,
     }),
-    222,
+    expectedWorkerPublicationIndexId,
   );
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({
+    indexName: workerPublicationIndexName,
+  });
 
-  assert.equal(mainIndexId, 122);
+  assert.equal(mainIndexId, expectedMainThreadIndexId);
   assert.equal(
-    fixture.scenario.mainThreadIndexRead({ indexId: mainIndexId, len: 4 }),
-    4,
+    fixture.scenario.mainThreadIndexRead({
+      indexId: mainIndexId,
+      len: mainThreadReadLength,
+    }),
+    mainThreadReadLength,
   );
-  assert.deepEqual(readBytes(mainMemory, 120, 4), [41, 42, 43, 44]);
+  assert.deepEqual(
+    readBytes(mainMemory, mainThreadReadDestinationPointer, mainThreadReadLength),
+    expectedMainThreadReadBytes,
+  );
   assert.deepEqual(
     fixture.calls.filter((call) => [
       OP.selectedFileIngest,
@@ -354,9 +368,9 @@ async function checkTypedScenarioHelpers() {
     ].includes(call.op)).map((call) => [call.host, call.op, call.name ?? call.messageType]),
     [
       ["main", OP.selectedFileIngest, "sources/scenario.json"],
-      ["worker", OP.workerPublication, indexName],
-      ["main", OP.mainThreadIndexOpen, indexName],
-      ["main", OP.mainThreadIndexRead, indexName],
+      ["worker", OP.workerPublication, workerPublicationIndexName],
+      ["main", OP.mainThreadIndexOpen, workerPublicationIndexName],
+      ["main", OP.mainThreadIndexRead, workerPublicationIndexName],
     ],
   );
 
