@@ -286,12 +286,6 @@ async function checkInteractiveIngestGate() {
     },
     [abi.HOST_IMPORT_NAME.CANVAS_LISTEN_RESIZE]() {},
     [abi.HOST_IMPORT_NAME.POINTER_LISTEN]() {},
-    [abi.HOST_IMPORT_NAME.OPFS_CREATE_FROM_FILE]() {
-      return 0;
-    },
-    [abi.HOST_IMPORT_NAME.OPFS_READ_CHUNK]() {
-      return 0;
-    },
     [abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]: true,
   };
   assert.equal(typeof host.setFileSelectedCallback, "function");
