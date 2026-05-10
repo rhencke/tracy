@@ -238,18 +238,38 @@ async function checkDurableIndexAcrossHosts() {
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/trace.idx";
+  const workerIndexBytes = new Uint8Array([21, 22, 23, 24]);
+  const workerIndexWriteOffset = 2n;
+  const expectedWorkerIndexId = 222;
+  const expectedMainIndexSize = workerIndexWriteOffset + BigInt(workerIndexBytes.byteLength);
+  const mainIndexReadDest = 120;
+  const expectedMainIndexReadBytes = [
+    ...Array(Number(workerIndexWriteOffset)).fill(0),
+    ...workerIndexBytes,
+  ];
+  const mainIndexReadLen = expectedMainIndexReadBytes.length;
   const workerIndexId = await fixture.scenario.workerPublication({
-    bytes: new Uint8Array([21, 22, 23, 24]),
+    bytes: workerIndexBytes,
     indexName,
-    offset: 2n,
+    offset: workerIndexWriteOffset,
     workerHost,
   });
   const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
-  assert.equal(workerIndexId, 222);
-  assert.equal(fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId), 6n);
-  assert.equal(fixture.scenario.mainThreadIndexRead({ indexId: mainIndexId, len: 6 }), 6);
-  assert.deepEqual(readBytes(mainMemory, 120, 6), [0, 0, 21, 22, 23, 24]);
+  assert.equal(workerIndexId, expectedWorkerIndexId);
+  assert.equal(fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId), expectedMainIndexSize);
+  assert.equal(
+    fixture.scenario.mainThreadIndexRead({
+      destPtr: mainIndexReadDest,
+      indexId: mainIndexId,
+      len: mainIndexReadLen,
+    }),
+    mainIndexReadLen,
+  );
+  assert.deepEqual(
+    readBytes(mainMemory, mainIndexReadDest, mainIndexReadLen),
+    expectedMainIndexReadBytes,
+  );
   assert.deepEqual(
     fixture.calls.filter((call) => [
       OP.workerPublication,
