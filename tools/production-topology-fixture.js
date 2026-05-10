@@ -29,10 +29,15 @@ const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze([
   "indexOpen",
   "indexRead",
   "indexWrite",
+  "mainThreadIndexOpen",
+  "mainThreadIndexRead",
   "sameHostTestShortcut",
   "setFileSelectedCallback",
+  "selectedFileIngest",
   "sourceFromFile",
   "sourceOpen",
+  "workerMessageDelivery",
+  "workerPublication",
 ]);
 // The fixture writes only small scratch buffers, but two pages catches accidental
 // main/worker memory sharing without pretending this is a production heap size.

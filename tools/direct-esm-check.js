@@ -466,10 +466,15 @@ function assertProductionTopologyFixtureUsesHostAbiSpec() {
     [/op:\s*"index-open"/, "index-open operation name"],
     [/op:\s*"index-read"/, "index-read operation name"],
     [/op:\s*"index-write"/, "index-write operation name"],
+    [/op:\s*"main-thread-index-open"/, "main-thread index-open scenario operation name"],
+    [/op:\s*"main-thread-index-read"/, "main-thread index-read scenario operation name"],
     [/op:\s*"index-flush"/, "index-flush operation name"],
     [/op:\s*"set-file-selected-callback"/, "file-selection callback operation name"],
+    [/op:\s*"selected-file-ingest"/, "selected-file ingest scenario operation name"],
     [/op:\s*"file-picker-open"/, "file-picker-open operation name"],
     [/op:\s*"same-host-test-shortcut"/, "same-host shortcut operation name"],
+    [/op:\s*"worker-message-delivery"/, "worker message-delivery scenario operation name"],
+    [/op:\s*"worker-publication"/, "worker publication scenario operation name"],
   ]) {
     assert.doesNotMatch(
       source,
