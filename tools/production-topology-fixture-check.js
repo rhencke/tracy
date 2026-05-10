@@ -91,7 +91,8 @@ async function checkDefaultSeparation() {
 }
 
 async function checkSelectedFileAndDurableSourceReads() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixtureMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: fixtureMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const mainFile = {
     bytes: new Uint8Array([11, 12, 13, 14, 15]),
@@ -102,50 +103,132 @@ async function checkSelectedFileAndDurableSourceReads() {
     name: "worker-trace.json",
   };
   const selected = [];
-  const acceptLen = writeString(mainMemory, 8, ".json");
+  const jsonFilePickerAccept = ".json";
+  const filePickerAcceptPtr = 8;
+  // Synthetic file-picker handles model opaque browser FileSystemFileHandle values.
+  const selectedMainFileHandle = 77;
+  const mainSourceName = `sources/${mainFile.name}`;
+  const mainSourceNamePtr = 48;
+  const mainSourceReadOffset = 2n;
+  const mainSourceReadLen = 2;
+  const mainSourceReadDest = 64;
+  const mainSourceReadBufferLen = mainSourceReadLen + 1;
+  const expectedMainSelectedSourceSize = BigInt(mainFile.bytes.byteLength);
+  const expectedMainSourceReadBytes = [
+    ...mainFile.bytes.slice(
+      Number(mainSourceReadOffset),
+      Number(mainSourceReadOffset) + mainSourceReadLen,
+    ),
+    0,
+  ];
+  const acceptLen = writeString(mainMemory, filePickerAcceptPtr, jsonFilePickerAccept);
 
   fixture.mainHost.setFileSelectedCallback((event) => selected.push(event));
-  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](8, acceptLen);
-  fixture.scenario.selectedFileIngest({ file: mainFile, handle: 77 });
-  assert.equal(await picker, 77);
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](filePickerAcceptPtr, acceptLen);
+  fixture.scenario.selectedFileIngest({ file: mainFile, handle: selectedMainFileHandle });
+  assert.equal(await picker, selectedMainFileHandle);
   await Promise.resolve();
-  assert.deepEqual(selected, [{ file: mainFile, handle: 77 }]);
+  assert.deepEqual(selected, [{ file: mainFile, handle: selectedMainFileHandle }]);
 
-  const mainSelectedSourceId = fixture.mainHost[HOST.OPFS_SOURCE_FROM_FILE](77);
+  const mainSelectedSourceId = fixture.mainHost[HOST.OPFS_SOURCE_FROM_FILE](selectedMainFileHandle);
 
-  assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_SIZE](mainSelectedSourceId), 5n);
+  assert.equal(
+    fixture.mainHost[HOST.OPFS_SOURCE_SIZE](mainSelectedSourceId),
+    expectedMainSelectedSourceSize,
+  );
 
-  const sourceName = "sources/trace.json";
-  const sourceNameLen = writeString(mainMemory, 48, sourceName);
-  const mainSourceId = fixture.mainHost[HOST.OPFS_SOURCE_OPEN](48, sourceNameLen);
+  const sourceNameLen = writeString(mainMemory, mainSourceNamePtr, mainSourceName);
+  const mainSourceId = fixture.mainHost[HOST.OPFS_SOURCE_OPEN](
+    mainSourceNamePtr,
+    sourceNameLen,
+  );
 
-  assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_READ](mainSourceId, 2n, 2, 64), 2);
-  assert.deepEqual(readBytes(mainMemory, 64, 3), [13, 14, 0]);
+  assert.equal(
+    fixture.mainHost[HOST.OPFS_SOURCE_READ](
+      mainSourceId,
+      mainSourceReadOffset,
+      mainSourceReadLen,
+      mainSourceReadDest,
+    ),
+    mainSourceReadLen,
+  );
+  assert.deepEqual(
+    readBytes(mainMemory, mainSourceReadDest, mainSourceReadBufferLen),
+    expectedMainSourceReadBytes,
+  );
 
   const workerFixture = makeProductionTopologyFixture({
-    mainMemory: new WebAssembly.Memory({ initial: 2 }),
+    mainMemory: new WebAssembly.Memory({ initial: fixtureMemoryPageCount }),
   });
-  const workerAcceptLen = writeString(workerFixture.mainMemory, 8, ".json");
+  const undefinedImportSentinel = "undefined";
+  const expectedWorkerImportType = "function";
+  const selectedWorkerFileHandle = 88;
+  const workerSourceName = `sources/${workerFile.name}`;
+  const workerSourceNamePtr = 80;
+  const workerSourceReadOffset = 1n;
+  const workerSourceReadLen = 3;
+  const workerSourceReadDest = 32;
+  const workerSourceReadBufferLen = workerSourceReadLen + 1;
+  const expectedWorkerSelectedSourceSize = BigInt(workerFile.bytes.byteLength);
+  const expectedWorkerSourceReadBytes = [
+    ...workerFile.bytes.slice(
+      Number(workerSourceReadOffset),
+      Number(workerSourceReadOffset) + workerSourceReadLen,
+    ),
+    0,
+  ];
+  const escapedWorkerSourceName = workerSourceName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const workerSourceMissingPattern = new RegExp(
+    `OPFS source ${escapedWorkerSourceName} should exist before open`,
+  );
+  const workerAcceptLen = writeString(
+    workerFixture.mainMemory,
+    filePickerAcceptPtr,
+    jsonFilePickerAccept,
+  );
 
   workerFixture.mainHost.setFileSelectedCallback(() => {});
-  const workerPicker = workerFixture.mainHost[HOST.FILE_PICKER_OPEN](8, workerAcceptLen);
-  workerFixture.scenario.selectedFileIngest({ file: workerFile, handle: 88 });
-  assert.equal(await workerPicker, 88);
-  const workerSourceName = "sources/worker-trace.json";
+  const workerPicker = workerFixture.mainHost[HOST.FILE_PICKER_OPEN](
+    filePickerAcceptPtr,
+    workerAcceptLen,
+  );
+  workerFixture.scenario.selectedFileIngest({
+    file: workerFile,
+    handle: selectedWorkerFileHandle,
+  });
+  assert.equal(await workerPicker, selectedWorkerFileHandle);
   const workerHost = workerFixture.createWorkerHost();
 
-  assert.equal(Object.hasOwn(workerHost, "undefined"), false);
-  assert.equal(typeof workerHost.opfs_create_from_file, "function");
-  const sourceId = workerHost[HOST.OPFS_CREATE_FROM_FILE](88);
+  assert.equal(Object.hasOwn(workerHost, undefinedImportSentinel), false);
+  assert.equal(typeof workerHost[HOST.OPFS_CREATE_FROM_FILE], expectedWorkerImportType);
+  const sourceId = workerHost[HOST.OPFS_CREATE_FROM_FILE](selectedWorkerFileHandle);
 
-  assert.equal(workerHost[HOST.OPFS_SOURCE_SIZE](sourceId), 5n);
-  assert.equal(workerHost[HOST.OPFS_READ_CHUNK](sourceId, 1n, 3, 32), 3);
-  assert.deepEqual(readBytes(workerHost.memory, 32, 4), [22, 23, 24, 0]);
-  const workerSourceNameLen = writeString(workerFixture.mainMemory, 80, workerSourceName);
+  assert.equal(workerHost[HOST.OPFS_SOURCE_SIZE](sourceId), expectedWorkerSelectedSourceSize);
+  assert.equal(
+    workerHost[HOST.OPFS_READ_CHUNK](
+      sourceId,
+      workerSourceReadOffset,
+      workerSourceReadLen,
+      workerSourceReadDest,
+    ),
+    workerSourceReadLen,
+  );
+  assert.deepEqual(
+    readBytes(workerHost.memory, workerSourceReadDest, workerSourceReadBufferLen),
+    expectedWorkerSourceReadBytes,
+  );
+  const workerSourceNameLen = writeString(
+    workerFixture.mainMemory,
+    workerSourceNamePtr,
+    workerSourceName,
+  );
 
   assert.throws(
-    () => workerFixture.mainHost[HOST.OPFS_SOURCE_OPEN](80, workerSourceNameLen),
-    /OPFS source sources\/worker-trace\.json should exist before open/,
+    () => workerFixture.mainHost[HOST.OPFS_SOURCE_OPEN](
+      workerSourceNamePtr,
+      workerSourceNameLen,
+    ),
+    workerSourceMissingPattern,
     "worker-created selected-file sources should not be durable in the main host",
   );
 }
