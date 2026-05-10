@@ -400,7 +400,8 @@ async function checkTypedScenarioHelpers() {
 }
 
 async function checkTypedScenarioOrderGuards() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const orderGuardMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: orderGuardMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/out-of-order.idx";
