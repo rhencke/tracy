@@ -181,11 +181,145 @@ async function checkDurableIndexAcrossHosts() {
   );
 }
 
+async function checkTypedScenarioHelpers() {
+  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const selected = [];
+  const selectedFile = {
+    bytes: new Uint8Array([31, 32, 33, 34]),
+    name: "scenario.json",
+  };
+  const acceptLen = writeString(mainMemory, 8, ".json");
+
+  fixture.mainHost.setFileSelectedCallback((event) => selected.push(event));
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](8, acceptLen);
+
+  assert.equal(fixture.scenario.selectedFileIngest({ file: selectedFile, handle: 91 }), 91);
+  assert.equal(await picker, 91);
+  await Promise.resolve();
+  assert.deepEqual(selected, [{ file: selectedFile, handle: 91 }]);
+  assert.ok(
+    fixture.calls.some(
+      (call) => call.host === "main" &&
+        call.op === OP.selectedFileIngest &&
+        call.handle === 91,
+    ),
+    "typed selected-file ingest helper should record the named scenario operation",
+  );
+
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/scenario.idx";
+
+  assert.equal(
+    await fixture.scenario.workerPublication({
+      bytes: new Uint8Array([41, 42, 43, 44]),
+      indexName,
+      workerHost,
+    }),
+    222,
+  );
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+
+  assert.equal(mainIndexId, 122);
+  assert.equal(
+    fixture.scenario.mainThreadIndexRead({ indexId: mainIndexId, len: 4 }),
+    4,
+  );
+  assert.deepEqual(readBytes(mainMemory, 120, 4), [41, 42, 43, 44]);
+  assert.deepEqual(
+    fixture.calls.filter((call) => [
+      OP.selectedFileIngest,
+      OP.workerPublication,
+      OP.mainThreadIndexOpen,
+      OP.mainThreadIndexRead,
+    ].includes(call.op)).map((call) => [call.host, call.op, call.name ?? call.messageType]),
+    [
+      ["main", OP.selectedFileIngest, "sources/scenario.json"],
+      ["worker", OP.workerPublication, indexName],
+      ["main", OP.mainThreadIndexOpen, indexName],
+      ["main", OP.mainThreadIndexRead, indexName],
+    ],
+  );
+
+  let delivered = null;
+
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      message: { ingestId: 1, type: "progress" },
+      worker: {
+        emit(type, message) {
+          delivered = { message, type };
+        },
+      },
+    }),
+    true,
+  );
+  assert.deepEqual(delivered, {
+    message: { ingestId: 1, type: "progress" },
+    type: "message",
+  });
+}
+
+async function checkTypedScenarioOrderGuards() {
+  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/out-of-order.idx";
+
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName }),
+    /worker must create OPFS index indexes\/out-of-order\.idx before publication/,
+    "main-thread open helper should reject indexes the worker has not created",
+  );
+
+  const nameLen = writeString(workerHost.memory, 16, indexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, nameLen);
+
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName }),
+    /worker must flush OPFS index indexes\/out-of-order\.idx before main-thread handoff/,
+    "main-thread open helper should reject unflushed worker indexes",
+  );
+  await assert.rejects(
+    () => fixture.scenario.workerPublication({ indexName }),
+    /worker publication requires worker OPFS index indexes\/out-of-order\.idx to contain bytes/,
+    "worker publication helper should reject empty indexes",
+  );
+
+  new Uint8Array(workerHost.memory.buffer, 96, 2).set([51, 52]);
+  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](workerIndexId, 0n, 96, 2), 2);
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName }),
+    /worker must flush OPFS index indexes\/out-of-order\.idx before main-thread handoff/,
+    "main-thread open helper should reject unflushed worker indexes",
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), 0);
+  assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexRead({ indexId: workerIndexId, len: 2 }),
+    /main thread must open OPFS index before read/,
+    "main-thread read helper should reject reads before a typed main-thread open",
+  );
+
+  const noSelectionFixture = makeProductionTopologyFixture();
+
+  assert.throws(
+    () => noSelectionFixture.scenario.workerMessageDelivery({
+      message: { ingestId: 1, type: "progress" },
+      worker: { emit() {} },
+    }),
+    /requires selected-file ingest first/,
+    "worker message helper should reject delivery before selected-file ingest",
+  );
+}
+
 async function main() {
   checkHostImportNameGuard();
   await checkDefaultSeparation();
   await checkSelectedFileAndDurableSourceReads();
   await checkDurableIndexAcrossHosts();
+  await checkTypedScenarioHelpers();
+  await checkTypedScenarioOrderGuards();
 }
 
 main().catch((error) => {

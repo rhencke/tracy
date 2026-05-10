@@ -48,6 +48,11 @@ const DEFAULT_MAIN_SOURCE_ID_SEED = 112;
 const DEFAULT_MAIN_INDEX_ID_SEED = 122;
 const DEFAULT_WORKER_SOURCE_ID_SEED = 212;
 const DEFAULT_WORKER_INDEX_ID_SEED = 222;
+// Scenario helpers write short resource names and payload bytes into scratch
+// memory owned by the fixture, not into production heap regions.
+const DEFAULT_SCENARIO_NAME_PTR = 16;
+const DEFAULT_SCENARIO_SRC_PTR = 96;
+const DEFAULT_SCENARIO_DEST_PTR = 120;
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
@@ -85,6 +90,13 @@ function makeDefaultMemory() {
 
 function decodeString(memory, ptr, len) {
   return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
+}
+
+function writeString(memory, ptr, value) {
+  const bytes = new TextEncoder().encode(value);
+
+  new Uint8Array(memory.buffer, ptr, bytes.byteLength).set(bytes);
+  return bytes.byteLength;
 }
 
 function copyToMemory(memory, src, destPtr, len) {
@@ -165,6 +177,9 @@ function makeProductionTopologyFixture(options = {}) {
   const durableSources = new Map(options.durableSources ?? []);
   const durableIndexes = new Map(options.durableIndexes ?? []);
   const createdWorkerHosts = [];
+  const selectedFileIngests = new Set();
+  const workerIndexHandoffs = new Map();
+  const mainThreadIndexOpens = new Map();
   let fileSelectedCallback = null;
   let pendingFilePickerOpen = null;
   let nextMainSourceId = options.nextMainSourceId ?? DEFAULT_MAIN_SOURCE_ID_SEED;
@@ -181,6 +196,55 @@ function makeProductionTopologyFixture(options = {}) {
       "production topology fixture worker memory factory must not return the main memory",
     );
     return workerMemory;
+  }
+
+  function requireIndexName(value, operation) {
+    assert.equal(
+      typeof value,
+      "string",
+      `${operation} requires a non-empty OPFS index name`,
+    );
+    assert.notEqual(value.length, 0, `${operation} requires a non-empty OPFS index name`);
+    return value;
+  }
+
+  function workerIndexHandoff(name) {
+    let handoff = workerIndexHandoffs.get(name);
+
+    if (handoff === undefined) {
+      handoff = {
+        flushed: false,
+        lastIndexId: null,
+        published: false,
+        writeCount: 0,
+      };
+      workerIndexHandoffs.set(name, handoff);
+    }
+    return handoff;
+  }
+
+  function requireWorkerIndexHandoff(name, operation) {
+    const handoff = workerIndexHandoffs.get(name);
+
+    assert.ok(
+      handoff !== undefined,
+      `${operation}: worker must create OPFS index ${name} before publication`,
+    );
+    return handoff;
+  }
+
+  function requireWorkerPublishedIndex(name, operation) {
+    const handoff = requireWorkerIndexHandoff(name, operation);
+
+    assert.ok(
+      handoff.flushed,
+      `${operation}: worker must flush OPFS index ${name} before main-thread handoff`,
+    );
+    assert.ok(
+      handoff.published,
+      `${operation}: worker must publish OPFS index ${name} before main-thread handoff`,
+    );
+    return handoff;
   }
 
   function sourceFromSelectedFile(host, sources, files, fileHandle) {
@@ -292,13 +356,25 @@ function makeProductionTopologyFixture(options = {}) {
 
         durableIndexes.set(name, { bytes: new Uint8Array(0), name });
         indexes.set(indexId, { id: indexId, name });
+        if (host === "worker") {
+          const handoff = workerIndexHandoff(name);
+
+          handoff.lastIndexId = indexId;
+        }
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexCreate });
         return indexId;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
         const name = putNameFrom(namePtr, nameLen);
         const indexId = idState.nextIndexId();
+        const workerHandoff = workerIndexHandoffs.get(name);
 
+        if (host === "main" && workerHandoff !== undefined) {
+          assert.ok(
+            workerHandoff.flushed,
+            `main-thread index open must wait for worker publication of ${name}`,
+          );
+        }
         durableIndex(name);
         indexes.set(indexId, { id: indexId, name });
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexOpen });
@@ -341,6 +417,12 @@ function makeProductionTopologyFixture(options = {}) {
         }
         nextBytes.set(new Uint8Array(memory.buffer, srcPtr, len), start);
         durable.bytes = nextBytes;
+        if (host === "worker") {
+          const handoff = workerIndexHandoff(index.name);
+
+          handoff.lastIndexId = indexId;
+          handoff.writeCount += 1;
+        }
         calls.push({
           host,
           id: indexId,
@@ -354,6 +436,12 @@ function makeProductionTopologyFixture(options = {}) {
       async [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
         const index = requireIndex(indexId);
 
+        if (host === "worker") {
+          const handoff = workerIndexHandoff(index.name);
+
+          handoff.flushed = true;
+          handoff.lastIndexId = indexId;
+        }
         calls.push({ host, id: indexId, name: index.name, op: FIXTURE_OPERATION.indexFlush });
         await new Promise((resolve) => setImmediate(resolve));
         return 0;
@@ -410,6 +498,13 @@ function makeProductionTopologyFixture(options = {}) {
         `production topology fixture must install a file-selection callback; calls=${JSON.stringify(calls)}`,
       );
       selectedFiles.set(handle, file);
+      selectedFileIngests.add(handle);
+      calls.push({
+        handle,
+        host: "main",
+        name: defaultSourceName(file),
+        op: FIXTURE_OPERATION.selectedFileIngest,
+      });
       queueMicrotask(() => callback({ file, handle }));
       pendingFilePickerOpen.resolve(handle);
       pendingFilePickerOpen = null;
@@ -473,6 +568,140 @@ function makeProductionTopologyFixture(options = {}) {
     return mainHost;
   }
 
+  const scenario = Object.freeze({
+    selectedFileIngest({ file, handle }) {
+      mainHost.selectPickedFile(handle, file);
+      return handle;
+    },
+    async workerPublication({
+      bytes,
+      indexName,
+      namePtr = DEFAULT_SCENARIO_NAME_PTR,
+      offset = 0n,
+      srcPtr = DEFAULT_SCENARIO_SRC_PTR,
+      workerHost,
+    }) {
+      const name = requireIndexName(indexName, FIXTURE_OPERATION.workerPublication);
+      let indexId = null;
+
+      if (workerHost !== undefined) {
+        assert.equal(
+          typeof workerHost[HOST_IMPORT_NAME.OPFS_INDEX_CREATE],
+          "function",
+          "worker publication requires a worker OPFS host",
+        );
+        const nameLen = writeString(workerHost.memory, namePtr, name);
+
+        indexId = workerHost[HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen);
+        if (bytes !== undefined) {
+          const payload = bytesFrom(bytes);
+
+          new Uint8Array(workerHost.memory.buffer, srcPtr, payload.byteLength).set(payload);
+          workerHost[HOST_IMPORT_NAME.OPFS_INDEX_WRITE](
+            indexId,
+            offset,
+            srcPtr,
+            payload.byteLength,
+          );
+        }
+        await workerHost[HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId);
+      }
+
+      const handoff = requireWorkerIndexHandoff(name, FIXTURE_OPERATION.workerPublication);
+
+      assert.ok(
+        handoff.writeCount > 0,
+        `worker publication requires worker OPFS index ${name} to contain bytes`,
+      );
+      assert.ok(
+        handoff.flushed,
+        `worker publication requires worker OPFS index ${name} to be flushed`,
+      );
+      handoff.published = true;
+      calls.push({
+        host: "worker",
+        id: indexId ?? handoff.lastIndexId,
+        name,
+        op: FIXTURE_OPERATION.workerPublication,
+      });
+      return indexId ?? handoff.lastIndexId;
+    },
+    mainThreadIndexOpen({
+      indexName,
+      namePtr = DEFAULT_SCENARIO_NAME_PTR,
+    }) {
+      const name = requireIndexName(indexName, FIXTURE_OPERATION.mainThreadIndexOpen);
+
+      requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
+      const nameLen = writeString(mainMemory, namePtr, name);
+      const indexId = mainHost[HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen);
+
+      mainThreadIndexOpens.set(indexId, name);
+      calls.push({
+        host: "main",
+        id: indexId,
+        name,
+        op: FIXTURE_OPERATION.mainThreadIndexOpen,
+      });
+      return indexId;
+    },
+    mainThreadIndexRead({
+      destPtr = DEFAULT_SCENARIO_DEST_PTR,
+      indexId,
+      len,
+      offset = 0n,
+    }) {
+      const name = mainThreadIndexOpens.get(indexId);
+
+      assert.ok(
+        name !== undefined,
+        `${FIXTURE_OPERATION.mainThreadIndexRead}: main thread must open OPFS index before read`,
+      );
+      const read = mainHost[HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr);
+
+      calls.push({
+        host: "main",
+        id: indexId,
+        len,
+        name,
+        offset: Number(offset),
+        op: FIXTURE_OPERATION.mainThreadIndexRead,
+      });
+      return read;
+    },
+    workerMessageDelivery({ message, worker }) {
+      assert.equal(
+        typeof message,
+        "object",
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires a worker message object`,
+      );
+      assert.notEqual(
+        message,
+        null,
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires a worker message object`,
+      );
+      assert.ok(
+        selectedFileIngests.size > 0,
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file ingest first`,
+      );
+      calls.push({
+        host: "worker",
+        ingestId: message.ingestId,
+        messageType: message.type,
+        op: FIXTURE_OPERATION.workerMessageDelivery,
+      });
+      if (typeof worker?.emit === "function") {
+        worker.emit("message", message);
+        return true;
+      }
+      if (typeof worker?.onmessage === "function") {
+        worker.onmessage({ data: message });
+        return true;
+      }
+      throw new Error("worker message delivery requires emit or onmessage");
+    },
+  });
+
   return {
     calls,
     createWorkerHost,
@@ -483,6 +712,7 @@ function makeProductionTopologyFixture(options = {}) {
     makeSameHostWorkerHostForTests,
     makeSameMemoryWorkerHostForTests,
     makeWorkerMemory,
+    scenario,
     selectedFiles,
   };
 }
