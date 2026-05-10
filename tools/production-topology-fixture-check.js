@@ -291,6 +291,7 @@ async function checkTypedScenarioHelpers() {
   const selected = [];
   const selectedFileBytes = new Uint8Array([31, 32, 33, 34]);
   const selectedFileName = "scenario.json";
+  const selectedFileHandle = 91;
   const selectedFile = {
     bytes: selectedFileBytes,
     name: selectedFileName,
@@ -300,7 +301,10 @@ async function checkTypedScenarioHelpers() {
   fixture.mainHost.setFileSelectedCallback((event) => selected.push(event));
   const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](8, acceptLen);
 
-  assert.equal(fixture.scenario.selectedFileIngest({ file: selectedFile, handle: 91 }), 91);
+  assert.equal(
+    fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
+    selectedFileHandle,
+  );
   assert.equal(await picker, 91);
   await Promise.resolve();
   assert.deepEqual(selected, [{ file: selectedFile, handle: 91 }]);
