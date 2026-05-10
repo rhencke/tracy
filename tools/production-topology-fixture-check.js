@@ -405,38 +405,72 @@ async function checkTypedScenarioOrderGuards() {
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/out-of-order.idx";
+  const workerIndexNamePointer = 16;
+  const workerWriteBytes = new Uint8Array([51, 52]);
+  const workerWritePointer = 96;
+  const workerWriteOffset = 0n;
+  const workerWriteLength = workerWriteBytes.byteLength;
+  const expectedWorkerWriteCount = workerWriteLength;
+  const expectedFlushResult = 0;
+  const mainThreadReadLengthBeforeOpen = workerWriteLength;
+  const noSelectionWorkerMessage = { ingestId: 1, type: "progress" };
+  const expectedCreateBeforePublicationError = {
+    message: `${OP.mainThreadIndexOpen}: worker must create OPFS index ${indexName} before publication`,
+  };
+  const expectedFlushBeforeHandoffError = {
+    message: `${OP.mainThreadIndexOpen}: worker must flush OPFS index ${indexName} before main-thread handoff`,
+  };
+  const expectedBytesBeforePublicationError = {
+    message: `worker publication requires worker OPFS index ${indexName} to contain bytes`,
+  };
+  const expectedNoSelectionMessageError = {
+    message: `${OP.workerMessageDelivery} requires selected-file ingest first`,
+  };
 
   assert.throws(
     () => fixture.scenario.mainThreadIndexOpen({ indexName }),
-    /worker must create OPFS index indexes\/out-of-order\.idx before publication/,
+    expectedCreateBeforePublicationError,
     "main-thread open helper should reject indexes the worker has not created",
   );
 
-  const nameLen = writeString(workerHost.memory, 16, indexName);
-  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, nameLen);
+  const nameLen = writeString(workerHost.memory, workerIndexNamePointer, indexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](workerIndexNamePointer, nameLen);
 
   assert.throws(
     () => fixture.scenario.mainThreadIndexOpen({ indexName }),
-    /worker must flush OPFS index indexes\/out-of-order\.idx before main-thread handoff/,
+    expectedFlushBeforeHandoffError,
     "main-thread open helper should reject unflushed worker indexes",
   );
   await assert.rejects(
     () => fixture.scenario.workerPublication({ indexName }),
-    /worker publication requires worker OPFS index indexes\/out-of-order\.idx to contain bytes/,
+    expectedBytesBeforePublicationError,
     "worker publication helper should reject empty indexes",
   );
 
-  new Uint8Array(workerHost.memory.buffer, 96, 2).set([51, 52]);
-  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](workerIndexId, 0n, 96, 2), 2);
+  new Uint8Array(workerHost.memory.buffer, workerWritePointer, workerWriteLength).set(
+    workerWriteBytes,
+  );
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      workerWriteOffset,
+      workerWritePointer,
+      workerWriteLength,
+    ),
+    expectedWorkerWriteCount,
+  );
   assert.throws(
     () => fixture.scenario.mainThreadIndexOpen({ indexName }),
-    /worker must flush OPFS index indexes\/out-of-order\.idx before main-thread handoff/,
+    expectedFlushBeforeHandoffError,
     "main-thread open helper should reject unflushed worker indexes",
   );
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), 0);
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
   assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
   assert.throws(
-    () => fixture.scenario.mainThreadIndexRead({ indexId: workerIndexId, len: 2 }),
+    () => fixture.scenario.mainThreadIndexRead({
+      indexId: workerIndexId,
+      len: mainThreadReadLengthBeforeOpen,
+    }),
     /main thread must open OPFS index before read/,
     "main-thread read helper should reject reads before a typed main-thread open",
   );
@@ -445,10 +479,10 @@ async function checkTypedScenarioOrderGuards() {
 
   assert.throws(
     () => noSelectionFixture.scenario.workerMessageDelivery({
-      message: { ingestId: 1, type: "progress" },
+      message: noSelectionWorkerMessage,
       worker: { emit() {} },
     }),
-    /requires selected-file ingest first/,
+    expectedNoSelectionMessageError,
     "worker message helper should reject delivery before selected-file ingest",
   );
 }
