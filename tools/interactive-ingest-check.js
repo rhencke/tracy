@@ -6,14 +6,16 @@ const {
   compileDistWasmModule,
   distWasmModuleOptions,
   instantiateDistWasmModule,
-  moduleUrl,
 } = require("./acceptance-wasm-helpers.js");
 const {
+  createFakeWorkerClass,
+  flushAsyncWork,
   flushMicrotasks,
-  installBrowserGlobals,
+  importRepoModule,
+  installRuntimeBrowserGlobals,
   makeFakeCanvas,
   makeFakeCanvasContext,
-  makeFakeElement,
+  runAnimationFrame,
 } = require("./browser-harness.js");
 
 let FIXTURE_SIZE_BYTES;
@@ -24,10 +26,9 @@ let REQUIRED_TRACE_RENDER_PLANNER_EXPORTS;
 const FIRST_EVENTS_BUDGET_MS = 100;
 
 async function loadGeneratedInteractiveIngestCheckSpec() {
-  const { INTERACTIVE_INGEST_CHECK } = await import(moduleUrl("host/startup-spec.mjs"));
-  const { TRACE_RENDERER_REQUIRED_EXPORTS } = await import(
-    moduleUrl("host/trace-renderer-spec.mjs")
-  );
+  const { INTERACTIVE_INGEST_CHECK } = await importRepoModule("host/startup-spec.mjs");
+  const { TRACE_RENDERER_REQUIRED_EXPORTS } =
+    await importRepoModule("host/trace-renderer-spec.mjs");
 
   FIXTURE_SIZE_BYTES = INTERACTIVE_INGEST_CHECK.FIXTURE_SIZE_BYTES;
   INGEST_WINDOW_BYTES = INTERACTIVE_INGEST_CHECK.INGEST_WINDOW_BYTES;
@@ -68,37 +69,7 @@ function makeInteractiveIngestMemory() {
   return new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
 }
 
-function installBrowserHarness(canvas) {
-  return installBrowserGlobals({
-    canvas,
-    createElement: () => makeFakeElement(),
-  });
-}
-
-class FakeWorker {
-  constructor(url, options) {
-    this.events = new Map();
-    this.options = options;
-    this.posted = [];
-    this.url = url;
-  }
-
-  addEventListener(type, callback) {
-    this.events.set(type, callback);
-  }
-
-  emit(type, data) {
-    this.events.get(type)?.({ data });
-  }
-
-  postMessage(message) {
-    this.posted.push(message);
-  }
-
-  terminate() {
-    this.terminated = true;
-  }
-}
+const FakeWorker = createFakeWorkerClass();
 
 function decodeString(memory, ptr, len) {
   return new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len));
@@ -624,12 +595,6 @@ function makeCanvasHarness() {
   };
 }
 
-async function flushAsyncWork() {
-  await flushMicrotasks();
-  await new Promise((resolve) => setImmediate(resolve));
-  await flushMicrotasks();
-}
-
 function assertProductionTraceRenderPlannerExports(exports) {
   for (const name of REQUIRED_TRACE_RENDER_PLANNER_EXPORTS) {
     assert.equal(
@@ -656,14 +621,14 @@ async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
 
 async function checkInteractiveIngestGate() {
   await loadGeneratedInteractiveIngestCheckSpec();
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const ingestRuntime = await import(moduleUrl("host/ingest-worker-runtime.mjs"));
-  const wasmModules = await import(moduleUrl("host/wasm-modules.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const ingestRuntime = await importRepoModule("host/ingest-worker-runtime.mjs");
+  const wasmModules = await importRepoModule("host/wasm-modules.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = makeInteractiveIngestMemory();
   const canvasHarness = makeCanvasHarness();
-  const { frames } = installBrowserHarness(canvasHarness.canvas);
+  const { frames } = installRuntimeBrowserGlobals({ canvas: canvasHarness.canvas });
   const sourceName = "sources/throttled-100mb.json";
   const workerStatuses = [];
   const importCalls = [];
@@ -867,16 +832,15 @@ async function checkInteractiveIngestGate() {
     () => frames.length >= 1,
     "interactive ingest gate should schedule frames before production preload",
   );
-  await runFrame(frames, canvasHarness, 0);
+  await runInteractiveFrame(frames, canvasHarness, 0);
   await flushAsyncWork();
   await waitForAsyncCondition(
     () => frames.length >= 1,
     "interactive ingest gate should schedule an app-ready follow-up frame before ingest preload",
   );
   const appReadyFrameCallbacks = frames.splice(0);
-  for (const frame of appReadyFrameCallbacks) {
-    canvasHarness.setFrameAt(16);
-    frame(16);
+  while (appReadyFrameCallbacks.length > 0) {
+    await runInteractiveFrame(appReadyFrameCallbacks, canvasHarness, 16);
   }
   await flushAsyncWork();
   await waitForAsyncCondition(
@@ -914,7 +878,7 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should schedule frames after production preload",
   );
   if (frames.length > 0) {
-    await runFrame(frames, canvasHarness, 0);
+    await runInteractiveFrame(frames, canvasHarness, 0);
   }
   assertInteractiveContractOk(
     interactiveContract,
@@ -965,7 +929,7 @@ async function checkInteractiveIngestGate() {
       continue;
     }
 
-    await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
+    await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
     await flushAsyncWork();
     nextFrameAt += 16;
   }
@@ -1101,7 +1065,7 @@ async function checkInteractiveIngestGate() {
     "interactive ingest gate should instantiate the real production app renderer planner module",
   );
 
-  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
+  await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   nextFrameAt += 16;
 
   const queryableCoveredRange = controller.indexReader.coveredRange();
@@ -1134,7 +1098,7 @@ async function checkInteractiveIngestGate() {
     deltaY: -500,
     preventDefault() {},
   });
-  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
+  await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   nextFrameAt += 16;
   const zoomedViewport = rendererInstance.status().viewport;
   assertInteractiveContractOk(
@@ -1161,7 +1125,7 @@ async function checkInteractiveIngestGate() {
     preventDefault() {},
   });
   canvasHarness.listeners.get("pointerup")({ pointerId: 1 });
-  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
+  await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   nextFrameAt += 16;
   assertInteractiveContractOk(
     interactiveContract,
@@ -1173,7 +1137,7 @@ async function checkInteractiveIngestGate() {
     ],
   );
 
-  await runFrame(frames, canvasHarness, nextFrameAt, frameDurations);
+  await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
   const progressStatuses = workerStatuses.filter(
     (entry) => entry.message?.type === "progress",
   );
@@ -1239,16 +1203,12 @@ function nextWorkerTime() {
 
 nextWorkerTime.times = [0, 10, 20, 34, 3034, 3035];
 
-async function runFrame(frames, canvasHarness, ts, frameDurations = null) {
-  const frame = frames.shift();
-
-  assert.equal(typeof frame, "function", `expected a frame callback at ${ts} ms`);
-  canvasHarness.setFrameAt(ts);
-  const startedAt = performance.now();
-  frame(ts);
-  const duration = performance.now() - startedAt;
-  frameDurations?.push(duration);
-  await flushMicrotasks();
+async function runInteractiveFrame(frames, canvasHarness, ts, frameDurations = null) {
+  await runAnimationFrame(frames, ts, {
+    beforeFrame: (timestamp) => canvasHarness.setFrameAt(timestamp),
+    frameDurations,
+    performance,
+  });
 }
 
 checkInteractiveIngestGate().catch((error) => {

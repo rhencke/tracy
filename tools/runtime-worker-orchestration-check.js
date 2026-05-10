@@ -3,11 +3,11 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
-const { moduleUrl } = require("./acceptance-wasm-helpers.js");
 const {
-  flushMicrotasks,
-  installBrowserGlobals,
-  makeFakeElement,
+  createFakeWorkerClass,
+  flushRuntimeMicrotasks,
+  importRepoModule,
+  installRuntimeBrowserGlobals,
 } = require("./browser-harness.js");
 
 let OPFS_PAGE_SIZE;
@@ -25,9 +25,8 @@ let TEST_TRACE_RENDER_ROW_BYTES;
 let TEST_TRACE_RENDER_RANGE_BYTES;
 
 async function loadGeneratedIndexFormatSpec() {
-  const { INDEX_DECODE_HINTS, INDEX_FORMAT, INDEX_PAGE_HEADER_OFFSETS } = await import(
-    moduleUrl("host/index-format-spec.mjs")
-  );
+  const { INDEX_DECODE_HINTS, INDEX_FORMAT, INDEX_PAGE_HEADER_OFFSETS } =
+    await importRepoModule("host/index-format-spec.mjs");
 
   OPFS_PAGE_SIZE = INDEX_FORMAT.OPFS_PAGE_SIZE;
   INDEX_DECODE_HINT_COMPACT_SLICES = INDEX_DECODE_HINTS.COMPACT_SLICES;
@@ -43,7 +42,7 @@ async function loadGeneratedTraceRendererSpec() {
     INDEX_QUERY_RESULT_LAYOUT,
     TRACE_RENDERER_CANVAS_OPS,
     TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT,
-  } = await import(moduleUrl("host/trace-renderer-spec.mjs")));
+  } = await importRepoModule("host/trace-renderer-spec.mjs"));
   TEST_TRACE_RENDER_COMMAND = Object.freeze({
     BYTES: TRACE_RENDERER_CANVAS_OPS.DRAW_COMMAND_BYTES,
     CLEAR_RECT: TRACE_RENDERER_CANVAS_OPS.DRAW_CLEAR_RECT_TAG,
@@ -67,44 +66,7 @@ async function loadGeneratedTraceRendererSpec() {
   TEST_TRACE_RENDER_RANGE_BYTES = TRACE_RENDERER_INCOMPLETE_RANGE_LAYOUT.BYTES;
 }
 
-class FakeWorker {
-  static instances = [];
-
-  constructor(url, options) {
-    this.events = new Map();
-    this.options = options;
-    this.posted = [];
-    this.url = url;
-    FakeWorker.instances.push(this);
-  }
-
-  addEventListener(type, callback) {
-    this.events.set(type, callback);
-  }
-
-  emit(type, data) {
-    this.events.get(type)?.({ data });
-  }
-
-  postMessage(message) {
-    this.posted.push(message);
-  }
-
-  terminate() {
-    this.terminated = true;
-  }
-}
-
-function installBrowserStubs() {
-  return installBrowserGlobals({
-    canvas: { hidden: false, id: "tracy" },
-    createElement: () => makeFakeElement(),
-  });
-}
-
-async function flushRuntimeMicrotasks(count = 8) {
-  await flushMicrotasks(count);
-}
+const FakeWorker = createFakeWorkerClass();
 
 function readTraceRenderRow(memory, ptr, index) {
   const view = new DataView(memory.buffer);
@@ -642,8 +604,8 @@ function makeAppExports(extra = {}) {
 }
 
 async function checkRuntimeOrchestratesWorker() {
-  const { frames } = installBrowserStubs();
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
   const workerMessages = [];
   const instantiateCalls = [];
   const performanceEntries = [];
@@ -809,7 +771,7 @@ async function checkRuntimeOrchestratesWorker() {
 
   frames[0](122);
   frames[1](123);
-  await import(moduleUrl("host/trace-renderer-spec.mjs"));
+  await importRepoModule("host/trace-renderer-spec.mjs");
   await flushRuntimeMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
@@ -847,10 +809,10 @@ async function checkRuntimeOrchestratesWorker() {
 }
 
 async function checkRuntimeStartsIngestFromFileSelection() {
-  const { frames } = installBrowserStubs();
+  const { frames } = installRuntimeBrowserGlobals();
 
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   const sourceName = "sources/selected trace.json";
   const callbacks = [];
@@ -945,9 +907,9 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 }
 
 async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
-  installBrowserStubs();
+  installRuntimeBrowserGlobals();
 
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
   const indexReaderOpenCalls = [];
   const workerStatus = [];
   const controller = runtime.createIngestWorkerController({
@@ -1059,10 +1021,10 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
 }
 
 async function checkFileSelectionSetupErrorsReportStatus() {
-  installBrowserStubs();
+  installRuntimeBrowserGlobals();
 
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   let callback;
   const workerStatus = [];
@@ -1105,8 +1067,8 @@ async function checkFileSelectionSetupErrorsReportStatus() {
 }
 
 async function checkMainThreadIndexReaderQueriesCommittedPages() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
@@ -1359,8 +1321,8 @@ async function checkMainThreadIndexReaderQueriesCommittedPages() {
 }
 
 async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   let opened = false;
   const host = {
@@ -1400,8 +1362,8 @@ async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
 }
 
 async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
@@ -1598,8 +1560,8 @@ async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
 }
 
 async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
@@ -1724,8 +1686,8 @@ async function checkMainThreadCoveredRangeRereadsUnqueryablePartialPage() {
 }
 
 async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
-  const catalog = await import(moduleUrl("host/index-reader-catalog.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const catalog = await importRepoModule("host/index-reader-catalog.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
@@ -1786,8 +1748,8 @@ async function checkMainThreadSliceCatalogReportsCapacityOverflow() {
 }
 
 async function checkMainThreadIndexReaderFailsOnCatalogOverflow() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
-  const abi = await import(moduleUrl("host/abi.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
   const memory = new WebAssembly.Memory({ initial: 512 });
   const view = new DataView(memory.buffer);
   const pagePtr = 32768;
@@ -1866,7 +1828,7 @@ async function checkMainThreadIndexReaderFailsOnCatalogOverflow() {
 }
 
 async function checkWorkerStatusReportsReaderCatalogOverflow() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
   const workerStatus = [];
   const indexReader = {
     open() {
@@ -1900,7 +1862,7 @@ async function checkWorkerStatusReportsReaderCatalogOverflow() {
 }
 
 async function checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid() {
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const runtime = await importRepoModule("host/runtime.mjs");
   const indexReaderOpenCalls = [];
   const controller = runtime.createIngestWorkerController({
     Worker: FakeWorker,
@@ -1959,7 +1921,7 @@ function checkWatWriterPropagatesCatalogOverflow() {
 }
 
 async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const operations = [];
   const canvas = {
@@ -2123,7 +2085,7 @@ async function checkProgressiveTraceRendererDrawsCoveredPartialRows() {
 }
 
 async function checkProgressiveTraceRendererClipsLeftEdgeSlices() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const operations = [];
   const canvas = {
@@ -2217,7 +2179,7 @@ async function checkProgressiveTraceRendererClipsLeftEdgeSlices() {
 }
 
 async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const canvas = {
     height: 120,
@@ -2300,7 +2262,7 @@ async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
 }
 
 async function checkProgressiveTraceRendererSurfacesCappedQueries() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const queryCalls = [];
   const operations = [];
@@ -2423,7 +2385,7 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
 }
 
 async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const queryCalls = [];
   const canvas = {
@@ -2488,7 +2450,7 @@ async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
 }
 
 async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const queryCalls = [];
   const canvas = {
@@ -2566,7 +2528,7 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
 }
 
 async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhausted() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const queryCalls = [];
   const operations = [];
@@ -2684,7 +2646,7 @@ async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhauste
 }
 
 async function checkProgressiveTraceRendererUsesWasmCanvasOpPlanner() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   assert.throws(
     () => rendererModule.createProgressiveTraceRenderer(
       new WebAssembly.Memory({ initial: 1 }),
@@ -2762,7 +2724,7 @@ async function checkProgressiveTraceRendererUsesWasmCanvasOpPlanner() {
 }
 
 async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() {
-  const rendererModule = await import(moduleUrl("host/progressive-trace-renderer.mjs"));
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const listeners = new Map();
   const operations = [];
@@ -2921,8 +2883,8 @@ async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() 
 }
 
 async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
-  const { frames } = installBrowserStubs();
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   let coveredRange = null;
   let readerCoveredRange = null;
@@ -3027,8 +2989,8 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
 }
 
 async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
-  const { frames } = installBrowserStubs();
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   let drawCalls = 0;
   const coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
@@ -3078,8 +3040,8 @@ async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
 }
 
 async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
-  const { frames } = installBrowserStubs();
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const performanceEntries = [];
   const performance = {
@@ -3143,7 +3105,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
       throw new Error("not expected before queryable pages");
     },
   });
-  await import(moduleUrl("host/trace-renderer-spec.mjs"));
+  await importRepoModule("host/trace-renderer-spec.mjs");
   await flushRuntimeMicrotasks();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
@@ -3157,8 +3119,8 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
 }
 
 async function checkAppReadyFailsWhenDeferredRendererFails() {
-  const { frames } = installBrowserStubs();
-  const runtime = await import(moduleUrl("host/runtime.mjs"));
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
   const memory = new WebAssembly.Memory({ initial: 1 });
   const performanceEntries = [];
   const previousError = globalThis.__TRACY_APP_LOAD_ERROR__;

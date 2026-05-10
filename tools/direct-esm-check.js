@@ -206,6 +206,39 @@ function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
   }
 }
 
+function assertRuntimeWorkerCheckUsesSharedHarness() {
+  const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+
+  for (const [pattern, message] of [
+    [/createFakeWorkerClass/, "fake Worker"],
+    [/installRuntimeBrowserGlobals/, "browser globals"],
+    [/flushRuntimeMicrotasks/, "runtime microtask flushing"],
+    [/importRepoModule/, "repo module imports"],
+  ]) {
+    assert.match(
+      source,
+      pattern,
+      `runtime worker orchestration check should get ${message} from the shared browser harness`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/class\s+FakeWorker\b/, "a local fake Worker class"],
+    [/function\s+installBrowserStubs\b/, "a local browser stub installer"],
+    [/function\s+flushRuntimeMicrotasks\b/, "a local runtime microtask flusher"],
+    [/moduleUrl\(/, "direct moduleUrl imports"],
+    [/installBrowserGlobals/, "low-level browser global installation"],
+    [/makeFakeElement/, "local fake element wiring"],
+    [/globalThis\.requestAnimationFrame\s*=/, "local RAF installation"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `runtime worker orchestration check should not own ${message}`,
+    );
+  }
+}
+
 function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
   const source = readRepoFile("tools/interactive-ingest-check.js");
   const startupSpecSource = readRepoFile("host/startup-spec.mjs");
@@ -349,6 +382,41 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     /interactive_ingest_expect_independent_memories/,
     "interactive ingest gate should fail closed when main and worker Wasm memories are shared",
   );
+}
+
+function assertInteractiveIngestCheckUsesSharedHarness() {
+  const source = readRepoFile("tools/interactive-ingest-check.js");
+
+  for (const [pattern, message] of [
+    [/createFakeWorkerClass/, "fake Worker"],
+    [/installRuntimeBrowserGlobals/, "browser globals"],
+    [/flushAsyncWork/, "async flushing"],
+    [/runAnimationFrame/, "frame execution"],
+    [/importRepoModule/, "repo module imports"],
+  ]) {
+    assert.match(
+      source,
+      pattern,
+      `interactive ingest check should get ${message} from the shared browser harness`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/class\s+FakeWorker\b/, "a local fake Worker class"],
+    [/function\s+installBrowserHarness\b/, "a local browser harness installer"],
+    [/function\s+flushAsyncWork\b/, "a local async flusher"],
+    [/function\s+runFrame\b/, "a local frame runner"],
+    [/moduleUrl\(/, "direct moduleUrl imports"],
+    [/installBrowserGlobals/, "low-level browser global installation"],
+    [/makeFakeElement/, "local fake element wiring"],
+    [/globalThis\.requestAnimationFrame\s*=/, "local RAF installation"],
+  ]) {
+    assert.doesNotMatch(
+      source,
+      pattern,
+      `interactive ingest check should not own ${message}`,
+    );
+  }
 }
 
 function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
@@ -894,7 +962,9 @@ function main() {
   assertNoInlinePaletteColor("host/runtime.mjs");
   assertIndexCatalogUsesGeneratedFormatSpec();
   assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec();
+  assertRuntimeWorkerCheckUsesSharedHarness();
   assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
+  assertInteractiveIngestCheckUsesSharedHarness();
 }
 
 try {
