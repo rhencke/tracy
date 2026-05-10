@@ -290,9 +290,10 @@ async function checkTypedScenarioHelpers() {
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const selected = [];
   const selectedFileBytes = new Uint8Array([31, 32, 33, 34]);
+  const selectedFileName = "scenario.json";
   const selectedFile = {
     bytes: selectedFileBytes,
-    name: "scenario.json",
+    name: selectedFileName,
   };
   const acceptLen = writeString(mainMemory, 8, ".json");
 
