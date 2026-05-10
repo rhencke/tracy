@@ -292,14 +292,23 @@ async function checkTypedScenarioHelpers() {
   const selectedFileBytes = new Uint8Array([31, 32, 33, 34]);
   const selectedFileName = "scenario.json";
   const selectedFileHandle = 91;
+  const selectedFileAcceptPointer = 8;
+  const selectedFileAcceptValue = ".json";
   const selectedFile = {
     bytes: selectedFileBytes,
     name: selectedFileName,
   };
-  const acceptLen = writeString(mainMemory, 8, ".json");
+  const acceptLen = writeString(
+    mainMemory,
+    selectedFileAcceptPointer,
+    selectedFileAcceptValue,
+  );
 
   fixture.mainHost.setFileSelectedCallback((event) => selected.push(event));
-  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](8, acceptLen);
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
 
   assert.equal(
     fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
