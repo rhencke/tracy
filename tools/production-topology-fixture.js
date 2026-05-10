@@ -18,6 +18,8 @@ function makeHostImportNameMap(hostImports) {
 const DEFAULT_HOST_IMPORT_NAME = makeHostImportNameMap(hostAbi.hostImports);
 const REQUIRED_HOST_IMPORT_KEYS = Object.freeze(Object.keys(DEFAULT_HOST_IMPORT_NAME));
 const FIXTURE_OPERATION = Object.freeze(hostAbi.opfsBridge.fixtureOperations);
+const MAIN_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.defaultPersistsFileSources;
+const WORKER_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.workerPersistsFileSources;
 const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze([
   "filePickerOpen",
   "indexCreate",
@@ -177,6 +179,8 @@ function makeProductionTopologyFixture(options = {}) {
   function sourceFromSelectedFile(host, sources, files, fileHandle) {
     const file = files.get(fileHandle);
     const sourceId = host === "main" ? nextMainSourceId : nextWorkerSourceId;
+    const persistFileSource =
+      host === "main" ? MAIN_PERSISTS_FILE_SOURCES : WORKER_PERSISTS_FILE_SOURCES;
 
     assert.ok(file !== undefined, `unknown ${host} selected file handle ${fileHandle}`);
     if (host === "main") {
@@ -188,7 +192,9 @@ function makeProductionTopologyFixture(options = {}) {
     const name = defaultSourceName(file);
 
     calls.push({ handle: fileHandle, host, op: FIXTURE_OPERATION.sourceFromFile });
-    durableSources.set(name, { file, name, size: fileSize(file) });
+    if (persistFileSource) {
+      durableSources.set(name, { file, name, size: fileSize(file) });
+    }
     sources.set(sourceId, { file, name, size: fileSize(file) });
     return sourceId;
   }

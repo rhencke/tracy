@@ -73,31 +73,40 @@ async function checkDefaultSeparation() {
 async function checkSelectedFileAndDurableSourceReads() {
   const mainMemory = new WebAssembly.Memory({ initial: 2 });
   const fixture = makeProductionTopologyFixture({ mainMemory });
-  const file = {
+  const mainFile = {
     bytes: new Uint8Array([11, 12, 13, 14, 15]),
     name: "trace.json",
+  };
+  const workerFile = {
+    bytes: new Uint8Array([21, 22, 23, 24, 25]),
+    name: "worker-trace.json",
   };
   const selected = [];
   const acceptLen = writeString(mainMemory, 8, ".json");
 
   fixture.mainHost.setFileSelectedCallback((event) => selected.push(event));
   const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](8, acceptLen);
-  fixture.mainHost.selectPickedFile(77, file);
+  fixture.mainHost.selectPickedFile(77, mainFile);
   assert.equal(await picker, 77);
   await Promise.resolve();
-  assert.deepEqual(selected, [{ file, handle: 77 }]);
+  assert.deepEqual(selected, [{ file: mainFile, handle: 77 }]);
 
+  const mainSelectedSourceId = fixture.mainHost[HOST.OPFS_SOURCE_FROM_FILE](77);
+
+  assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_SIZE](mainSelectedSourceId), 5n);
+
+  fixture.selectedFiles.set(88, workerFile);
   const workerHost = fixture.createWorkerHost({
     files: new Map(fixture.selectedFiles),
   });
 
   assert.equal(Object.hasOwn(workerHost, "undefined"), false);
   assert.equal(typeof workerHost.opfs_create_from_file, "function");
-  const sourceId = workerHost[HOST.OPFS_CREATE_FROM_FILE](77);
+  const sourceId = workerHost[HOST.OPFS_CREATE_FROM_FILE](88);
 
   assert.equal(workerHost[HOST.OPFS_SOURCE_SIZE](sourceId), 5n);
   assert.equal(workerHost[HOST.OPFS_READ_CHUNK](sourceId, 1n, 3, 32), 3);
-  assert.deepEqual(readBytes(workerHost.memory, 32, 4), [12, 13, 14, 0]);
+  assert.deepEqual(readBytes(workerHost.memory, 32, 4), [22, 23, 24, 0]);
 
   const sourceName = "sources/trace.json";
   const sourceNameLen = writeString(mainMemory, 48, sourceName);
@@ -105,6 +114,15 @@ async function checkSelectedFileAndDurableSourceReads() {
 
   assert.equal(fixture.mainHost[HOST.OPFS_SOURCE_READ](mainSourceId, 2n, 2, 64), 2);
   assert.deepEqual(readBytes(mainMemory, 64, 3), [13, 14, 0]);
+
+  const workerSourceName = "sources/worker-trace.json";
+  const workerSourceNameLen = writeString(mainMemory, 80, workerSourceName);
+
+  assert.throws(
+    () => fixture.mainHost[HOST.OPFS_SOURCE_OPEN](80, workerSourceNameLen),
+    /OPFS source sources\/worker-trace\.json should exist before open/,
+    "worker-created selected-file sources should not be durable in the main host",
+  );
 }
 
 async function checkDurableIndexAcrossHosts() {
