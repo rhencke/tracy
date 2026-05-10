@@ -17,6 +17,9 @@ function makeHostImportNameMap(hostImports) {
 
 const DEFAULT_HOST_IMPORT_NAME = makeHostImportNameMap(hostAbi.hostImports);
 const REQUIRED_HOST_IMPORT_KEYS = Object.freeze(Object.keys(DEFAULT_HOST_IMPORT_NAME));
+// The fixture writes only small scratch buffers, but two pages catches accidental
+// main/worker memory sharing without pretending this is a production heap size.
+const DEFAULT_FIXTURE_MEMORY_PAGES = 2;
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
@@ -34,7 +37,7 @@ function assertHostImportNames(HOST_IMPORT_NAME) {
 }
 
 function makeDefaultMemory() {
-  return new WebAssembly.Memory({ initial: 2 });
+  return new WebAssembly.Memory({ initial: DEFAULT_FIXTURE_MEMORY_PAGES });
 }
 
 function decodeString(memory, ptr, len) {
