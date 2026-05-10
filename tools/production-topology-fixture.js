@@ -414,6 +414,10 @@ function makeProductionTopologyFixture(options = {}) {
             workerHandoff.flushed,
             `main-thread index open must wait for worker publication of ${name}`,
           );
+          assert.ok(
+            workerHandoff.published,
+            `main-thread index open must wait for worker publication of ${name}`,
+          );
         }
         durableIndex(name);
         indexes.set(indexId, { id: indexId, name });

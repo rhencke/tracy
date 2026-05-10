@@ -381,18 +381,13 @@ async function checkTypedScenarioChronology() {
   assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](earlyWorkerIndexId), 0);
   const earlyMainNameLen = writeString(mainMemory, 16, earlyIndexName);
 
-  const earlyMainIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](16, earlyMainNameLen);
-  const earlyRawOpenIndex = fixture.calls.findIndex(
-    (call) => call.host === "main" &&
-      call.op === OP.indexOpen &&
-      call.name === earlyIndexName,
+  assert.throws(
+    () => fixture.mainHost[HOST.OPFS_INDEX_OPEN](16, earlyMainNameLen),
+    /main-thread index open must wait for worker publication of indexes\/early-open\.idx/,
+    "raw main-thread open should reject flushed but unpublished worker indexes",
   );
   assert.equal(await fixture.scenario.workerPublication({ indexName: earlyIndexName }), earlyWorkerIndexId);
-  const earlyPublicationIndex = fixture.calls.findIndex(
-    (call) => call.host === "worker" &&
-      call.op === OP.workerPublication &&
-      call.name === earlyIndexName,
-  );
+  const earlyMainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName: earlyIndexName });
 
   assert.equal(
     fixture.scenario.mainThreadIndexOpen({
@@ -409,12 +404,12 @@ async function checkTypedScenarioChronology() {
 
   assert.equal(
     typedEarlyOpen.sourceCallIndex,
-    earlyRawOpenIndex,
-    "observe-only open should carry the original raw open index",
-  );
-  assert.ok(
-    typedEarlyOpen.sourceCallIndex < earlyPublicationIndex,
-    "typed open metadata should reveal a raw open that ran before worker publication",
+    fixture.calls.findIndex(
+      (call) => call.host === "main" &&
+        call.op === OP.indexOpen &&
+        call.name === earlyIndexName,
+    ),
+    "observe-only open should carry the original valid raw open index",
   );
 
   const readIndexName = "indexes/read-order.idx";

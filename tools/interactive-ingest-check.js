@@ -335,6 +335,8 @@ async function checkInteractiveIngestGate() {
       super(url, options);
       this.didYieldForFrame = false;
       this.memory = makeInteractiveIngestMemory();
+      this.coveredRangesReleased = false;
+      this.pendingCoveredRanges = [];
       assert.notEqual(
         this.memory,
         memory,
@@ -409,6 +411,13 @@ async function checkInteractiveIngestGate() {
         memoryFactory: () => this.memory,
         now: nextWorkerTime,
         postMessage: (message) => {
+          if (
+            message?.type === ingestRuntime.INGEST_WORKER_MESSAGE.COVERED_RANGE &&
+            !this.coveredRangesReleased
+          ) {
+            this.pendingCoveredRanges.push(message);
+            return;
+          }
           if (message?.type === ingestRuntime.INGEST_WORKER_MESSAGE.COMPLETE) {
             this.pendingComplete = message;
             return;
@@ -417,6 +426,16 @@ async function checkInteractiveIngestGate() {
           opfsHarness.scenario.workerMessageDelivery({ message, worker: this });
         },
       });
+    }
+
+    flushCoveredRanges() {
+      this.coveredRangesReleased = true;
+      while (this.pendingCoveredRanges.length > 0) {
+        opfsHarness.scenario.workerMessageDelivery({
+          message: this.pendingCoveredRanges.shift(),
+          worker: this,
+        });
+      }
     }
 
     flushComplete() {
@@ -600,6 +619,8 @@ async function checkInteractiveIngestGate() {
   );
   assert.notEqual(controller.status().state, "error", controller.status().error);
   assert.equal(workerIndexId, 222);
+  controller.worker.flushCoveredRanges();
+  await flushAsyncWork();
 
   let nextFrameAt = 10;
   while (
