@@ -286,9 +286,18 @@ async function checkInteractiveIngestGate() {
     },
     [abi.HOST_IMPORT_NAME.CANVAS_LISTEN_RESIZE]() {},
     [abi.HOST_IMPORT_NAME.POINTER_LISTEN]() {},
-    [abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker]: true,
   };
   assert.equal(typeof host.setFileSelectedCallback, "function");
+  assert.equal(
+    opfsHarness.mainHost[abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+    abi.OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale,
+    "production topology fixture main host should expose the OPFS stale-size marker",
+  );
+  assert.equal(
+    host[abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+    abi.OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale,
+    "interactive ingest host should inherit the OPFS stale-size marker from the fixture",
+  );
   assert.equal(
     typeof host[abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE],
     "function",
@@ -348,6 +357,14 @@ async function checkInteractiveIngestGate() {
             workerHost,
             opfsHarness.mainHost,
             "interactive ingest gate must use separate main and worker OPFS hosts",
+          );
+          assert.equal(
+            Object.hasOwn(
+              workerHost,
+              abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker,
+            ),
+            false,
+            "worker OPFS hosts must not expose the main-thread stale-size marker",
           );
           return workerHost;
         },
@@ -651,6 +668,16 @@ async function checkInteractiveIngestGate() {
       (workerHost) => workerHost !== opfsHarness.mainHost,
     ),
     "main-thread reader must not share its OPFS host object with the worker",
+  );
+  assert.ok(
+    opfsHarness.mainHost.createdWorkerHosts.every(
+      (workerHost) =>
+        !Object.hasOwn(
+          workerHost,
+          abi.OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker,
+        ),
+    ),
+    "worker OPFS hosts must not expose the main-thread stale-size marker",
   );
   assert.ok(
     opfsHarness.calls.some(

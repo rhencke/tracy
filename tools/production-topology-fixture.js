@@ -18,6 +18,8 @@ function makeHostImportNameMap(hostImports) {
 const DEFAULT_HOST_IMPORT_NAME = makeHostImportNameMap(hostAbi.hostImports);
 const REQUIRED_HOST_IMPORT_KEYS = Object.freeze(Object.keys(DEFAULT_HOST_IMPORT_NAME));
 const FIXTURE_OPERATION = Object.freeze(hostAbi.opfsBridge.fixtureOperations);
+const INDEX_SIZE_MAY_BE_STALE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMarker;
+const MAIN_INDEX_SIZE_MAY_BE_STALE = hostAbi.opfsBridge.mainIndexSizeMayBeStale;
 const MAIN_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.defaultPersistsFileSources;
 const WORKER_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.workerPersistsFileSources;
 const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze([
@@ -385,6 +387,7 @@ function makeProductionTopologyFixture(options = {}) {
   const mainHost = {
     calls,
     createdWorkerHosts,
+    [INDEX_SIZE_MAY_BE_STALE_MARKER]: MAIN_INDEX_SIZE_MAY_BE_STALE,
     selectPickedFile(handle, file) {
       assert.notEqual(
         pendingFilePickerOpen,

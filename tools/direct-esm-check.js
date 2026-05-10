@@ -412,6 +412,10 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
     [/installBrowserGlobals/, "low-level browser global installation"],
     [/makeFakeElement/, "local fake element wiring"],
     [/function\s+makeProductionTopologyOpfsHarness\b/, "a local production topology harness"],
+    [
+      /\[abi\.OPFS_BRIDGE_CONTRACT\.indexSizeMayBeStaleMarker\]\s*:\s*true/,
+      "a manual OPFS stale-size marker patch",
+    ],
     [/globalThis\.requestAnimationFrame\s*=/, "local RAF installation"],
   ]) {
     assert.doesNotMatch(
@@ -439,6 +443,16 @@ function assertProductionTopologyFixtureUsesHostAbiSpec() {
     source,
     /hostAbi\.opfsBridge\.fixtureOperations/,
     "production topology fixture should derive observable operation names from the host ABI spec",
+  );
+  assert.match(
+    source,
+    /hostAbi\.opfsBridge\.indexSizeMayBeStaleMarker/,
+    "production topology fixture should derive the OPFS stale-size marker key from the host ABI spec",
+  );
+  assert.match(
+    source,
+    /hostAbi\.opfsBridge\.mainIndexSizeMayBeStale/,
+    "production topology fixture should derive the OPFS stale-size marker value from the host ABI spec",
   );
 
   for (const [pattern, message] of [

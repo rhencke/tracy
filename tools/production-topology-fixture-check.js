@@ -3,11 +3,14 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const hostAbi = require("../abi/host.json");
 const {
   FIXTURE_OPERATION: OP,
   DEFAULT_HOST_IMPORT_NAME: HOST,
   makeProductionTopologyFixture,
 } = require("./production-topology-fixture.js");
+
+const STALE_SIZE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMarker;
 
 function writeString(memory, ptr, value) {
   const bytes = new TextEncoder().encode(value);
@@ -53,15 +56,32 @@ async function checkDefaultSeparation() {
     mainMemory,
     "production topology fixture should default to independent worker memory",
   );
+  assert.equal(
+    fixture.mainHost[STALE_SIZE_MARKER],
+    hostAbi.opfsBridge.mainIndexSizeMayBeStale,
+    "main host should expose the production OPFS stale-size marker",
+  );
+  assert.equal(
+    Object.hasOwn(workerHost, STALE_SIZE_MARKER),
+    false,
+    "worker hosts should not expose the main-thread OPFS stale-size marker",
+  );
   assert.throws(
     () => fixture.createWorkerHost({ memory: mainMemory }),
     /makeSameMemoryWorkerHostForTests/,
     "same-memory workers should require the narrowly named test helper",
   );
+  const sameMemoryWorkerHost = fixture.makeSameMemoryWorkerHostForTests();
+
   assert.equal(
-    fixture.makeSameMemoryWorkerHostForTests().memory,
+    sameMemoryWorkerHost.memory,
     mainMemory,
     "same-memory shortcut should be explicit in the helper name",
+  );
+  assert.equal(
+    Object.hasOwn(sameMemoryWorkerHost, STALE_SIZE_MARKER),
+    false,
+    "same-memory worker hosts should not expose the main-thread OPFS stale-size marker",
   );
   assert.equal(
     fixture.makeSameHostWorkerHostForTests(),
