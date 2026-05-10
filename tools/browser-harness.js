@@ -1,5 +1,7 @@
 "use strict";
 
+const { moduleUrl } = require("./acceptance-wasm-helpers.js");
+
 function makeFakeElement(overrides = {}) {
   return {
     addEventListener() {},
@@ -97,6 +99,22 @@ function createRafHarness() {
   return { frames };
 }
 
+async function runAnimationFrame(frames, timestamp, options = {}) {
+  const frame = frames.shift();
+
+  if (typeof frame !== "function") {
+    throw new Error(`expected a frame callback at ${timestamp} ms`);
+  }
+
+  options.beforeFrame?.(timestamp);
+  const startedAt = options.performance?.now?.();
+  frame(timestamp);
+  if (startedAt !== undefined) {
+    options.frameDurations?.push(options.performance.now() - startedAt);
+  }
+  await flushMicrotasks(options.microtasks ?? 1);
+}
+
 function installJspiStubs() {
   globalThis.WebAssembly.Suspending = class Suspending {
     constructor(fn) {
@@ -118,21 +136,96 @@ function installBrowserGlobals(options = {}) {
   return { ...installed, ...raf, window };
 }
 
+function installRuntimeBrowserGlobals(options = {}) {
+  const {
+    canvas = {},
+    createElement = () => makeFakeElement(),
+    ...browserOptions
+  } = options;
+
+  return installBrowserGlobals({
+    canvas: { hidden: false, id: "tracy", ...canvas },
+    createElement,
+    ...browserOptions,
+  });
+}
+
 async function flushMicrotasks(count = 1) {
   for (let index = 0; index < count; index += 1) {
     await Promise.resolve();
   }
 }
 
+async function flushRuntimeMicrotasks(count = 8) {
+  await flushMicrotasks(count);
+}
+
+async function flushAsyncWork(options = {}) {
+  await flushMicrotasks(options.beforeImmediateMicrotasks ?? 1);
+  if (options.immediate !== false) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  await flushMicrotasks(options.afterImmediateMicrotasks ?? 1);
+}
+
+function createFakeWorkerClass() {
+  return class FakeWorker {
+    static instances = [];
+
+    static reset() {
+      this.instances.length = 0;
+    }
+
+    constructor(url, options) {
+      this.events = new Map();
+      this.options = options;
+      this.posted = [];
+      this.url = url;
+      this.constructor.instances.push(this);
+    }
+
+    addEventListener(type, callback) {
+      this.events.set(type, callback);
+    }
+
+    emit(type, data) {
+      this.events.get(type)?.({ data });
+    }
+
+    postMessage(message) {
+      this.posted.push(message);
+    }
+
+    terminate() {
+      this.terminated = true;
+    }
+  };
+}
+
+function repoModuleUrl(relativePath) {
+  return moduleUrl(relativePath);
+}
+
+function importRepoModule(relativePath) {
+  return import(repoModuleUrl(relativePath));
+}
+
 module.exports = {
+  createFakeWorkerClass,
   createRafHarness,
+  flushAsyncWork,
   flushMicrotasks,
+  flushRuntimeMicrotasks,
+  importRepoModule,
   installBrowserGlobals,
   installFakeDocument,
   installFakeWindow,
   installJspiStubs,
+  installRuntimeBrowserGlobals,
   makeFakeCanvas,
   makeFakeCanvasContext,
   makeFakeDocument,
   makeFakeElement,
+  repoModuleUrl,
+  runAnimationFrame,
 };
