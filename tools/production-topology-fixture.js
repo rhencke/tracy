@@ -20,6 +20,12 @@ const REQUIRED_HOST_IMPORT_KEYS = Object.freeze(Object.keys(DEFAULT_HOST_IMPORT_
 // The fixture writes only small scratch buffers, but two pages catches accidental
 // main/worker memory sharing without pretending this is a production heap size.
 const DEFAULT_FIXTURE_MEMORY_PAGES = 2;
+// Fixture handle IDs use separate sentinel ranges so assertions and failures can
+// distinguish main/worker state and source/index handles at a glance.
+const DEFAULT_MAIN_SOURCE_ID_SEED = 112;
+const DEFAULT_MAIN_INDEX_ID_SEED = 122;
+const DEFAULT_WORKER_SOURCE_ID_SEED = 212;
+const DEFAULT_WORKER_INDEX_ID_SEED = 222;
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
@@ -123,10 +129,10 @@ function makeProductionTopologyFixture(options = {}) {
   const createdWorkerHosts = [];
   let fileSelectedCallback = null;
   let pendingFilePickerOpen = null;
-  let nextMainSourceId = options.nextMainSourceId ?? 112;
-  let nextMainIndexId = options.nextMainIndexId ?? 122;
-  let nextWorkerSourceId = options.nextWorkerSourceId ?? 212;
-  let nextWorkerIndexId = options.nextWorkerIndexId ?? 222;
+  let nextMainSourceId = options.nextMainSourceId ?? DEFAULT_MAIN_SOURCE_ID_SEED;
+  let nextMainIndexId = options.nextMainIndexId ?? DEFAULT_MAIN_INDEX_ID_SEED;
+  let nextWorkerSourceId = options.nextWorkerSourceId ?? DEFAULT_WORKER_SOURCE_ID_SEED;
+  let nextWorkerIndexId = options.nextWorkerIndexId ?? DEFAULT_WORKER_INDEX_ID_SEED;
 
   function makeWorkerMemory() {
     const workerMemory = workerMemoryFactory();
