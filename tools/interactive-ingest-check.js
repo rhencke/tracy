@@ -18,6 +18,7 @@ const {
   runAnimationFrame,
 } = require("./browser-harness.js");
 const {
+  FIXTURE_OPERATION: OP,
   makeProductionTopologyFixture,
 } = require("./production-topology-fixture.js");
 
@@ -464,7 +465,7 @@ async function checkInteractiveIngestGate() {
   await flushAsyncWork();
   assert.equal(
     opfsHarness.calls.some(
-      (call) => call.host === "main" && call.op === "file-picker-open",
+      (call) => call.host === "main" && call.op === OP.filePickerOpen,
     ),
     false,
     "interactive ingest gate should not open the file picker during app load",
@@ -490,7 +491,7 @@ async function checkInteractiveIngestGate() {
   );
   await waitForAsyncCondition(
     () => opfsHarness.calls.some(
-      (call) => call.host === "main" && call.op === "set-file-selected-callback",
+      (call) => call.host === "main" && call.op === OP.setFileSelectedCallback,
     ),
     "interactive ingest gate should install the production file-selection callback during startup",
   );
@@ -500,7 +501,7 @@ async function checkInteractiveIngestGate() {
   await flushAsyncWork();
   assert.ok(
     opfsHarness.calls.some(
-      (call) => call.host === "main" && call.op === "file-picker-open",
+      (call) => call.host === "main" && call.op === OP.filePickerOpen,
     ),
     "interactive ingest gate should open the production file picker path from a user gesture",
   );
@@ -602,7 +603,7 @@ async function checkInteractiveIngestGate() {
     () =>
       opfsHarness.calls.some(
         (call) => call.host === "worker" &&
-          call.op === "index-create" &&
+          call.op === OP.indexCreate &&
           call.name === "indexes/throttled-100mb.json.idx",
       ) || controller.status().state === "error",
     `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
@@ -617,14 +618,14 @@ async function checkInteractiveIngestGate() {
       flag(
         opfsHarness.calls.some(
           (call) => call.host === "worker" &&
-            call.op === "source-from-file" &&
+            call.op === OP.sourceFromFile &&
             call.handle === 77,
         ),
       ),
       flag(
         opfsHarness.calls.some(
           (call) => call.host === "worker" &&
-            call.op === "index-create" &&
+            call.op === OP.indexCreate &&
             call.name === "indexes/throttled-100mb.json.idx",
         ),
       ),
@@ -642,7 +643,7 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === "index-open" &&
+        call.op === OP.indexOpen &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "main-thread reader should open the worker-written OPFS index",
@@ -658,7 +659,7 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "worker" &&
-        call.op === "index-write" &&
+        call.op === OP.indexWrite &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "worker should publish index bytes through the named OPFS index",
@@ -666,7 +667,7 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === "index-read" &&
+        call.op === OP.indexRead &&
         call.name === "indexes/throttled-100mb.json.idx",
     ),
     "main thread should read worker-published bytes through the named OPFS index",
@@ -674,12 +675,12 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.findIndex(
       (call) => call.host === "worker" &&
-        call.op === "index-write" &&
+        call.op === OP.indexWrite &&
         call.name === "indexes/throttled-100mb.json.idx",
     ) <
       opfsHarness.calls.findIndex(
         (call) => call.host === "main" &&
-          call.op === "index-open" &&
+          call.op === OP.indexOpen &&
           call.name === "indexes/throttled-100mb.json.idx",
       ),
     "main-thread reader should discover the named index after worker publication",

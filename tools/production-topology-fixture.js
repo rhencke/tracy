@@ -17,6 +17,19 @@ function makeHostImportNameMap(hostImports) {
 
 const DEFAULT_HOST_IMPORT_NAME = makeHostImportNameMap(hostAbi.hostImports);
 const REQUIRED_HOST_IMPORT_KEYS = Object.freeze(Object.keys(DEFAULT_HOST_IMPORT_NAME));
+const FIXTURE_OPERATION = Object.freeze(hostAbi.opfsBridge.fixtureOperations);
+const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze([
+  "filePickerOpen",
+  "indexCreate",
+  "indexFlush",
+  "indexOpen",
+  "indexRead",
+  "indexWrite",
+  "sameHostTestShortcut",
+  "setFileSelectedCallback",
+  "sourceFromFile",
+  "sourceOpen",
+]);
 // The fixture writes only small scratch buffers, but two pages catches accidental
 // main/worker memory sharing without pretending this is a production heap size.
 const DEFAULT_FIXTURE_MEMORY_PAGES = 2;
@@ -38,6 +51,21 @@ function assertHostImportNames(HOST_IMPORT_NAME) {
       HOST_IMPORT_NAME[key].length,
       0,
       `production topology fixture host import ${key} must not be empty`,
+    );
+  }
+}
+
+function assertFixtureOperations(fixtureOperations) {
+  for (const key of REQUIRED_FIXTURE_OPERATION_KEYS) {
+    assert.equal(
+      typeof fixtureOperations[key],
+      "string",
+      `production topology fixture operation ${key} must be defined`,
+    );
+    assert.notEqual(
+      fixtureOperations[key].length,
+      0,
+      `production topology fixture operation ${key} must not be empty`,
     );
   }
 }
@@ -119,6 +147,7 @@ function makeProductionTopologyFixture(options = {}) {
   const HOST_IMPORT_NAME = options.HOST_IMPORT_NAME ?? DEFAULT_HOST_IMPORT_NAME;
 
   assertHostImportNames(HOST_IMPORT_NAME);
+  assertFixtureOperations(FIXTURE_OPERATION);
 
   const mainMemory = options.mainMemory ?? makeDefaultMemory();
   const workerMemoryFactory = options.workerMemoryFactory ?? makeDefaultMemory;
@@ -158,7 +187,7 @@ function makeProductionTopologyFixture(options = {}) {
 
     const name = defaultSourceName(file);
 
-    calls.push({ handle: fileHandle, host, op: "source-from-file" });
+    calls.push({ handle: fileHandle, host, op: FIXTURE_OPERATION.sourceFromFile });
     durableSources.set(name, { file, name, size: fileSize(file) });
     sources.set(sourceId, { file, name, size: fileSize(file) });
     return sourceId;
@@ -231,7 +260,7 @@ function makeProductionTopologyFixture(options = {}) {
         const source = durableSource(name);
         const sourceId = idState.nextSourceId();
 
-        calls.push({ host, name, op: "source-open" });
+        calls.push({ host, name, op: FIXTURE_OPERATION.sourceOpen });
         sources.set(sourceId, source);
         return sourceId;
       },
@@ -250,7 +279,7 @@ function makeProductionTopologyFixture(options = {}) {
 
         durableIndexes.set(name, { bytes: new Uint8Array(0), name });
         indexes.set(indexId, { id: indexId, name });
-        calls.push({ host, id: indexId, name, op: "index-create" });
+        calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexCreate });
         return indexId;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
@@ -259,7 +288,7 @@ function makeProductionTopologyFixture(options = {}) {
 
         durableIndex(name);
         indexes.set(indexId, { id: indexId, name });
-        calls.push({ host, id: indexId, name, op: "index-open" });
+        calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexOpen });
         return indexId;
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
@@ -279,7 +308,7 @@ function makeProductionTopologyFixture(options = {}) {
           len,
           name: index.name,
           offset: start,
-          op: "index-read",
+          op: FIXTURE_OPERATION.indexRead,
         });
         copyToMemory(memory, chunk, destPtr, len);
         return chunk.byteLength;
@@ -305,14 +334,14 @@ function makeProductionTopologyFixture(options = {}) {
           len,
           name: index.name,
           offset: start,
-          op: "index-write",
+          op: FIXTURE_OPERATION.indexWrite,
         });
         return len;
       },
       async [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
         const index = requireIndex(indexId);
 
-        calls.push({ host, id: indexId, name: index.name, op: "index-flush" });
+        calls.push({ host, id: indexId, name: index.name, op: FIXTURE_OPERATION.indexFlush });
         await new Promise((resolve) => setImmediate(resolve));
         return 0;
       },
@@ -375,7 +404,7 @@ function makeProductionTopologyFixture(options = {}) {
       calls.push({
         callbackType: typeof callback,
         host: "main",
-        op: "set-file-selected-callback",
+        op: FIXTURE_OPERATION.setFileSelectedCallback,
       });
       fileSelectedCallback = callback;
     },
@@ -388,7 +417,7 @@ function makeProductionTopologyFixture(options = {}) {
       calls.push({
         accept: decodeString(mainMemory, acceptPtr, acceptLen),
         host: "main",
-        op: "file-picker-open",
+        op: FIXTURE_OPERATION.filePickerOpen,
       });
       return new Promise((resolve) => {
         pendingFilePickerOpen = { resolve };
@@ -425,7 +454,7 @@ function makeProductionTopologyFixture(options = {}) {
   }
 
   function makeSameHostWorkerHostForTests() {
-    calls.push({ host: "worker", op: "same-host-test-shortcut" });
+    calls.push({ host: "worker", op: FIXTURE_OPERATION.sameHostTestShortcut });
     createdWorkerHosts.push(mainHost);
     return mainHost;
   }
@@ -446,5 +475,6 @@ function makeProductionTopologyFixture(options = {}) {
 
 module.exports = {
   DEFAULT_HOST_IMPORT_NAME,
+  FIXTURE_OPERATION,
   makeProductionTopologyFixture,
 };

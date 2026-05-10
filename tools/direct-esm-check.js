@@ -435,12 +435,27 @@ function assertProductionTopologyFixtureUsesHostAbiSpec() {
     /hostAbi\.hostImports/,
     "production topology fixture should derive host import names from the host ABI spec",
   );
+  assert.match(
+    source,
+    /hostAbi\.opfsBridge\.fixtureOperations/,
+    "production topology fixture should derive observable operation names from the host ABI spec",
+  );
 
   for (const [pattern, message] of [
     [/const\s+DEFAULT_HOST_IMPORT_NAME\s*=\s*Object\.freeze\(\{/, "default host import table"],
     [/FILE_PICKER_OPEN:\s*"file_picker_open"/, "file picker import name"],
     [/OPFS_CREATE_FROM_FILE:\s*"opfs_create_from_file"/, "OPFS create-from-file import name"],
     [/OPFS_INDEX_CREATE:\s*"opfs_index_create"/, "OPFS index-create import name"],
+    [/op:\s*"source-from-file"/, "source-from-file operation name"],
+    [/op:\s*"source-open"/, "source-open operation name"],
+    [/op:\s*"index-create"/, "index-create operation name"],
+    [/op:\s*"index-open"/, "index-open operation name"],
+    [/op:\s*"index-read"/, "index-read operation name"],
+    [/op:\s*"index-write"/, "index-write operation name"],
+    [/op:\s*"index-flush"/, "index-flush operation name"],
+    [/op:\s*"set-file-selected-callback"/, "file-selection callback operation name"],
+    [/op:\s*"file-picker-open"/, "file-picker-open operation name"],
+    [/op:\s*"same-host-test-shortcut"/, "same-host shortcut operation name"],
   ]) {
     assert.doesNotMatch(
       source,

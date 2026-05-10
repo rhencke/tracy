@@ -4,6 +4,7 @@
 
 const assert = require("node:assert/strict");
 const {
+  FIXTURE_OPERATION: OP,
   DEFAULT_HOST_IMPORT_NAME: HOST,
   makeProductionTopologyFixture,
 } = require("./production-topology-fixture.js");
@@ -125,17 +126,19 @@ async function checkDurableIndexAcrossHosts() {
   assert.equal(fixture.mainHost[HOST.OPFS_INDEX_READ](mainIndexId, 0n, 6, 120), 6);
   assert.deepEqual(readBytes(mainMemory, 120, 6), [0, 0, 21, 22, 23, 24]);
   assert.deepEqual(
-    fixture.calls.filter((call) => call.op.startsWith("index-")).map((call) => [
-      call.host,
-      call.op,
-      call.name,
-    ]),
+    fixture.calls.filter((call) => [
+      OP.indexCreate,
+      OP.indexFlush,
+      OP.indexOpen,
+      OP.indexRead,
+      OP.indexWrite,
+    ].includes(call.op)).map((call) => [call.host, call.op, call.name]),
     [
-      ["worker", "index-create", indexName],
-      ["worker", "index-write", indexName],
-      ["worker", "index-flush", indexName],
-      ["main", "index-open", indexName],
-      ["main", "index-read", indexName],
+      ["worker", OP.indexCreate, indexName],
+      ["worker", OP.indexWrite, indexName],
+      ["worker", OP.indexFlush, indexName],
+      ["main", OP.indexOpen, indexName],
+      ["main", OP.indexRead, indexName],
     ],
   );
 }
