@@ -600,7 +600,8 @@ async function checkWorkerPublicationRequiresWrittenBytes() {
 }
 
 async function checkTypedScenarioChronology() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const chronologyMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: chronologyMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const earlyIndexName = "indexes/early-open.idx";
