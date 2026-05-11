@@ -112,6 +112,14 @@ const INDEX_QUERY_RESULT_LAYOUT = Object.freeze({
   PARTIAL: 24,
 });
 // @generated trace-renderer-contract:end
+import {
+  errorMessage,
+  globalValue,
+  normalizedPositiveInteger,
+  normalizedRowCap,
+  wasmNumber,
+} from "./memory.mjs";
+
 const {
   DEFAULT_TRACE_RENDER_COMMAND_CAP,
   DEFAULT_TRACE_RENDER_COMMAND_PTR,
@@ -207,20 +215,6 @@ const TRACE_RENDERER_COLORS = Object.freeze({
   INCOMPLETE_QUERY_FILL: "rgba(180, 83, 9, 0.16)",
   INCOMPLETE_QUERY_STRIPE: "rgba(146, 64, 14, 0.42)",
 });
-
-function globalValue(value) {
-  return value instanceof WebAssembly.Global ? value.value : value;
-}
-
-function wasmNumber(value, fallback) {
-  const numeric = Number(globalValue(value));
-
-  return Number.isFinite(numeric) ? numeric : fallback;
-}
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function canvasDimension(canvas, property, fallback) {
   const suffix = `${property[0].toUpperCase()}${property.slice(1)}`;
@@ -499,22 +493,6 @@ function isPromiseLike(value) {
     value !== null &&
     typeof value.then === "function"
   );
-}
-
-function normalizedRowCap(value, fallback) {
-  const numeric = Number(value);
-
-  return Number.isFinite(numeric) && numeric >= 0
-    ? Math.floor(numeric)
-    : fallback;
-}
-
-function normalizedPositiveInteger(value, fallback) {
-  const numeric = Number(value);
-
-  return Number.isFinite(numeric) && numeric > 0
-    ? Math.floor(numeric)
-    : fallback;
 }
 
 function requireTraceRenderExports(plannerExports) {

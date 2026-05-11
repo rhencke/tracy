@@ -167,6 +167,96 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
   );
 }
 
+function importSpecifier(fromPath, toPath) {
+  const fromDir = path.dirname(fromPath);
+  const relativePath = path.relative(fromDir, toPath).replaceAll(path.sep, "/");
+
+  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+}
+
+function assertStringArray(value, message) {
+  assert(
+    Array.isArray(value) &&
+      value.length > 0 &&
+      value.every((entry) => typeof entry === "string" && entry.length > 0),
+    message,
+  );
+}
+
+function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridge) {
+  const helperContract = bridge.wasmBoundaryHelpers;
+
+  assert(
+    helperContract !== null && typeof helperContract === "object",
+    "runtime bridge should define shared Wasm boundary helper topology",
+  );
+  assert.equal(
+    typeof helperContract.ownerModule,
+    "string",
+    "shared Wasm boundary helper contract should name its owner module",
+  );
+  assert.equal(
+    typeof helperContract.startupImporter,
+    "string",
+    "shared Wasm boundary helper contract should name its startup importer",
+  );
+  assertStringArray(
+    helperContract.helpers,
+    "shared Wasm boundary helper contract should list helper exports",
+  );
+  assertStringArray(
+    helperContract.consumers,
+    "shared Wasm boundary helper contract should list helper consumers",
+  );
+
+  const ownerSource = readRepoFile(helperContract.ownerModule);
+  const startupImporterSource = readRepoFile(helperContract.startupImporter);
+  const startupImportSpecifier = importSpecifier(
+    helperContract.startupImporter,
+    helperContract.ownerModule,
+  );
+
+  assert.match(
+    startupImporterSource,
+    new RegExp(`from "${escapeRegExp(startupImportSpecifier)}"`),
+    `shared Wasm boundary helpers must stay in ${helperContract.ownerModule}, which ${helperContract.startupImporter} already fetches during startup`,
+  );
+  assert.match(
+    bootstrapSource,
+    new RegExp(`import\\("${escapeRegExp(`./${helperContract.startupImporter}`)}"\\)`),
+    `bootstrap should keep ${helperContract.startupImporter} on the startup path before runtime imports shared Wasm boundary helpers`,
+  );
+
+  for (const name of helperContract.helpers) {
+    assert.match(
+      ownerSource,
+      new RegExp(`export function ${name}\\(`),
+      `${helperContract.ownerModule} should own shared Wasm boundary helper ${name}`,
+    );
+  }
+
+  for (const relativePath of helperContract.consumers) {
+    const source = readRepoFile(relativePath);
+    const ownerImportSpecifier = importSpecifier(
+      relativePath,
+      helperContract.ownerModule,
+    );
+
+    assert.match(
+      source,
+      new RegExp(`from "${escapeRegExp(ownerImportSpecifier)}"`),
+      `${relativePath} should reuse shared Wasm boundary helpers from startup-fetched ${helperContract.ownerModule}`,
+    );
+    for (const name of helperContract.helpers) {
+      assert.doesNotMatch(
+        source,
+        new RegExp(`function ${name}\\(`),
+        `${relativePath} should not duplicate shared Wasm boundary helper ${name}`,
+      );
+    }
+  }
+}
+
 function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
   const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
 
@@ -800,6 +890,7 @@ function main() {
   const traceRendererSpecSource = readRepoFile("host/trace-renderer-spec.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
+  const runtimeSpec = JSON.parse(readRepoFile("abi/runtime.json"));
   const paletteSpec = JSON.parse(readRepoFile("abi/palette.json"));
   const readmeSource = readRepoFile("README.md");
   const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
@@ -812,6 +903,10 @@ function main() {
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
   assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
   assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
+  assertSharedWasmBoundaryHelpersStayOnStartupPath(
+    bootstrapSource,
+    runtimeSpec.runtimeBridge,
+  );
 
   assert.match(
     buildScript,
@@ -1015,6 +1110,7 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
+    "host/memory.mjs",
     "host/index-format-spec.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/startup-spec.mjs",
@@ -1030,6 +1126,7 @@ function main() {
     "host/ingest-worker-runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime.mjs",
+    "host/memory.mjs",
     "host/index-format-spec.mjs",
     "host/startup-spec.mjs",
     "host/trace-renderer-spec.mjs",
@@ -1044,6 +1141,7 @@ function main() {
     "bootstrap.mjs",
     "worker.js",
     "host/runtime.mjs",
+    "host/memory.mjs",
     "host/index-format-spec.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/startup-spec.mjs",

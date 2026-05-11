@@ -99,6 +99,26 @@ export const RUNTIME_BRIDGE = Object.freeze({
     "SLICE_CATALOG_FULL_PREFIX": "main-thread slice catalog full while rebuilding index ",
     "SLICE_CATALOG_FULL_PAGE_SEPARATOR": " at page ",
     "WORKER_INGEST_FAILED": "worker ingest failed"
+  },
+  "wasmBoundaryHelpers": {
+    "ownerModule": "host/memory.mjs",
+    "startupImporter": "host/shim.mjs",
+    "helpers": [
+      "errorMessage",
+      "globalValue",
+      "normalizedPositiveInteger",
+      "normalizedRowCap",
+      "numericSize",
+      "promisingWasmExport",
+      "wasmNumber"
+    ],
+    "consumers": [
+      "host/index-reader-catalog.mjs",
+      "host/ingest-worker-runtime.mjs",
+      "host/opfs-source.mjs",
+      "host/progressive-trace-renderer.mjs",
+      "host/runtime.mjs"
+    ]
   }
 });
 

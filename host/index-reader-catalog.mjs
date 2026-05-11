@@ -1,11 +1,8 @@
 import { HOST_IMPORT_NAME } from "./abi.mjs";
 import { INDEX_FORMAT } from "./index-format-spec.mjs";
+import { globalValue, promisingWasmExport } from "./memory.mjs";
 export const OPFS_INDEX_SIZE_MAY_BE_STALE =
   "tracy.opfsIndexSizeMayBeStale";
-
-function globalValue(value) {
-  return value instanceof WebAssembly.Global ? value.value : value;
-}
 
 function indexPageCountFromSize(size) {
   return typeof size === "bigint"
@@ -20,12 +17,6 @@ function hasCatalogRebuildExports(index) {
     typeof index.read_page === "function" &&
     "INDEX_WRITER_STATUS_CATALOG_FULL" in index
   );
-}
-
-function promisingWasmExport(fn, receiver = undefined) {
-  return typeof WebAssembly.promising === "function"
-    ? WebAssembly.promising(fn)
-    : fn.bind(receiver);
 }
 
 export async function rebuildMainThreadSliceCatalog(

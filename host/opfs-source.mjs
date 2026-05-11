@@ -1,5 +1,5 @@
 import { HOST_IMPORT_NAME, OPFS_BRIDGE_CONTRACT } from "./abi.mjs";
-import { u64ToNumber } from "./memory.mjs";
+import { errorMessage, u64ToNumber } from "./memory.mjs";
 
 function makeUnsupportedHostImport(name, reason) {
   return () => {
@@ -26,10 +26,6 @@ export function makeOpfsSourceHost(memoryView, files = new Map(), options = {}) 
   const persistFileSources =
     options.persistFileSources ??
     OPFS_BRIDGE_CONTRACT.defaultPersistsFileSources;
-
-  function errorMessage(error) {
-    return error instanceof Error ? error.message : String(error);
-  }
 
   function requireSource(operation, sourceId) {
     const entry = sources.get(sourceId);
