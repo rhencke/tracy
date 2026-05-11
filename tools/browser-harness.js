@@ -177,6 +177,113 @@ async function flushAsyncWork(options = {}) {
   await flushMicrotasks(options.afterImmediateMicrotasks ?? 1);
 }
 
+const RUNTIME_APP_FIRST_FRAME_TIMESTAMP_MS = 0;
+const RUNTIME_APP_READY_FRAME_TIMESTAMP_MS = 16;
+
+function createRuntimeAppHarness(options = {}) {
+  const {
+    browserGlobals: defaultBrowserGlobals = {},
+    host: defaultHost = {},
+    memory: defaultMemory = null,
+    memoryOptions: defaultMemoryOptions = { initial: 1 },
+    runAppOptions: defaultRunAppOptions = {},
+    runtime: defaultRuntime = null,
+    runtimeModulePath: defaultRuntimeModulePath = "host/runtime.mjs",
+  } = options;
+  let browserGlobals = null;
+  let controller = null;
+  let memory = defaultMemory;
+  let runtime = defaultRuntime;
+
+  function requireBooted() {
+    if (browserGlobals === null || controller === null) {
+      throw new Error("runtime app harness must boot before running frames");
+    }
+  }
+
+  async function flushRuntimeWork(count) {
+    await flushRuntimeMicrotasks(count);
+  }
+
+  async function boot(bootOptions = {}) {
+    if (controller !== null) {
+      throw new Error("runtime app harness boot was already called");
+    }
+
+    browserGlobals = installRuntimeBrowserGlobals(
+      bootOptions.browserGlobals ?? defaultBrowserGlobals,
+    );
+    memory =
+      bootOptions.memory ??
+      memory ??
+      new WebAssembly.Memory(bootOptions.memoryOptions ?? defaultMemoryOptions);
+    runtime =
+      bootOptions.runtime ??
+      runtime ??
+      await importRepoModule(bootOptions.runtimeModulePath ?? defaultRuntimeModulePath);
+    controller = runtime.runApp(
+      memory,
+      bootOptions.host ?? defaultHost,
+      bootOptions.runAppOptions ?? defaultRunAppOptions,
+    );
+    await flushRuntimeWork(bootOptions.microtasks);
+
+    return controller;
+  }
+
+  async function runFrame(timestamp, frameOptions = {}) {
+    requireBooted();
+
+    await runAnimationFrame(browserGlobals.frames, timestamp, {
+      beforeFrame: frameOptions.beforeFrame,
+      frameDurations: frameOptions.frameDurations,
+      microtasks: 0,
+      performance: frameOptions.performance,
+    });
+    await flushRuntimeWork(frameOptions.microtasks);
+  }
+
+  async function bootToAppReady(appReadyOptions = {}) {
+    if (controller === null) {
+      await boot(appReadyOptions);
+    } else {
+      requireBooted();
+    }
+
+    await runFrame(
+      appReadyOptions.firstFrameTimestamp ?? RUNTIME_APP_FIRST_FRAME_TIMESTAMP_MS,
+      appReadyOptions,
+    );
+    const appReadyFrameCallbacks = browserGlobals.frames.splice(0);
+    for (const frame of appReadyFrameCallbacks) {
+      frame(
+        appReadyOptions.appReadyFrameTimestamp ??
+          RUNTIME_APP_READY_FRAME_TIMESTAMP_MS,
+      );
+    }
+    await flushRuntimeWork(appReadyOptions.microtasks);
+  }
+
+  return {
+    boot,
+    bootToAppReady,
+    flushRuntimeWork,
+    get browserGlobals() {
+      return browserGlobals;
+    },
+    get controller() {
+      return controller;
+    },
+    get frames() {
+      return browserGlobals?.frames ?? [];
+    },
+    get memory() {
+      return memory;
+    },
+    runFrame,
+  };
+}
+
 function createFakeWorkerClass() {
   return class FakeWorker {
     static instances = [];
@@ -222,6 +329,7 @@ function importRepoModule(relativePath) {
 module.exports = {
   createFakeWorkerClass,
   createRafHarness,
+  createRuntimeAppHarness,
   flushAsyncWork,
   flushMicrotasks,
   flushRuntimeMicrotasks,
