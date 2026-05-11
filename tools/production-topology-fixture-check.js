@@ -762,7 +762,8 @@ async function checkTypedScenarioChronology() {
 }
 
 async function checkObservedIndexReadPreservesRawReadCount() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const observedReadMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: observedReadMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/short-read.idx";
