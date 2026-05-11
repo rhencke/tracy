@@ -20,16 +20,6 @@ const FORBIDDEN_BUNDLE_PATTERNS = [
 ];
 const LEGACY_BOOTSTRAP_ENTRYPOINT = "bootstrap" + ".js";
 const LEGACY_BOOTSTRAP_PATTERN = new RegExp(`${"bootstrap"}\\.js`);
-const RUNTIME_APP_BOOT_SENSITIVE_CHECKS = Object.freeze([
-  "checkRuntimeOrchestratesWorker",
-  "checkRuntimeStartsIngestFromFileSelection",
-  "checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal",
-  "checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart",
-  "checkRuntimePreloadsProgressiveTraceRendererImplementation",
-  "checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable",
-  "checkAppReadyWaitsForFirstFrameAndDeferredRenderer",
-  "checkAppReadyFailsWhenDeferredRendererFails",
-]);
 const FORBIDDEN_RUNTIME_APP_BOOT_PATTERNS = Object.freeze([
   {
     pattern: /\bruntime\.runApp\s*\(/,
@@ -67,6 +57,10 @@ const FORBIDDEN_RUNTIME_APP_BOOT_PATTERNS = Object.freeze([
 
 function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
+}
+
+function readJsonRepoFile(relativePath) {
+  return JSON.parse(readRepoFile(relativePath));
 }
 
 function extractFunctionSource(source, functionName) {
@@ -400,15 +394,33 @@ function assertRuntimeWorkerCheckUsesSharedHarness() {
 }
 
 function assertRuntimeAppBootChecksUseHarnessOperations() {
+  const runtimeSpec = readJsonRepoFile("abi/runtime.json");
+  const bootSensitiveChecks =
+    runtimeSpec.runtimeWorkerOrchestrationCheck?.bootSensitiveChecks;
   const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
 
   assert.match(
     source,
     /createRuntimeAppHarness/,
     "runtime worker orchestration check should import the runtime app boot harness",
   );
+  assertStringArray(
+    bootSensitiveChecks,
+    "runtime worker orchestration check boot-sensitive check names should live in abi/runtime.json",
+  );
+  assert.match(
+    startupSpecSource,
+    /export const RUNTIME_WORKER_ORCHESTRATION_CHECK = Object\.freeze/,
+    "generated startup spec should expose the runtime worker orchestration check contract",
+  );
+  assert.match(
+    startupSpecSource,
+    /bootSensitiveChecks/,
+    "generated startup spec should include boot-sensitive runtime worker check names",
+  );
 
-  for (const functionName of RUNTIME_APP_BOOT_SENSITIVE_CHECKS) {
+  for (const functionName of bootSensitiveChecks) {
     const functionSource = extractFunctionSource(source, functionName);
 
     assert.match(

@@ -37,6 +37,19 @@ export const INTERACTIVE_INGEST_CHECK = Object.freeze({
   ASYNC_POLL_INTERVAL_MS: 1,
 });
 
+export const RUNTIME_WORKER_ORCHESTRATION_CHECK = Object.freeze({
+  "bootSensitiveChecks": [
+    "checkRuntimeOrchestratesWorker",
+    "checkRuntimeStartsIngestFromFileSelection",
+    "checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal",
+    "checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart",
+    "checkRuntimePreloadsProgressiveTraceRendererImplementation",
+    "checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable",
+    "checkAppReadyWaitsForFirstFrameAndDeferredRenderer",
+    "checkAppReadyFailsWhenDeferredRendererFails"
+  ]
+});
+
 export const RUNTIME_BRIDGE = Object.freeze({
   "threads": {
     "MAIN": "main"
