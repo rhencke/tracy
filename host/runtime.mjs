@@ -1,6 +1,12 @@
 import { HOST_ASYNC_IMPORTS, HOST_IMPORT_NAME } from "./abi.mjs";
 import { INDEX_FORMAT } from "./index-format-spec.mjs";
 import {
+  errorMessage,
+  globalValue,
+  normalizedRowCap,
+  promisingWasmExport,
+} from "./memory.mjs";
+import {
   APP_SHELL_COLORS,
   PERFORMANCE_MARKS,
   PERFORMANCE_MEASURES,
@@ -68,12 +74,6 @@ function wasmHostImports(host) {
   return wrapped;
 }
 
-function promisingWasmExport(fn, receiver = undefined) {
-  return typeof WebAssembly.promising === "function"
-    ? WebAssembly.promising(fn)
-    : fn.bind(receiver);
-}
-
 function reportAppLoadError(error) {
   console.error(error);
   globalThis.__TRACY_APP_LOAD_ERROR__ = errorMessage(error);
@@ -96,18 +96,6 @@ function notifyWorkerStatus(status, options, message) {
 
   options.onWorkerStatus?.(snapshot, message);
   return snapshot;
-}
-
-function globalValue(value) {
-  return value instanceof WebAssembly.Global ? value.value : value;
-}
-
-function normalizedRowCap(value, fallback) {
-  const numeric = Number(value);
-
-  return Number.isFinite(numeric) && numeric >= 0
-    ? Math.floor(numeric)
-    : fallback;
 }
 
 function growMemoryToFit(memory, byteLength) {
@@ -781,10 +769,6 @@ function showError(message) {
   }
 
   document.body.appendChild(error);
-}
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function readHostString(memory, ptr, len) {

@@ -5,6 +5,12 @@ import {
   compileWasmModuleGraphForThread,
   instantiateWasmModuleForThread,
 } from "./wasm-modules.mjs";
+import {
+  errorMessage,
+  globalValue,
+  numericSize,
+  promisingWasmExport,
+} from "./memory.mjs";
 
 export const INGEST_WORKER_MESSAGE = Object.freeze({
   COMPLETE: "complete",
@@ -33,14 +39,6 @@ const {
 const TOKEN_OUTPUT_BASE = 5 * 1024 * 1024;
 let preloadedWorkerWasmModules = null;
 
-function globalValue(value) {
-  return value instanceof WebAssembly.Global ? value.value : value;
-}
-
-function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-
 function supportsWasmJspi() {
   return (
     typeof WebAssembly.Suspending === "function" &&
@@ -60,12 +58,6 @@ function wasmHostImports(host) {
     }
   }
   return wrapped;
-}
-
-function promisingWasmExport(fn, receiver = undefined) {
-  return typeof WebAssembly.promising === "function"
-    ? WebAssembly.promising(fn)
-    : fn.bind(receiver);
 }
 
 function makeDefaultMemory() {
@@ -146,15 +138,6 @@ function parserDefaultOutputRecordCap(parserState) {
   }
 
   return recordCap;
-}
-
-function numericSize(size) {
-  if (size === undefined || size === null) {
-    return null;
-  }
-
-  const value = Number(size);
-  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function sourceSize(host, sourceId) {
