@@ -21,15 +21,18 @@ const {
   FIXTURE_OPERATION: OP,
   makeProductionTopologyFixture,
 } = require("./production-topology-fixture.js");
+const { constantValue: layoutConstantValue } = require("./layout-spec.js");
 
 let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
 let ASYNC_WAIT_TIMEOUT_MS;
 let ASYNC_POLL_INTERVAL_MS;
+let INTERACTIVE_INGEST_MEMORY_MAXIMUM_PAGES;
 let FILE_SELECTION;
 let REQUIRED_TRACE_RENDER_PLANNER_EXPORTS;
 
+const INTERACTIVE_INGEST_MEMORY_INITIAL_PAGES = layoutConstantValue("MEM_INITIAL_PAGES");
 const FIRST_EVENTS_BUDGET_MS = 100;
 // The fixture name is deliberately browser-file shaped so the generated
 // file-selection contract can derive the source and index paths under test.
@@ -42,7 +45,7 @@ const SELECTED_FILE_HANDLE = 77;
 const MAIN_THREAD_INDEX_READ_PROBE_BYTES = 1;
 
 async function loadGeneratedInteractiveIngestCheckSpec() {
-  const { INTERACTIVE_INGEST_CHECK, RUNTIME_BRIDGE } =
+  const { BOOTSTRAP_WASM_MEMORY, INTERACTIVE_INGEST_CHECK, RUNTIME_BRIDGE } =
     await importRepoModule("host/startup-spec.mjs");
   const { TRACE_RENDERER_REQUIRED_EXPORTS } =
     await importRepoModule("host/trace-renderer-spec.mjs");
@@ -52,6 +55,8 @@ async function loadGeneratedInteractiveIngestCheckSpec() {
   FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
   ASYNC_WAIT_TIMEOUT_MS = INTERACTIVE_INGEST_CHECK.ASYNC_WAIT_TIMEOUT_MS;
   ASYNC_POLL_INTERVAL_MS = INTERACTIVE_INGEST_CHECK.ASYNC_POLL_INTERVAL_MS;
+  INTERACTIVE_INGEST_MEMORY_MAXIMUM_PAGES =
+    BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES;
   FILE_SELECTION = RUNTIME_BRIDGE.fileSelection;
   REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = TRACE_RENDERER_REQUIRED_EXPORTS;
 }
@@ -86,7 +91,10 @@ function flag(value) {
 }
 
 function makeInteractiveIngestMemory() {
-  return new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
+  return new WebAssembly.Memory({
+    initial: INTERACTIVE_INGEST_MEMORY_INITIAL_PAGES,
+    maximum: INTERACTIVE_INGEST_MEMORY_MAXIMUM_PAGES,
+  });
 }
 
 function sourcePathForTraceName(traceName) {
