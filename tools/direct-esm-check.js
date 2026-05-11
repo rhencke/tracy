@@ -20,22 +20,6 @@ const FORBIDDEN_BUNDLE_PATTERNS = [
 ];
 const LEGACY_BOOTSTRAP_ENTRYPOINT = "bootstrap" + ".js";
 const LEGACY_BOOTSTRAP_PATTERN = new RegExp(`${"bootstrap"}\\.js`);
-const WASM_BOUNDARY_HELPER_NAMES = Object.freeze([
-  "errorMessage",
-  "globalValue",
-  "normalizedPositiveInteger",
-  "normalizedRowCap",
-  "numericSize",
-  "promisingWasmExport",
-  "wasmNumber",
-]);
-const WASM_BOUNDARY_HELPER_CONSUMERS = Object.freeze([
-  "host/index-reader-catalog.mjs",
-  "host/ingest-worker-runtime.mjs",
-  "host/opfs-source.mjs",
-  "host/progressive-trace-renderer.mjs",
-  "host/runtime.mjs",
-]);
 
 function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
@@ -183,37 +167,87 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
   );
 }
 
-function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, shimSource) {
-  const memorySource = readRepoFile("host/memory.mjs");
+function importSpecifier(fromPath, toPath) {
+  const fromDir = path.dirname(fromPath);
+  const relativePath = path.relative(fromDir, toPath).replaceAll(path.sep, "/");
+
+  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+}
+
+function assertStringArray(value, message) {
+  assert(
+    Array.isArray(value) &&
+      value.length > 0 &&
+      value.every((entry) => typeof entry === "string" && entry.length > 0),
+    message,
+  );
+}
+
+function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridge) {
+  const helperContract = bridge.wasmBoundaryHelpers;
+
+  assert(
+    helperContract !== null && typeof helperContract === "object",
+    "runtime bridge should define shared Wasm boundary helper topology",
+  );
+  assert.equal(
+    typeof helperContract.ownerModule,
+    "string",
+    "shared Wasm boundary helper contract should name its owner module",
+  );
+  assert.equal(
+    typeof helperContract.startupImporter,
+    "string",
+    "shared Wasm boundary helper contract should name its startup importer",
+  );
+  assertStringArray(
+    helperContract.helpers,
+    "shared Wasm boundary helper contract should list helper exports",
+  );
+  assertStringArray(
+    helperContract.consumers,
+    "shared Wasm boundary helper contract should list helper consumers",
+  );
+
+  const ownerSource = readRepoFile(helperContract.ownerModule);
+  const startupImporterSource = readRepoFile(helperContract.startupImporter);
+  const startupImportSpecifier = importSpecifier(
+    helperContract.startupImporter,
+    helperContract.ownerModule,
+  );
 
   assert.match(
-    shimSource,
-    /from "\.\/memory\.mjs"/,
-    "shared Wasm boundary helpers must stay in host/memory.mjs, which shim.mjs already fetches during startup",
+    startupImporterSource,
+    new RegExp(`from "${escapeRegExp(startupImportSpecifier)}"`),
+    `shared Wasm boundary helpers must stay in ${helperContract.ownerModule}, which ${helperContract.startupImporter} already fetches during startup`,
   );
   assert.match(
     bootstrapSource,
-    /const shimModulePromise = import\("\.\/host\/shim\.mjs"\)/,
-    "bootstrap should keep shim.mjs on the startup path before runtime imports shared Wasm boundary helpers",
+    new RegExp(`import\\("${escapeRegExp(`./${helperContract.startupImporter}`)}"\\)`),
+    `bootstrap should keep ${helperContract.startupImporter} on the startup path before runtime imports shared Wasm boundary helpers`,
   );
 
-  for (const name of WASM_BOUNDARY_HELPER_NAMES) {
+  for (const name of helperContract.helpers) {
     assert.match(
-      memorySource,
+      ownerSource,
       new RegExp(`export function ${name}\\(`),
-      `host/memory.mjs should own shared Wasm boundary helper ${name}`,
+      `${helperContract.ownerModule} should own shared Wasm boundary helper ${name}`,
     );
   }
 
-  for (const relativePath of WASM_BOUNDARY_HELPER_CONSUMERS) {
+  for (const relativePath of helperContract.consumers) {
     const source = readRepoFile(relativePath);
+    const ownerImportSpecifier = importSpecifier(
+      relativePath,
+      helperContract.ownerModule,
+    );
 
     assert.match(
       source,
-      /from "\.\/memory\.mjs"/,
-      `${relativePath} should reuse shared Wasm boundary helpers from startup-fetched host/memory.mjs`,
+      new RegExp(`from "${escapeRegExp(ownerImportSpecifier)}"`),
+      `${relativePath} should reuse shared Wasm boundary helpers from startup-fetched ${helperContract.ownerModule}`,
     );
-    for (const name of WASM_BOUNDARY_HELPER_NAMES) {
+    for (const name of helperContract.helpers) {
       assert.doesNotMatch(
         source,
         new RegExp(`function ${name}\\(`),
@@ -849,7 +883,6 @@ function main() {
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
-  const shimSource = readRepoFile("host/shim.mjs");
   const indexFormatSpecSource = readRepoFile("host/index-format-spec.mjs");
   const hostAbiSource = readRepoFile("host/abi.mjs");
   const opfsSourceSource = readRepoFile("host/opfs-source.mjs");
@@ -857,6 +890,7 @@ function main() {
   const traceRendererSpecSource = readRepoFile("host/trace-renderer-spec.mjs");
   const workerSource = readRepoFile("worker.js");
   const packageJson = JSON.parse(readRepoFile("package.json"));
+  const runtimeSpec = JSON.parse(readRepoFile("abi/runtime.json"));
   const paletteSpec = JSON.parse(readRepoFile("abi/palette.json"));
   const readmeSource = readRepoFile("README.md");
   const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
@@ -869,7 +903,10 @@ function main() {
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
   assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
   assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
-  assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, shimSource);
+  assertSharedWasmBoundaryHelpersStayOnStartupPath(
+    bootstrapSource,
+    runtimeSpec.runtimeBridge,
+  );
 
   assert.match(
     buildScript,
