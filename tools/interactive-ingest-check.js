@@ -21,22 +21,43 @@ const {
   FIXTURE_OPERATION: OP,
   makeProductionTopologyFixture,
 } = require("./production-topology-fixture.js");
+const { constantValue: layoutConstantValue } = require("./layout-spec.js");
 
 let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
+let ASYNC_WAIT_TIMEOUT_MS;
+let ASYNC_POLL_INTERVAL_MS;
+let INTERACTIVE_INGEST_MEMORY_MAXIMUM_PAGES;
+let FILE_SELECTION;
 let REQUIRED_TRACE_RENDER_PLANNER_EXPORTS;
 
+const INTERACTIVE_INGEST_MEMORY_INITIAL_PAGES = layoutConstantValue("MEM_INITIAL_PAGES");
 const FIRST_EVENTS_BUDGET_MS = 100;
+// The fixture name is deliberately browser-file shaped so the generated
+// file-selection contract can derive the source and index paths under test.
+const INTERACTIVE_TRACE_FILE_NAME = "throttled-100mb.json";
+// Non-zero handle proves selected-file ingest preserves the browser File
+// identity through the production handoff instead of accepting a placeholder.
+const SELECTED_FILE_HANDLE = 77;
+// A single byte is enough to prove the main thread read from the published
+// worker index while keeping the observation independent of index encoding.
+const MAIN_THREAD_INDEX_READ_PROBE_BYTES = 1;
 
 async function loadGeneratedInteractiveIngestCheckSpec() {
-  const { INTERACTIVE_INGEST_CHECK } = await importRepoModule("host/startup-spec.mjs");
+  const { BOOTSTRAP_WASM_MEMORY, INTERACTIVE_INGEST_CHECK, RUNTIME_BRIDGE } =
+    await importRepoModule("host/startup-spec.mjs");
   const { TRACE_RENDERER_REQUIRED_EXPORTS } =
     await importRepoModule("host/trace-renderer-spec.mjs");
 
   FIXTURE_SIZE_BYTES = INTERACTIVE_INGEST_CHECK.FIXTURE_SIZE_BYTES;
   INGEST_WINDOW_BYTES = INTERACTIVE_INGEST_CHECK.INGEST_WINDOW_BYTES;
   FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
+  ASYNC_WAIT_TIMEOUT_MS = INTERACTIVE_INGEST_CHECK.ASYNC_WAIT_TIMEOUT_MS;
+  ASYNC_POLL_INTERVAL_MS = INTERACTIVE_INGEST_CHECK.ASYNC_POLL_INTERVAL_MS;
+  INTERACTIVE_INGEST_MEMORY_MAXIMUM_PAGES =
+    BOOTSTRAP_WASM_MEMORY.BOOTSTRAP_MEMORY_MAXIMUM_PAGES;
+  FILE_SELECTION = RUNTIME_BRIDGE.fileSelection;
   REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = TRACE_RENDERER_REQUIRED_EXPORTS;
 }
 
@@ -70,7 +91,25 @@ function flag(value) {
 }
 
 function makeInteractiveIngestMemory() {
-  return new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
+  return new WebAssembly.Memory({
+    initial: INTERACTIVE_INGEST_MEMORY_INITIAL_PAGES,
+    maximum: INTERACTIVE_INGEST_MEMORY_MAXIMUM_PAGES,
+  });
+}
+
+function sourcePathForTraceName(traceName) {
+  return `${FILE_SELECTION.SOURCE_PREFIX}${traceName}`;
+}
+
+function indexPathForTraceName(traceName) {
+  return `${FILE_SELECTION.INDEX_PREFIX}${traceName}${FILE_SELECTION.INDEX_SUFFIX}`;
+}
+
+function writeString(memory, ptr, value) {
+  const bytes = new TextEncoder().encode(value);
+
+  new Uint8Array(memory.buffer, ptr, bytes.byteLength).set(bytes);
+  return bytes.byteLength;
 }
 
 const FakeWorker = createFakeWorkerClass();
@@ -117,7 +156,7 @@ function makeTraceFile() {
 
   return {
     contentBytes: FIXTURE_SIZE_BYTES,
-    name: "throttled-100mb.json",
+    name: INTERACTIVE_TRACE_FILE_NAME,
     size: FIXTURE_SIZE_BYTES,
     readAt(offset, len) {
       const start = Math.min(Number(offset), FIXTURE_SIZE_BYTES);
@@ -241,18 +280,45 @@ function assertProductionTraceRenderPlannerExports(exports) {
   }
 }
 
-async function waitForAsyncCondition(callback, label, timeoutMs = 2000) {
+async function waitForAsyncCondition(
+  callback,
+  label,
+  timeoutMs = ASYNC_WAIT_TIMEOUT_MS,
+) {
   const deadline = performance.now() + timeoutMs;
 
   while (performance.now() < deadline) {
     if (callback()) {
       return;
     }
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await new Promise((resolve) => setTimeout(resolve, ASYNC_POLL_INTERVAL_MS));
     await flushAsyncWork();
   }
 
   assert.ok(callback(), label);
+}
+
+async function waitForAsyncAction(
+  callback,
+  label,
+  timeoutMs = ASYNC_WAIT_TIMEOUT_MS,
+) {
+  const deadline = performance.now() + timeoutMs;
+  let lastError = null;
+
+  while (performance.now() < deadline) {
+    try {
+      return await callback();
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, ASYNC_POLL_INTERVAL_MS));
+    await flushAsyncWork();
+  }
+
+  assert.fail(
+    `${label}; lastError=${lastError?.message ?? String(lastError)}`,
+  );
 }
 
 async function checkInteractiveIngestGate() {
@@ -265,7 +331,8 @@ async function checkInteractiveIngestGate() {
   const memory = makeInteractiveIngestMemory();
   const canvasHarness = makeCanvasHarness();
   const { frames } = installRuntimeBrowserGlobals({ canvas: canvasHarness.canvas });
-  const sourceName = "sources/throttled-100mb.json";
+  const sourceName = sourcePathForTraceName(INTERACTIVE_TRACE_FILE_NAME);
+  const indexName = indexPathForTraceName(INTERACTIVE_TRACE_FILE_NAME);
   const workerStatuses = [];
   const importCalls = [];
   const frameDurations = [];
@@ -316,6 +383,10 @@ async function checkInteractiveIngestGate() {
       super(url, options);
       this.didYieldForFrame = false;
       this.memory = makeInteractiveIngestMemory();
+      // COVERED_RANGE delivery opens the main-thread reader, so this queue
+      // stays closed until workerPublication records the production handoff.
+      this.coveredRangesReleased = false;
+      this.pendingCoveredRanges = [];
       assert.notEqual(
         this.memory,
         memory,
@@ -390,19 +461,48 @@ async function checkInteractiveIngestGate() {
         memoryFactory: () => this.memory,
         now: nextWorkerTime,
         postMessage: (message) => {
+          if (
+            message?.type === ingestRuntime.INGEST_WORKER_MESSAGE.COVERED_RANGE &&
+            !this.coveredRangesReleased
+          ) {
+            this.pendingCoveredRanges.push(message);
+            return;
+          }
           if (message?.type === ingestRuntime.INGEST_WORKER_MESSAGE.COMPLETE) {
             this.pendingComplete = message;
             return;
           }
 
-          this.emit("message", message);
+          opfsHarness.scenario.workerMessageDelivery({ indexName, message, worker: this });
         },
       });
     }
 
+    async flushCoveredRanges() {
+      await waitForAsyncAction(
+        () =>
+          opfsHarness.scenario.workerPublication({
+            indexName,
+          }),
+        `worker should publish the current OPFS index before covered_range delivery; calls=${JSON.stringify(opfsHarness.calls)}`,
+      );
+      this.coveredRangesReleased = true;
+      while (this.pendingCoveredRanges.length > 0) {
+        opfsHarness.scenario.workerMessageDelivery({
+          indexName,
+          message: this.pendingCoveredRanges.shift(),
+          worker: this,
+        });
+      }
+      this.coveredRangesReleased = false;
+    }
+
     flushComplete() {
       if (this.pendingComplete !== undefined) {
-        this.emit("message", this.pendingComplete);
+        opfsHarness.scenario.workerMessageDelivery({
+          message: this.pendingComplete,
+          worker: this,
+        });
         this.pendingComplete = undefined;
       }
     }
@@ -541,7 +641,10 @@ async function checkInteractiveIngestGate() {
 
   const fileSelectionStartedAt = performance.now();
 
-  host.selectPickedFile(77, selectedFile);
+  opfsHarness.scenario.selectedFileIngest({
+    file: selectedFile,
+    handle: SELECTED_FILE_HANDLE,
+  });
   await flushMicrotasks(1);
   assert.notEqual(controller.status().state, "error", controller.status().error);
 
@@ -551,22 +654,41 @@ async function checkInteractiveIngestGate() {
   const startPosted =
     ingestStarts.length === 1 &&
     ingestStarts[0]?.ingestId === 1 &&
-    ingestStarts[0]?.indexName === "indexes/throttled-100mb.json.idx" &&
+    ingestStarts[0]?.indexName === indexName &&
     ingestStarts[0]?.sourceFile === selectedFile &&
-    ingestStarts[0]?.sourceFileHandle === 77 &&
+    ingestStarts[0]?.sourceFileHandle === SELECTED_FILE_HANDLE &&
     ingestStarts[0]?.sourceName === sourceName &&
     ingestStarts[0]?.sourceSize === FIXTURE_SIZE_BYTES;
   assert.deepEqual(ingestStarts, [
     {
       ingestId: 1,
-      indexName: "indexes/throttled-100mb.json.idx",
+      indexName,
       sourceFile: selectedFile,
-      sourceFileHandle: 77,
+      sourceFileHandle: SELECTED_FILE_HANDLE,
       sourceName,
       sourceSize: FIXTURE_SIZE_BYTES,
       type: "start",
     },
   ]);
+
+  const workerIndexId = await waitForAsyncAction(
+    () =>
+      opfsHarness.scenario.workerPublication({
+        indexName,
+      }),
+    `worker should publish the real OPFS index through the scenario helper; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
+  );
+  assert.notEqual(controller.status().state, "error", controller.status().error);
+  assert.equal(
+    workerIndexId,
+    opfsHarness.calls.find(
+      (call) => call.host === "worker" &&
+        call.op === OP.indexCreate &&
+        call.name === indexName,
+    )?.id,
+  );
+  await controller.worker.flushCoveredRanges();
+  await flushAsyncWork();
 
   let nextFrameAt = 10;
   while (
@@ -579,11 +701,17 @@ async function checkInteractiveIngestGate() {
   ) {
     if (frames.length === 0) {
       await flushAsyncWork();
+      if (controller.worker?.pendingCoveredRanges?.length > 0) {
+        await controller.worker.flushCoveredRanges();
+      }
       continue;
     }
 
     await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
     await flushAsyncWork();
+    if (controller.worker?.pendingCoveredRanges?.length > 0) {
+      await controller.worker.flushCoveredRanges();
+    }
     nextFrameAt += 16;
   }
   await flushAsyncWork();
@@ -610,17 +738,16 @@ async function checkInteractiveIngestGate() {
     firstTraceDrawElapsedMs <= FIRST_EVENTS_BUDGET_MS,
     `first visible events took ${firstTraceDrawElapsedMs}ms after file selection`,
   );
-  await waitForAsyncCondition(
-    () =>
-      opfsHarness.calls.some(
-        (call) => call.host === "worker" &&
-          call.op === OP.indexCreate &&
-          call.name === "indexes/throttled-100mb.json.idx",
-      ) || controller.status().state === "error",
-    `worker should create the real OPFS index before the start contract is checked; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
-    2000,
+  assert.equal(
+    await waitForAsyncAction(
+      () =>
+        opfsHarness.scenario.workerPublication({
+          indexName,
+        }),
+      `worker should publish the final OPFS index generation before main-thread open; calls=${JSON.stringify(opfsHarness.calls)} status=${JSON.stringify(controller.status())} posted=${JSON.stringify(controller.worker?.posted ?? [])}`,
+    ),
+    workerIndexId,
   );
-  assert.notEqual(controller.status().state, "error", controller.status().error);
   assertInteractiveContractOk(
     interactiveContract,
     "interactive_ingest_expect_worker_start",
@@ -630,14 +757,14 @@ async function checkInteractiveIngestGate() {
         opfsHarness.calls.some(
           (call) => call.host === "worker" &&
             call.op === OP.sourceFromFile &&
-            call.handle === 77,
+            call.handle === SELECTED_FILE_HANDLE,
         ),
       ),
       flag(
         opfsHarness.calls.some(
           (call) => call.host === "worker" &&
             call.op === OP.indexCreate &&
-            call.name === "indexes/throttled-100mb.json.idx",
+            call.name === indexName,
         ),
       ),
     ],
@@ -653,9 +780,20 @@ async function checkInteractiveIngestGate() {
   );
   assert.ok(
     opfsHarness.calls.some(
+      (call) => call.host === "worker" &&
+        call.op === OP.workerMessageDelivery,
+    ),
+    "worker should deliver progress through the typed message-delivery helper",
+  );
+  const mainThreadIndexId = opfsHarness.scenario.mainThreadIndexOpen({
+    indexName,
+    observeOnly: true,
+  });
+  assert.ok(
+    opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === OP.indexOpen &&
-        call.name === "indexes/throttled-100mb.json.idx",
+        call.op === OP.mainThreadIndexOpen &&
+        call.name === indexName,
     ),
     "main-thread reader should open the worker-written OPFS index",
   );
@@ -682,31 +820,28 @@ async function checkInteractiveIngestGate() {
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "worker" &&
-        call.op === OP.indexWrite &&
-        call.name === "indexes/throttled-100mb.json.idx",
+        call.op === OP.workerPublication &&
+        call.name === indexName,
     ),
     "worker should publish index bytes through the named OPFS index",
+  );
+  const observedMainThreadIndexReadCount =
+    opfsHarness.scenario.mainThreadIndexRead({
+      indexId: mainThreadIndexId,
+      len: MAIN_THREAD_INDEX_READ_PROBE_BYTES,
+      observeOnly: true,
+    });
+  assert.ok(
+    observedMainThreadIndexReadCount >= MAIN_THREAD_INDEX_READ_PROBE_BYTES,
+    "observe-only helper should validate the production main-thread OPFS index read",
   );
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
-        call.op === OP.indexRead &&
-        call.name === "indexes/throttled-100mb.json.idx",
+        call.op === OP.mainThreadIndexRead &&
+        call.name === indexName,
     ),
     "main thread should read worker-published bytes through the named OPFS index",
-  );
-  assert.ok(
-    opfsHarness.calls.findIndex(
-      (call) => call.host === "worker" &&
-        call.op === OP.indexWrite &&
-        call.name === "indexes/throttled-100mb.json.idx",
-    ) <
-      opfsHarness.calls.findIndex(
-        (call) => call.host === "main" &&
-          call.op === OP.indexOpen &&
-          call.name === "indexes/throttled-100mb.json.idx",
-      ),
-    "main-thread reader should discover the named index after worker publication",
   );
   assert.equal(
     controller.indexReader.status().state,

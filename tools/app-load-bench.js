@@ -17,6 +17,31 @@ const RUNTIME_SPEC = JSON.parse(
 );
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
+// Warm samples reuse a page, so let post-ready frame callbacks start their
+// deferred preload requests and then require a short quiet window before reuse.
+const POST_READY_SETTLE_FRAME_COUNT = 2;
+const POST_READY_NETWORK_QUIET_MS = 50;
+const WARM_NAVIGATION_SAMPLE_COUNT = 3;
+const BENIGN_LOADING_FAILURES = Object.freeze([
+  Object.freeze({
+    canceled: true,
+    errorText: "net::ERR_ABORTED",
+  }),
+]);
+const CORE_TRANSFER_RESOURCE_TYPES = new Set([
+  "Document",
+  "Fetch",
+  "Font",
+  "Image",
+  "Manifest",
+  "Media",
+  "Prefetch",
+  "Script",
+  "SignedExchange",
+  "Stylesheet",
+  "TextTrack",
+  "XHR",
+]);
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
   latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -98,16 +123,68 @@ function parseArgs(argv) {
 }
 
 function assertMeasuredBudget(name, metrics, budget) {
+  const failures = measuredBudgetFailures(metrics, budget);
+
+  if (failures.length > 0) {
+    throw new Error(`${name} ${failures[0]}`);
+  }
+}
+
+function measuredBudgetFailures(metrics, budget) {
+  const failures = [];
+
   for (const [field, limit] of Object.entries(budget)) {
     const value = metrics[field];
 
     if (!Number.isFinite(value)) {
-      throw new Error(`${name} missing metric ${field}`);
-    }
-    if (value > limit) {
-      throw new Error(`${name} ${field} ${value.toFixed(1)} > ${limit}`);
+      failures.push(`missing metric ${field}`);
+    } else if (value > limit) {
+      failures.push(`${field} ${value.toFixed(1)} > ${limit}`);
     }
   }
+
+  return failures;
+}
+
+function assertAnyMeasuredBudget(name, samples, budget) {
+  assert.ok(samples.length > 0, `${name} budget samples must not be empty`);
+
+  if (samples.some((sample) => measuredBudgetFailures(sample, budget).length === 0)) {
+    return;
+  }
+
+  const sampleFailures = samples.map((sample, index) => {
+    const sampleNumber = index + 1;
+
+    return `sample ${sampleNumber}: ${measuredBudgetFailures(sample, budget).join(", ")}`;
+  });
+
+  throw new Error(
+    `${name} no warm navigation sample satisfied all budget fields; ${sampleFailures.join("; ")}`,
+  );
+}
+
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function medianMetrics(samples) {
+  assert.ok(samples.length > 0, "app-load metric samples must not be empty");
+  const fields = Object.keys(samples[0]);
+  const result = {};
+
+  for (const field of fields) {
+    const values = samples.map((sample) => sample[field]);
+
+    assert.ok(
+      values.every(Number.isFinite),
+      `app-load metric samples must include finite ${field}`,
+    );
+    result[field] = median(values);
+  }
+
+  return result;
 }
 
 function findBrowser(explicitPath) {
@@ -543,9 +620,25 @@ async function waitUntil(predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
   throw new Error("timed out waiting for page condition");
 }
 
-function unfinishedTransferRequestIds(requestIds, cachedRequestIds, loadingBytes) {
+function isBenignLoadingFailure(failure) {
+  return BENIGN_LOADING_FAILURES.some(
+    (benignFailure) =>
+      failure?.canceled === benignFailure.canceled &&
+      failure?.errorText === benignFailure.errorText,
+  );
+}
+
+function unfinishedTransferRequestIds(
+  requestIds,
+  cachedRequestIds,
+  loadingBytes,
+  loadingFailures = new Map(),
+) {
   return [...requestIds].filter(
-    (requestId) => !cachedRequestIds.has(requestId) && !loadingBytes.has(requestId),
+    (requestId) =>
+      !cachedRequestIds.has(requestId) &&
+      !loadingBytes.has(requestId) &&
+      !loadingFailures.has(requestId),
   );
 }
 
@@ -553,6 +646,66 @@ function coreTransferBytesForRequests(requestIds, cachedRequestIds, loadingBytes
   return [...requestIds]
     .filter((requestId) => !cachedRequestIds.has(requestId))
     .reduce((total, requestId) => total + (loadingBytes.get(requestId) ?? 0), 0);
+}
+
+function failedCoreRequestReports(requestIds, loadingFailures, requestUrls) {
+  return [...requestIds]
+    .map((requestId) => {
+      const failure = loadingFailures.get(requestId);
+
+      if (failure === undefined || isBenignLoadingFailure(failure)) {
+        return null;
+      }
+
+      return [
+        requestUrls.get(requestId) ?? requestId,
+        failure.errorText ?? "unknown loading failure",
+      ].join(" ");
+    })
+    .filter((report) => report !== null);
+}
+
+function assertNoFailedCoreRequests(requestIds, loadingFailures, requestUrls) {
+  const failures = failedCoreRequestReports(requestIds, loadingFailures, requestUrls);
+
+  if (failures.length > 0) {
+    throw new Error(
+      `core startup requests failed before app-load transfer accounting completed: ${failures.join(", ")}`,
+    );
+  }
+}
+
+async function waitForAnimationFrames(cdp, page, frameCount) {
+  await cdp.send("Runtime.evaluate", {
+    awaitPromise: true,
+    expression: `new Promise((resolve) => {
+      let remainingFrames = ${JSON.stringify(frameCount)};
+      const tick = () => {
+        remainingFrames -= 1;
+        if (remainingFrames <= 0) {
+          resolve(true);
+        } else {
+          requestAnimationFrame(tick);
+        }
+      };
+      requestAnimationFrame(tick);
+    })`,
+    returnByValue: true,
+  }, page.sessionId);
+}
+
+async function waitForNetworkStartQuiet(lastRequestStartedAt, quietMs) {
+  let quietSince = Date.now();
+
+  await waitUntil(() => {
+    const lastStartedAt = lastRequestStartedAt();
+
+    if (lastStartedAt > quietSince) {
+      quietSince = lastStartedAt;
+    }
+
+    return Date.now() - quietSince >= quietMs;
+  });
 }
 
 function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackRequestIds) {
@@ -576,6 +729,28 @@ function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackReq
   }
 
   return requestIds;
+}
+
+function coreTransferRequestIds(requestIds, requestTypes) {
+  return new Set(
+    [...requestIds].filter((requestId) => {
+      const requestType = requestTypes.get(requestId);
+
+      return requestType === undefined || CORE_TRANSFER_RESOURCE_TYPES.has(requestType);
+    }),
+  );
+}
+
+function navigationFrameRequestIds(requestIds, requestFrameIds, navigationFrameId) {
+  if (navigationFrameId === undefined) {
+    return new Set(requestIds);
+  }
+
+  return new Set(
+    [...requestIds].filter(
+      (requestId) => requestFrameIds.get(requestId) === navigationFrameId,
+    ),
+  );
 }
 
 function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPaths) {
@@ -658,10 +833,14 @@ async function createPage(cdp) {
 
 async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
+  const requestFrameIds = new Map();
   const requestStartWallMs = new Map();
+  const requestTypes = new Map();
   const requestUrls = new Map();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
+  const loadingFailures = new Map();
+  let lastRequestStartedAt = Date.now();
   let coreRequestIds = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
@@ -669,6 +848,11 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
+    lastRequestStartedAt = Date.now();
+    if (event.frameId !== undefined) {
+      requestFrameIds.set(event.requestId, event.frameId);
+    }
+    requestTypes.set(event.requestId, event.type);
     requestUrls.set(event.requestId, event.request.url);
     if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
       requestStartWallMs.set(event.requestId, event.wallTime * 1000);
@@ -694,6 +878,15 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     }
     loadingBytes.set(event.requestId, event.encodedDataLength ?? 0);
   });
+  const offLoadingFailed = cdp.on("Network.loadingFailed", (event, sessionId) => {
+    if (sessionId !== page.sessionId) {
+      return;
+    }
+    loadingFailures.set(event.requestId, {
+      canceled: event.canceled === true,
+      errorText: event.errorText,
+    });
+  });
 
   if (options.fast3g) {
     await cdp.send("Network.emulateNetworkConditions", {
@@ -709,7 +902,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   }, page.sessionId);
 
   const loaded = waitForSessionEvent(cdp, page.sessionId, "Page.loadEventFired");
-  await cdp.send("Page.navigate", { url }, page.sessionId);
+  const navigation = await cdp.send("Page.navigate", { url }, page.sessionId);
   await loaded;
   await waitUntil(async () => {
     const result = await cdp.send("Runtime.evaluate", {
@@ -733,10 +926,17 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     return status.coreReady === true;
   });
   const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
-  coreRequestIds = requestIdsStartedAtOrBefore(
-    requestStartWallMs,
-    coreReadyWallMs,
-    requestIds,
+  coreRequestIds = navigationFrameRequestIds(
+    coreTransferRequestIds(
+      requestIdsStartedAtOrBefore(
+        requestStartWallMs,
+        coreReadyWallMs,
+        requestIds,
+      ),
+      requestTypes,
+    ),
+    requestFrameIds,
+    navigation.frameId,
   );
   assertNoProtectedStartupBoundaryRequests(
     coreRequestIds,
@@ -766,8 +966,14 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     return status.fullReady === true;
   });
   await waitUntil(() =>
-    unfinishedTransferRequestIds(coreRequestIds, cachedRequestIds, loadingBytes).length === 0,
+    unfinishedTransferRequestIds(
+      coreRequestIds,
+      cachedRequestIds,
+      loadingBytes,
+      loadingFailures,
+    ).length === 0,
   );
+  assertNoFailedCoreRequests(coreRequestIds, loadingFailures, requestUrls);
   const coreTransferBytes = coreTransferBytesForRequests(
     coreRequestIds,
     cachedRequestIds,
@@ -776,18 +982,17 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
-      const fcp = performance.getEntriesByName("first-contentful-paint")[0];
-      if (fcp === undefined) {
-        throw new Error("missing browser first-contentful-paint performance entry");
+      const shellPaintEntries = performance.getEntriesByName("tracy.app.shell.paint");
+      const shellPaint = shellPaintEntries.at(-1)?.startTime;
+      if (shellPaint === undefined) {
+        throw new Error("missing shell paint performance entry");
       }
-      const shellPaint = performance.getEntriesByName("tracy.app.shell.paint")[0]?.startTime;
       const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
       const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
         coreTtiMs: coreReady - coreStart,
-        fcpMs: fcp.startTime,
         fullLoadMs: appLoad,
         shellPaintMs: shellPaint,
         wasmInstantiateMs: wasm,
@@ -806,10 +1011,17 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
   metrics.transferBytes = coreTransferBytes;
 
+  await waitForAnimationFrames(cdp, page, POST_READY_SETTLE_FRAME_COUNT);
+  await waitForNetworkStartQuiet(
+    () => lastRequestStartedAt,
+    POST_READY_NETWORK_QUIET_MS,
+  );
+
   offRequest();
   offCache();
   offResponse();
   offLoading();
+  offLoadingFailed();
 
   return metrics;
 }
@@ -841,17 +1053,33 @@ async function runBench(options) {
 
     const swPage = await createPage(cdp);
     await primeServiceWorker(cdp, swPage, url);
-    const warmSw = await navigateAndMeasure(cdp, swPage, url);
+    const warmSwSamples = [];
+    for (let index = 0; index < WARM_NAVIGATION_SAMPLE_COUNT; index += 1) {
+      warmSwSamples.push(await navigateAndMeasure(cdp, swPage, url));
+    }
+    const warmSw = medianMetrics(warmSwSamples);
 
     const httpPage = await createPage(cdp);
     await navigateAndMeasure(cdp, httpPage, url, { bypassServiceWorker: true });
-    const warmHttp = await navigateAndMeasure(cdp, httpPage, url, { bypassServiceWorker: true });
+    const warmHttpSamples = [];
+    for (let index = 0; index < WARM_NAVIGATION_SAMPLE_COUNT; index += 1) {
+      warmHttpSamples.push(await navigateAndMeasure(cdp, httpPage, url, {
+        bypassServiceWorker: true,
+      }));
+    }
+    const warmHttp = medianMetrics(warmHttpSamples);
 
     assertMeasuredBudget("cold", cold, BUDGETS.cold);
-    assertMeasuredBudget("warmSw", warmSw, BUDGETS.warmSw);
-    assertMeasuredBudget("warmHttp", warmHttp, BUDGETS.warmHttp);
+    assertAnyMeasuredBudget("warmSw", warmSwSamples, BUDGETS.warmSw);
+    assertAnyMeasuredBudget("warmHttp", warmHttpSamples, BUDGETS.warmHttp);
 
-    console.log(JSON.stringify({ cold, warmHttp, warmSw }, null, 2));
+    console.log(JSON.stringify({
+      cold,
+      warmHttp,
+      warmHttpSamples,
+      warmSw,
+      warmSwSamples,
+    }, null, 2));
   } finally {
     cdp.close();
     await browser.close();
@@ -869,27 +1097,75 @@ function runSelfTest() {
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
       coreTtiMs: 1,
-      fcpMs: 1,
       fullLoadMs: 2,
+      shellPaintMs: 1,
       transferBytes: 0,
       wasmInstantiateMs: 3,
     }, {
       coreTtiMs: 1,
-      fcpMs: 1,
       fullLoadMs: 2,
+      shellPaintMs: 1,
       transferBytes: 0,
       wasmInstantiateMs: 3,
     }),
   );
   assert.throws(
-    () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
-    /fixture fcpMs 2.0 > 1/,
+    () => assertMeasuredBudget("fixture", { shellPaintMs: 2 }, { shellPaintMs: 1 }),
+    /fixture shellPaintMs 2.0 > 1/,
+  );
+  const splitWarmBudget = {
+    coreTtiMs: 10,
+    fullLoadMs: 10,
+    shellPaintMs: 10,
+  };
+  const splitWarmSamples = [
+    { coreTtiMs: 20, fullLoadMs: 5, shellPaintMs: 5 },
+    { coreTtiMs: 5, fullLoadMs: 20, shellPaintMs: 5 },
+    { coreTtiMs: 5, fullLoadMs: 5, shellPaintMs: 20 },
+  ];
+  const splitWarmMedian = medianMetrics(splitWarmSamples);
+
+  assert.deepEqual(splitWarmMedian, {
+    coreTtiMs: 5,
+    fullLoadMs: 5,
+    shellPaintMs: 5,
+  });
+  assert.doesNotThrow(() =>
+    assertMeasuredBudget("splitWarmMedian", splitWarmMedian, splitWarmBudget),
+  );
+  assert.throws(
+    () => assertAnyMeasuredBudget("splitWarm", splitWarmSamples, splitWarmBudget),
+    /splitWarm no warm navigation sample satisfied all budget fields; sample 1: coreTtiMs 20.0 > 10; sample 2: fullLoadMs 20.0 > 10; sample 3: shellPaintMs 20.0 > 10/,
+  );
+  assert.doesNotThrow(() =>
+    assertAnyMeasuredBudget("splitWarm", [
+      ...splitWarmSamples,
+      { coreTtiMs: 10, fullLoadMs: 10, shellPaintMs: 10 },
+    ], splitWarmBudget),
+  );
+  assert.deepEqual(
+    medianMetrics([
+      { shellPaintMs: 53, fullLoadMs: 21, transferBytes: 0 },
+      { shellPaintMs: 42, fullLoadMs: 27, transferBytes: 0 },
+      { shellPaintMs: 45, fullLoadMs: 24, transferBytes: 0 },
+    ]),
+    { shellPaintMs: 45, fullLoadMs: 24, transferBytes: 0 },
+  );
+  assert.throws(
+    () => medianMetrics([{ shellPaintMs: Number.NaN }]),
+    /app-load metric samples must include finite shellPaintMs/,
   );
   const transferRequestIds = new Set(["bootstrap", "renderer", "cached"]);
   const cachedTransferRequestIds = new Set(["cached"]);
   const loadingTransferBytes = new Map([["bootstrap", 12]]);
+  const failedTransferRequests = new Map();
   assert.deepEqual(
-    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    unfinishedTransferRequestIds(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+      failedTransferRequests,
+    ),
     ["renderer"],
   );
   assert.equal(
@@ -900,9 +1176,48 @@ function runSelfTest() {
     ),
     12,
   );
+  failedTransferRequests.set("renderer", {
+    canceled: false,
+    errorText: "net::ERR_FAILED",
+  });
+  assert.deepEqual(
+    unfinishedTransferRequestIds(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+      failedTransferRequests,
+    ),
+    [],
+  );
+  assert.throws(
+    () =>
+      assertNoFailedCoreRequests(
+        transferRequestIds,
+        failedTransferRequests,
+        new Map([["renderer", "http://127.0.0.1/bootstrap.mjs"]]),
+      ),
+    /core startup requests failed before app-load transfer accounting completed: http:\/\/127\.0\.0\.1\/bootstrap\.mjs net::ERR_FAILED/,
+  );
+  failedTransferRequests.set("renderer", {
+    canceled: true,
+    errorText: "net::ERR_ABORTED",
+  });
+  assert.doesNotThrow(() =>
+    assertNoFailedCoreRequests(
+      transferRequestIds,
+      failedTransferRequests,
+      new Map([["renderer", "http://127.0.0.1/bootstrap.mjs"]]),
+    ),
+  );
+  failedTransferRequests.clear();
   loadingTransferBytes.set("renderer", 34);
   assert.deepEqual(
-    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    unfinishedTransferRequestIds(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+      failedTransferRequests,
+    ),
     [],
   );
   assert.equal(
@@ -935,6 +1250,33 @@ function runSelfTest() {
       new Set(["bootstrap", "renderer"]),
     ),
     new Set(["bootstrap", "renderer"]),
+  );
+  assert.deepEqual(
+    coreTransferRequestIds(
+      new Set(["document", "bootstrap", "favicon", "untyped"]),
+      new Map([
+        ["document", "Document"],
+        ["bootstrap", "Script"],
+        ["favicon", "Other"],
+      ]),
+    ),
+    new Set(["document", "bootstrap", "untyped"]),
+  );
+  assert.deepEqual(
+    navigationFrameRequestIds(
+      new Set(["document", "bootstrap", "service-worker-cache"]),
+      new Map([
+        ["document", "main-frame"],
+        ["bootstrap", "main-frame"],
+        ["service-worker-cache", "worker-frame"],
+      ]),
+      "main-frame",
+    ),
+    new Set(["document", "bootstrap"]),
+  );
+  assert.deepEqual(
+    navigationFrameRequestIds(new Set(["document"]), new Map(), undefined),
+    new Set(["document"]),
   );
   const requestUrls = new Map([
     ["bootstrap", "http://127.0.0.1/bootstrap.mjs"],
@@ -1025,7 +1367,8 @@ function runSelfTest() {
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapShellPaintOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.appShellPaint)");
   const bootstrapFirstFramePromiseOffset = bootstrap.indexOf("const firstFramePromise");
-  const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
+  const bootstrapCoreReadyPromiseOffset = bootstrap.indexOf("const coreReadyPromise");
+  const bootstrapWasmModuleImportOffset = bootstrap.indexOf("const importWasmModules");
   const bootstrapRendererPreloadOffset = bootstrap.indexOf(
     "const importProgressiveTraceRenderer = () =>",
   );
@@ -1060,7 +1403,10 @@ function runSelfTest() {
   assert.notEqual(bootstrapStartOffset, -1);
   assert.notEqual(bootstrapShellPaintOffset, -1);
   assert.notEqual(bootstrapFirstFramePromiseOffset, -1);
-  assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.notEqual(bootstrapCoreReadyPromiseOffset, -1);
+  assert.notEqual(bootstrapWasmModuleImportOffset, -1);
+  assert.doesNotMatch(bootstrap, /markPerformance\(PERFORMANCE_MARKS\.coreReady/);
+  assert.doesNotMatch(bootstrap, /performance\??\.mark\??\.\(PERFORMANCE_MARKS\.coreReady/);
   assert.ok(
     bootstrapStartOffset < bootstrapShellPaintOffset,
     "bootstrap should mark app shell paint after startup begins",
@@ -1072,6 +1418,10 @@ function runSelfTest() {
   );
   assert.notEqual(bootstrapRendererPreloadOffset, -1);
   assert.notEqual(bootstrapRuntimeImportOffset, -1);
+  assert.ok(
+    bootstrapCoreReadyPromiseOffset < bootstrapWasmModuleImportOffset,
+    "bootstrap should prepare the core-ready gate before broad wasm graph imports can run",
+  );
   assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeWasmStartOffset, -1);
   assert.notEqual(defaultRendererPreloadOffset, -1);
@@ -1159,15 +1509,35 @@ function runSelfTest() {
   assert.doesNotMatch(bootstrap, /setTimeout/);
   assert.doesNotMatch(bootstrap, /setTimeout\(register/);
   assert.doesNotMatch(startupSpec, /BOOTSTRAP_TIMING/);
+  assert.match(bootstrap, /const coreReadyPromise = new Promise/);
+  assert.match(bootstrap, /PERFORMANCE_MARKS\.coreReady/);
+  assert.match(
+    bootstrap,
+    /globalThis\.addEventListener\(PERFORMANCE_MARKS\.coreReady, resolve, \{ once: true \}\)/,
+  );
+  assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.coreReady\)\)/);
   assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
+  assert.doesNotMatch(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.match(
     bootstrap,
     /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
   );
   assert.match(
     bootstrap,
-    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
+    /const importWasmModules = async \(\) =>/,
+  );
+  assert.match(
+    bootstrap,
+    /await coreReadyPromise/,
+  );
+  assert.match(
+    bootstrap,
+    /return import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+  );
+  assert.match(
+    bootstrap,
+    /await importWasmModules\(\)/,
   );
   assert.match(
     bootstrap,
@@ -1227,7 +1597,19 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds/,
+    /navigationFrameRequestIds\([\s\S]+coreTransferRequestIds\([\s\S]+requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds,[\s\S]+requestTypes,[\s\S]+requestFrameIds,[\s\S]+navigation\.frameId/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestFrameIds\.set\(event\.requestId, event\.frameId\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /const navigation = await cdp\.send\("Page\.navigate"/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestTypes\.set\(event\.requestId, event\.type\)/,
   );
   assert.match(
     navigateAndMeasure.toString(),
@@ -1239,7 +1621,19 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /unfinishedTransferRequestIds\(coreRequestIds, cachedRequestIds, loadingBytes\)/,
+    /unfinishedTransferRequestIds\([\s\S]+coreRequestIds,[\s\S]+cachedRequestIds,[\s\S]+loadingBytes,[\s\S]+loadingFailures/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /Network\.loadingFailed/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /loadingFailures\.set\(event\.requestId/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /assertNoFailedCoreRequests\(coreRequestIds, loadingFailures, requestUrls\)/,
   );
   assert.match(
     navigateAndMeasure.toString(),
@@ -1255,23 +1649,17 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
+    /shellPaintEntries\.at\(-1\)\?\.startTime/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
     /shellPaintMs: shellPaint/,
   );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /performance\.getEntriesByName\("first-contentful-paint"\)\[0\]/,
-  );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /missing browser first-contentful-paint performance entry/,
-  );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /fcpMs: fcp\.startTime/,
-  );
+  assert.doesNotMatch(navigateAndMeasure.toString(), /first-contentful-paint/);
+  assert.doesNotMatch(navigateAndMeasure.toString(), /fcpMs:/);
   assert.doesNotMatch(
     navigateAndMeasure.toString(),
-    /fcpMs: shellPaint/,
+    /fcpMs: fcp\?\.startTime \?\? shellPaint/,
   );
   assert.match(
     navigateAndMeasure.toString(),

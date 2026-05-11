@@ -195,6 +195,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     catalogPageCount: null,
     error: null,
     exports: null,
+    exportsLoadGeneration: 0,
     indexId: null,
     indexName: null,
     openPromise: null,
@@ -202,6 +203,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     state: READER_STATUS.IDLE,
   };
   let operationQueue = Promise.resolve();
+  let queuedOpenForceReopen = false;
   let queuedOpenName = null;
   let queuedOpenPromise = null;
 
@@ -212,13 +214,21 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     return nextOperation;
   }
 
-  function queueOpen(indexName) {
-    if (queuedOpenPromise !== null && queuedOpenName === indexName) {
+  function queueOpen(indexName, { forceReopen = false } = {}) {
+    if (
+      queuedOpenPromise !== null &&
+      queuedOpenName === indexName &&
+      queuedOpenForceReopen === forceReopen
+    ) {
       return queuedOpenPromise;
     }
 
+    queuedOpenForceReopen = forceReopen;
     queuedOpenName = indexName;
-    queuedOpenPromise = runExclusive(() => open(indexName)).finally(() => {
+    queuedOpenPromise = runExclusive(() =>
+      open(indexName, { forceReopen })
+    ).finally(() => {
+      queuedOpenForceReopen = false;
       queuedOpenName = null;
       queuedOpenPromise = null;
     });
@@ -251,6 +261,8 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       return readerState.exports;
     }
 
+    const loadGeneration = readerState.exportsLoadGeneration + 1;
+    readerState.exportsLoadGeneration = loadGeneration;
     const loaded = await instantiate(
       RUNTIME_MODULES.INDEX,
       MAIN_THREAD,
@@ -262,8 +274,10 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       },
     );
     assertIndexReaderCappedQueryMetadataAbi(loaded.exports);
-    readerState.exports = loaded.exports;
-    return readerState.exports;
+    if (loadGeneration === readerState.exportsLoadGeneration) {
+      readerState.exports = loaded.exports;
+    }
+    return readerState.exports ?? loaded.exports;
   }
 
   async function loadSliceCatalogRebuild() {
@@ -370,11 +384,12 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     return rebuilt.rebuilt;
   }
 
-  async function open(indexName) {
+  async function open(indexName, { forceReopen = false } = {}) {
     if (typeof indexName !== "string" || indexName.length === 0) {
       return false;
     }
     if (
+      !forceReopen &&
       readerState.state === READER_STATUS.READY &&
       readerState.indexName === indexName
     ) {
@@ -409,6 +424,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
     readerState.error = null;
     readerState.catalogFull = false;
+    readerState.catalogPageCount = null;
     readerState.indexName = indexName;
     readerState.state = READER_STATUS.OPENING;
     readerState.openPromise = (async () => {
@@ -464,8 +480,8 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       await loadSliceCatalogRebuild();
       return true;
     },
-    async open(indexName) {
-      return queueOpen(indexName);
+    async open(indexName, openOptions = {}) {
+      return queueOpen(indexName, openOptions);
     },
     async queryRange(
       trackId,
@@ -542,6 +558,12 @@ export function createIngestWorkerController(options = {}) {
     return Number.isInteger(message?.ingestId) && message.ingestId === activeIngestId;
   }
 
+  function retireActiveIngest(ingestId) {
+    if (ingestId === activeIngestId) {
+      activeIngestId = null;
+    }
+  }
+
   function handleWorkerMessage(event) {
     const message = event?.data ?? event;
 
@@ -573,18 +595,22 @@ export function createIngestWorkerController(options = {}) {
       status.coveredRange = message;
       status.state = WORKER_STATUS.RUNNING;
       if (typeof status.ingest?.indexName === "string") {
-        indexReader?.open(status.ingest.indexName)?.catch((error) => {
-          status.error = errorMessage(error);
-          status.state = WORKER_STATUS.ERROR;
-          notifyWorkerStatus(status, options, null);
-        });
+        indexReader
+          ?.open(status.ingest.indexName, { forceReopen: true })
+          ?.catch((error) => {
+            status.error = errorMessage(error);
+            status.state = WORKER_STATUS.ERROR;
+            notifyWorkerStatus(status, options, null);
+          });
       }
     } else if (message?.type === INGEST_WORKER_MESSAGE.COMPLETE) {
       status.result = message;
       status.state = WORKER_STATUS.COMPLETE;
+      retireActiveIngest(message.ingestId);
     } else if (message?.type === INGEST_WORKER_MESSAGE.ERROR) {
       status.error = message.message ?? RUNTIME_ERRORS.WORKER_INGEST_FAILED;
       status.state = WORKER_STATUS.ERROR;
+      retireActiveIngest(message.ingestId);
     } else {
       return;
     }
@@ -599,6 +625,7 @@ export function createIngestWorkerController(options = {}) {
 
     status.state = WORKER_STATUS.ERROR;
     status.error = event?.message ?? RUNTIME_ERRORS.INGEST_WORKER_FAILED;
+    activeIngestId = null;
     preloadReject?.(new Error(status.error));
     preloadResolve = null;
     preloadReject = null;
@@ -682,6 +709,11 @@ export function createIngestWorkerController(options = {}) {
     },
     preload() {
       if (preloadPromise !== null) {
+        return preloadPromise;
+      }
+
+      if (activeIngestId !== null) {
+        preloadPromise = Promise.resolve(false);
         return preloadPromise;
       }
 
@@ -1089,6 +1121,7 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
+  globalThis.dispatchEvent?.(new Event(PERFORMANCE_MARKS.coreReady));
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
@@ -1119,12 +1152,9 @@ async function loadApp(memory, host, options = {}) {
   const ingestDependenciesReadyPromise =
     options.preloadIngestDependencies === false
       ? Promise.resolve(null)
-      : filePickerInstalledPromise.then(() =>
-          Promise.all([
-            options.ingestWorker?.indexReader?.preload?.(),
-            options.ingestWorker?.preload?.(),
-          ]),
-        );
+      : filePickerInstalledPromise
+          .then(() => options.ingestWorker?.indexReader?.preload?.())
+          .then(() => options.ingestWorker?.preload?.());
 
   filePickerInstalledPromise.then(() => {
     if (options.ingest !== undefined) {

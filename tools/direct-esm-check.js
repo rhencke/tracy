@@ -466,10 +466,15 @@ function assertProductionTopologyFixtureUsesHostAbiSpec() {
     [/op:\s*"index-open"/, "index-open operation name"],
     [/op:\s*"index-read"/, "index-read operation name"],
     [/op:\s*"index-write"/, "index-write operation name"],
+    [/op:\s*"main-thread-index-open"/, "main-thread index-open scenario operation name"],
+    [/op:\s*"main-thread-index-read"/, "main-thread index-read scenario operation name"],
     [/op:\s*"index-flush"/, "index-flush operation name"],
     [/op:\s*"set-file-selected-callback"/, "file-selection callback operation name"],
+    [/op:\s*"selected-file-ingest"/, "selected-file ingest scenario operation name"],
     [/op:\s*"file-picker-open"/, "file-picker-open operation name"],
     [/op:\s*"same-host-test-shortcut"/, "same-host shortcut operation name"],
+    [/op:\s*"worker-message-delivery"/, "worker message-delivery scenario operation name"],
+    [/op:\s*"worker-publication"/, "worker publication scenario operation name"],
   ]) {
     assert.doesNotMatch(
       source,
@@ -860,10 +865,21 @@ function main() {
   assert.doesNotMatch(bootstrapSource, /SERVICE_WORKER_READY_/);
   assert.doesNotMatch(bootstrapSource, /setTimeout/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(register/);
+  assert.match(bootstrapSource, /const coreReadyPromise = new Promise/);
+  assert.match(bootstrapSource, /PERFORMANCE_MARKS\.coreReady/);
+  assert.match(
+    bootstrapSource,
+    /globalThis\.addEventListener\(PERFORMANCE_MARKS\.coreReady, resolve, \{ once: true \}\)/,
+  );
+  assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.coreReady\)\)/);
   assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(
     bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
+  );
+  assert.doesNotMatch(
+    bootstrapSource,
+    /import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
   assert.match(
     bootstrapSource,
@@ -871,7 +887,19 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
+    /const importWasmModules = async \(\) =>/,
+  );
+  assert.match(
+    bootstrapSource,
+    /await coreReadyPromise/,
+  );
+  assert.match(
+    bootstrapSource,
+    /return import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+  );
+  assert.match(
+    bootstrapSource,
+    /await importWasmModules\(\)/,
   );
   assert.match(
     bootstrapSource,

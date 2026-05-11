@@ -906,6 +906,158 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   assert.equal(worker.posted.length, 2, "cancelled picker should not start ingest");
 }
 
+async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const preloadCalls = [];
+  let resolveIndexPreload;
+  const indexPreload = new Promise((resolve) => {
+    resolveIndexPreload = resolve;
+  });
+  const ingestWorker = {
+    indexReader: {
+      preload() {
+        preloadCalls.push("index-reader");
+        return indexPreload;
+      },
+    },
+    preload() {
+      preloadCalls.push("worker");
+      return Promise.resolve(true);
+    },
+  };
+
+  runtime.runApp(memory, {}, {
+    ingestWorker,
+    instantiateWasmModuleForThread: async () => ({
+      exports: makeAppExports(),
+    }),
+    progressiveTraceRenderer: false,
+  });
+
+  await flushRuntimeMicrotasks();
+  frames[0](0);
+  await flushRuntimeMicrotasks();
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    frame(16);
+  }
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    preloadCalls,
+    ["index-reader"],
+    "worker preload signal should wait until the main-thread reader preload has started",
+  );
+
+  resolveIndexPreload(true);
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    preloadCalls,
+    ["index-reader", "worker"],
+    "worker preload signal should mean the reader and worker ingest dependencies are warm",
+  );
+}
+
+async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
+  const { frames } = installRuntimeBrowserGlobals();
+  FakeWorker.reset();
+
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
+  const runtimeMemoryPages = 1;
+  const memory = new WebAssembly.Memory({ initial: runtimeMemoryPages });
+  const selectedFileSizeBytes = 1234;
+  const selectedFile = Object.freeze({
+    name: "pending preload trace.json",
+    size: selectedFileSizeBytes,
+  });
+  const selectedFileHandle = 9;
+  const expectedSourceName = `sources/${selectedFile.name}`;
+  const expectedIndexName = "indexes/pending_preload_trace.json.idx";
+  const workerUrl = "worker.js";
+  const firstFrameTimestampMs = 0;
+  const appReadyFrameTimestampMs = 16;
+  const preloadCalls = [];
+  const callbacks = [];
+  let resolveIndexPreload;
+  const indexPreload = new Promise((resolve) => {
+    resolveIndexPreload = resolve;
+  });
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]() {
+      throw new Error("file object selections should not need an OPFS source copy");
+    },
+    opfs_index_create() {
+      return 0;
+    },
+    setFileSelectedCallback(callback) {
+      callbacks.push(callback);
+    },
+  };
+
+  const controller = runtime.runApp(memory, host, {
+    indexReader: {
+      preload() {
+        preloadCalls.push("index-reader");
+        return indexPreload;
+      },
+    },
+    instantiateWasmModuleForThread: async () => ({
+      exports: makeAppExports(),
+    }),
+    progressiveTraceRenderer: false,
+    worker: {
+      Worker: FakeWorker,
+      workerUrl,
+    },
+  });
+
+  await flushRuntimeMicrotasks();
+  frames[0](firstFrameTimestampMs);
+  await flushRuntimeMicrotasks();
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    frame(appReadyFrameTimestampMs);
+  }
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    preloadCalls,
+    ["index-reader"],
+    "reader preload should be held before the worker preload can run",
+  );
+  assert.equal(controller.worker, null);
+  assert.equal(callbacks.length, 1);
+
+  callbacks[0]({ file: selectedFile, handle: selectedFileHandle });
+  await flushRuntimeMicrotasks();
+
+  const worker = controller.worker;
+  assert.deepEqual(worker.posted, [
+    {
+      ingestId: 1,
+      indexName: expectedIndexName,
+      sourceFile: selectedFile,
+      sourceFileHandle: selectedFileHandle,
+      sourceName: expectedSourceName,
+      sourceSize: selectedFile.size,
+      type: "start",
+    },
+  ]);
+
+  resolveIndexPreload(true);
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    worker.posted.map((message) => message.type),
+    ["start"],
+    "late worker preload should not post after selected-file ingest has started",
+  );
+}
+
 async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   installRuntimeBrowserGlobals();
 
@@ -1018,6 +1170,76 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   assert.equal(controller.status().result.committedEvents, 7);
   assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
   assert.equal(workerStatus.at(-1).message.ingestId, 2);
+
+  secondWorker.emit("message", {
+    committedPages: 99,
+    fileOffset: 999,
+    ingestId: 2,
+    type: "progress",
+  });
+  secondWorker.emit("message", {
+    end: 999,
+    ingestId: 2,
+    start: 900,
+    type: "covered_range",
+    valid: true,
+  });
+  assert.equal(
+    controller.status().state,
+    "complete",
+    "late same-ingest messages should not revive a completed ingest",
+  );
+  assert.equal(controller.status().progress.fileOffset, 64);
+  assert.equal(controller.status().coveredRange.end, 132);
+  assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
+
+  assert.equal(controller.preload() instanceof Promise, true);
+  assert.equal(secondWorker.posted.at(-1).type, "preload");
+  secondWorker.emit("message", { type: "preloaded" });
+  assert.equal(await controller.preload(), true);
+
+  const errorController = runtime.createIngestWorkerController({
+    Worker: FakeWorker,
+    indexReader: {
+      open(indexName) {
+        indexReaderOpenCalls.push(indexName);
+        return Promise.resolve(true);
+      },
+    },
+    workerUrl: "worker.js",
+  });
+  assert.equal(
+    errorController.start({
+      indexName: "indexes/error.idx",
+      sourceName: "sources/error.json",
+    }),
+    true,
+  );
+  const errorWorker = errorController.worker;
+  errorWorker.emit("message", {
+    ingestId: 1,
+    message: "ingest failed",
+    type: "error",
+  });
+  errorWorker.emit("message", {
+    committedPages: 42,
+    fileOffset: 4242,
+    ingestId: 1,
+    type: "progress",
+  });
+  errorWorker.emit("message", {
+    end: 4242,
+    ingestId: 1,
+    start: 4200,
+    type: "covered_range",
+    valid: true,
+  });
+  assert.equal(errorController.status().state, "error");
+  assert.equal(errorController.status().error, "ingest failed");
+  assert.equal(errorController.status().progress, null);
+  assert.equal(errorController.status().coveredRange, null);
+  assert.equal(errorController.preload() instanceof Promise, true);
+  assert.equal(errorWorker.posted.at(-1).type, "preload");
 }
 
 async function checkFileSelectionSetupErrorsReportStatus() {
@@ -1359,6 +1581,102 @@ async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
     indexName: "indexes/trace.idx",
     state: "error",
   });
+}
+
+async function checkMainThreadIndexReaderIgnoresStalePreloadExports() {
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
+  const memory = new WebAssembly.Memory({ initial: 512 });
+  const indexName = "indexes/preload-race.idx";
+  const openedIndexId = 70;
+  const stalePreloadTrackCount = 0;
+  const initializedOpenTrackCount = 7;
+  const instantiateRequests = [];
+  const initializedIndexIds = [];
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
+      assert.equal(
+        new TextDecoder().decode(new Uint8Array(memory.buffer, namePtr, nameLen)),
+        indexName,
+      );
+      return openedIndexId;
+    },
+  };
+
+  function deferredInstantiate(label, trackCount) {
+    let resolve;
+    const promise = new Promise((promiseResolve) => {
+      resolve = () => promiseResolve({
+        exports: {
+          index_query_range() {
+            return 0;
+          },
+          index_query_range_capped() {
+            return 0;
+          },
+          index_query_range_matched_rows() {
+            return 0;
+          },
+          index_query_range_written_rows() {
+            return 0;
+          },
+          index_reader_init(indexId) {
+            initializedIndexIds.push({ indexId, label });
+          },
+          index_track_count() {
+            return trackCount;
+          },
+        },
+      });
+    });
+
+    return { label, promise, resolve };
+  }
+
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async (id, thread) => {
+      assert.equal(id, "index");
+      assert.equal(thread, "main");
+      const request = instantiateRequests.length === 0
+        ? deferredInstantiate("preload", stalePreloadTrackCount)
+        : deferredInstantiate("open", initializedOpenTrackCount);
+      instantiateRequests.push(request);
+      return request.promise;
+    },
+  });
+
+  const preloadPromise = reader.preload();
+  await Promise.resolve();
+  assert.deepEqual(
+    instantiateRequests.map((request) => request.label),
+    ["preload"],
+  );
+
+  const openPromise = reader.open(indexName, { forceReopen: true });
+  await Promise.resolve();
+  assert.deepEqual(
+    instantiateRequests.map((request) => request.label),
+    ["preload", "open"],
+  );
+
+  instantiateRequests[1].resolve();
+  await openPromise;
+  assert.deepEqual(initializedIndexIds, [
+    { indexId: openedIndexId, label: "open" },
+  ]);
+  assert.equal(reader.status().state, "ready");
+  assert.equal(reader.trackCount(), initializedOpenTrackCount);
+
+  instantiateRequests[0].resolve();
+  await preloadPromise;
+  assert.equal(
+    reader.trackCount(),
+    initializedOpenTrackCount,
+    "older preload exports must not replace the initialized open reader",
+  );
+  assert.deepEqual(initializedIndexIds, [
+    { indexId: openedIndexId, label: "open" },
+  ]);
 }
 
 async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
@@ -3170,10 +3488,13 @@ async function main() {
   await loadGeneratedTraceRendererSpec();
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
+  await checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal();
+  await checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart();
   await checkRuntimeIgnoresStaleIngestWorkerMessages();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderRequiresCappedQueryMetadataExports();
+  await checkMainThreadIndexReaderIgnoresStalePreloadExports();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkMainThreadCoveredRangeRereadsUnqueryablePartialPage();
   await checkMainThreadSliceCatalogReportsCapacityOverflow();

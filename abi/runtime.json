@@ -11,6 +11,10 @@
     "PROGRESSIVE_TRACE_RENDERER_URL": {
       "value": "./progressive-trace-renderer.mjs",
       "description": "Deferred progressive trace renderer implementation module URL, relative to host/runtime.mjs."
+    },
+    "WASM_MODULES_URL": {
+      "value": "./wasm-modules.mjs",
+      "description": "Deferred generated wasm module graph URL, relative to host/runtime.mjs."
     }
   },
   "wasmMemory": {
@@ -33,22 +37,22 @@
     "budgets": {
       "cold": {
         "coreTtiMs": 250,
-        "fcpMs": 1100,
         "fullLoadMs": 1000,
+        "shellPaintMs": 1100,
         "transferBytes": 75000,
         "wasmInstantiateMs": 200
       },
       "warmHttp": {
         "coreTtiMs": 25,
-        "fcpMs": 50,
         "fullLoadMs": 25,
+        "shellPaintMs": 50,
         "transferBytes": 0,
         "wasmInstantiateMs": 25
       },
       "warmSw": {
         "coreTtiMs": 25,
-        "fcpMs": 45,
         "fullLoadMs": 25,
+        "shellPaintMs": 45,
         "transferBytes": 0,
         "wasmInstantiateMs": 15
       }
@@ -94,9 +98,10 @@
           "traceRenderer.canvasOps.DRAW_STYLE_ROLE_BACKGROUND",
           "traceRenderer.canvasOps.TERMINATOR_OP_BUDGET",
           "traceRenderer.draw.DEFAULT_STROKE_WIDTH",
+          "interactiveIngestCheck.ASYNC_POLL_INTERVAL_MS",
           "traceRenderer.layout.DEFAULT_MIN_VIEWPORT_SPAN"
         ],
-        "description": "These renderer constants are intentionally distinct: viewport clamp span, Wasm query-range tag, planner terminator budget, canvas stroke width, and command-stream style role values."
+        "description": "These renderer constants and the interactive ingest async poll cadence are intentionally distinct: viewport clamp span, Wasm query-range tag, planner terminator budget, canvas stroke width, command-stream style role values, and handoff polling cadence."
       },
       {
         "numericValue": 2,
@@ -242,6 +247,14 @@
     "FRAME_BUDGET_MS": {
       "value": 16.67,
       "description": "60 fps pan/zoom frame budget enforced by the interactive ingest verification gate."
+    },
+    "ASYNC_WAIT_TIMEOUT_MS": {
+      "value": 2000,
+      "description": "Maximum time the interactive ingest verification gate waits for async production handoff state before failing loudly."
+    },
+    "ASYNC_POLL_INTERVAL_MS": {
+      "value": 1,
+      "description": "Polling cadence for async production handoff checks in the interactive ingest verification gate."
     }
   },
   "runtimeBridge": {

@@ -5,6 +5,7 @@ export const RUNTIME_URLS = Object.freeze({
   WORKER_URL: "worker.js",
   SERVICE_WORKER_URL: "service-worker.js",
   PROGRESSIVE_TRACE_RENDERER_URL: "./progressive-trace-renderer.mjs",
+  WASM_MODULES_URL: "./wasm-modules.mjs",
 });
 
 export const APP_SHELL_COLORS = Object.freeze({
@@ -31,6 +32,8 @@ export const INTERACTIVE_INGEST_CHECK = Object.freeze({
   FIXTURE_SIZE_BYTES: 104857600,
   INGEST_WINDOW_BYTES: 10485760,
   FRAME_BUDGET_MS: 16.67,
+  ASYNC_WAIT_TIMEOUT_MS: 2000,
+  ASYNC_POLL_INTERVAL_MS: 1,
 });
 
 export const RUNTIME_BRIDGE = Object.freeze({
