@@ -262,6 +262,7 @@ test: dist check-generated
 	node tools/interactive-ingest-browser-check.js
 	node tools/direct-esm-check.js
 	node tools/service-worker-check.js
+	node tools/generated-file-writer-check.js
 	node tools/dist-budget-check.js --self-test
 	node tools/app-load-bench.js --self-test
 	node tools/lighthouse-ci-check.js
