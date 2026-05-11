@@ -694,13 +694,14 @@ async function waitForAnimationFrames(cdp, page, frameCount) {
   }, page.sessionId);
 }
 
-async function waitForNetworkQuiet(activeRequestIds, quietMs) {
+async function waitForNetworkStartQuiet(lastRequestStartedAt, quietMs) {
   let quietSince = Date.now();
 
   await waitUntil(() => {
-    if (activeRequestIds.size > 0) {
-      quietSince = Date.now();
-      return false;
+    const lastStartedAt = lastRequestStartedAt();
+
+    if (lastStartedAt > quietSince) {
+      quietSince = lastStartedAt;
     }
 
     return Date.now() - quietSince >= quietMs;
@@ -836,10 +837,10 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestStartWallMs = new Map();
   const requestTypes = new Map();
   const requestUrls = new Map();
-  const activeRequestIds = new Set();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
   const loadingFailures = new Map();
+  let lastRequestStartedAt = Date.now();
   let coreRequestIds = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
@@ -847,7 +848,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
-    activeRequestIds.add(event.requestId);
+    lastRequestStartedAt = Date.now();
     if (event.frameId !== undefined) {
       requestFrameIds.set(event.requestId, event.frameId);
     }
@@ -875,14 +876,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     if (sessionId !== page.sessionId) {
       return;
     }
-    activeRequestIds.delete(event.requestId);
     loadingBytes.set(event.requestId, event.encodedDataLength ?? 0);
   });
   const offLoadingFailed = cdp.on("Network.loadingFailed", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
       return;
     }
-    activeRequestIds.delete(event.requestId);
     loadingFailures.set(event.requestId, {
       canceled: event.canceled === true,
       errorText: event.errorText,
@@ -1013,7 +1012,10 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   metrics.transferBytes = coreTransferBytes;
 
   await waitForAnimationFrames(cdp, page, POST_READY_SETTLE_FRAME_COUNT);
-  await waitForNetworkQuiet(activeRequestIds, POST_READY_NETWORK_QUIET_MS);
+  await waitForNetworkStartQuiet(
+    () => lastRequestStartedAt,
+    POST_READY_NETWORK_QUIET_MS,
+  );
 
   offRequest();
   offCache();
