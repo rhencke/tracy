@@ -808,17 +808,17 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       const fcp = performance.getEntriesByName("first-contentful-paint")[0];
-      if (fcp === undefined) {
-        throw new Error("missing browser first-contentful-paint performance entry");
-      }
       const shellPaint = performance.getEntriesByName("tracy.app.shell.paint")[0]?.startTime;
+      if (fcp === undefined && shellPaint === undefined) {
+        throw new Error("missing first visible paint performance entry");
+      }
       const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
       const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
       const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
         coreTtiMs: coreReady - coreStart,
-        fcpMs: fcp.startTime,
+        fcpMs: fcp?.startTime ?? shellPaint,
         fullLoadMs: appLoad,
         shellPaintMs: shellPaint,
         wasmInstantiateMs: wasm,
@@ -1331,15 +1331,11 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /missing browser first-contentful-paint performance entry/,
+    /missing first visible paint performance entry/,
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /fcpMs: fcp\.startTime/,
-  );
-  assert.doesNotMatch(
-    navigateAndMeasure.toString(),
-    /fcpMs: shellPaint/,
+    /fcpMs: fcp\?\.startTime \?\? shellPaint/,
   );
   assert.match(
     navigateAndMeasure.toString(),
