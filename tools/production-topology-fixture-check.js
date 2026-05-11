@@ -1139,6 +1139,62 @@ async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
   );
 }
 
+async function checkMainThreadIndexReadRejectsSupersededPublishedGeneration() {
+  const readFreshnessMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: readFreshnessMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/superseded-read.idx";
+  const firstGenerationBytes = new Uint8Array([103]);
+  const secondGenerationBytes = new Uint8Array([104]);
+  const mainReadOffset = 0n;
+  const mainReadLength = firstGenerationBytes.byteLength;
+  const mainReadDestinationPointer = 120;
+  const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedRawReadFreshnessError = new RegExp(
+    `${OP.indexRead}: main-thread OPFS index ${escapedIndexName} open must match current published worker generation`,
+  );
+  const expectedTypedReadFreshnessError = new RegExp(
+    `${OP.mainThreadIndexRead}: main-thread OPFS index ${escapedIndexName} open must match current published worker generation`,
+  );
+  const firstWorkerIndexId = await fixture.scenario.workerPublication({
+    bytes: firstGenerationBytes,
+    indexName,
+    workerHost,
+  });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+  const secondWorkerIndexId = await fixture.scenario.workerPublication({
+    bytes: secondGenerationBytes,
+    indexName,
+    workerHost,
+  });
+
+  assert.notEqual(
+    firstWorkerIndexId,
+    secondWorkerIndexId,
+    "second worker publication should model a newer OPFS handoff generation",
+  );
+  assert.throws(
+    () => fixture.mainHost[HOST.OPFS_INDEX_READ](
+      mainIndexId,
+      mainReadOffset,
+      mainReadLength,
+      mainReadDestinationPointer,
+    ),
+    expectedRawReadFreshnessError,
+    "raw main-thread read should reject superseded published worker generations",
+  );
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexRead({
+      indexId: mainIndexId,
+      len: mainReadLength,
+      observeOnly: true,
+    }),
+    expectedTypedReadFreshnessError,
+    "typed main-thread read should reject superseded published worker generations",
+  );
+}
+
 async function checkObservedIndexReadPreservesRawReadCount() {
   const observedReadMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: observedReadMemoryPageCount });
@@ -1213,6 +1269,7 @@ async function main() {
   await checkTypedScenarioChronology();
   await checkObserveOnlyIndexOpenRejectsStaleRawOpen();
   await checkMainThreadIndexReadRejectsNewerUnpublishedGeneration();
+  await checkMainThreadIndexReadRejectsSupersededPublishedGeneration();
   await checkObservedIndexReadPreservesRawReadCount();
 }
 

@@ -355,7 +355,13 @@ function makeProductionTopologyFixture(options = {}) {
       opened !== undefined,
       `${operation}: main thread must open OPFS index before read`,
     );
-    requireWorkerPublishedIndex(opened.name, operation);
+    const handoff = requireWorkerPublishedIndex(opened.name, operation);
+
+    assert.equal(
+      opened.generation,
+      handoff.generation,
+      `${operation}: main-thread OPFS index ${opened.name} open must match current published worker generation`,
+    );
     return opened;
   }
 
