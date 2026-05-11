@@ -906,6 +906,61 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   assert.equal(worker.posted.length, 2, "cancelled picker should not start ingest");
 }
 
+async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
+  const { frames } = installRuntimeBrowserGlobals();
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const memory = new WebAssembly.Memory({ initial: 1 });
+  const preloadCalls = [];
+  let resolveIndexPreload;
+  const indexPreload = new Promise((resolve) => {
+    resolveIndexPreload = resolve;
+  });
+  const ingestWorker = {
+    indexReader: {
+      preload() {
+        preloadCalls.push("index-reader");
+        return indexPreload;
+      },
+    },
+    preload() {
+      preloadCalls.push("worker");
+      return Promise.resolve(true);
+    },
+  };
+
+  runtime.runApp(memory, {}, {
+    ingestWorker,
+    instantiateWasmModuleForThread: async () => ({
+      exports: makeAppExports(),
+    }),
+    progressiveTraceRenderer: false,
+  });
+
+  await flushRuntimeMicrotasks();
+  frames[0](0);
+  await flushRuntimeMicrotasks();
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    frame(16);
+  }
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    preloadCalls,
+    ["index-reader"],
+    "worker preload signal should wait until the main-thread reader preload has started",
+  );
+
+  resolveIndexPreload(true);
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    preloadCalls,
+    ["index-reader", "worker"],
+    "worker preload signal should mean the reader and worker ingest dependencies are warm",
+  );
+}
+
 async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   installRuntimeBrowserGlobals();
 
@@ -3170,6 +3225,7 @@ async function main() {
   await loadGeneratedTraceRendererSpec();
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
+  await checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal();
   await checkRuntimeIgnoresStaleIngestWorkerMessages();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();

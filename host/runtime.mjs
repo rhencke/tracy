@@ -1116,15 +1116,14 @@ async function loadApp(memory, host, options = {}) {
   const filePickerInstalledPromise = filePickerGestureReadyPromise.then(() => {
     installFilePickerGesture(host, options.ingestWorker, options);
   });
+  const preloadIngestDependencies = async () => {
+    await options.ingestWorker?.indexReader?.preload?.();
+    await options.ingestWorker?.preload?.();
+  };
   const ingestDependenciesReadyPromise =
     options.preloadIngestDependencies === false
       ? Promise.resolve(null)
-      : filePickerInstalledPromise.then(() =>
-          Promise.all([
-            options.ingestWorker?.indexReader?.preload?.(),
-            options.ingestWorker?.preload?.(),
-          ]),
-        );
+      : filePickerInstalledPromise.then(preloadIngestDependencies);
 
   filePickerInstalledPromise.then(() => {
     if (options.ingest !== undefined) {
