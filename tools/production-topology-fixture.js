@@ -42,6 +42,7 @@ const DEFAULT_WORKER_INDEX_ID_SEED = 222;
 const DEFAULT_SCENARIO_NAME_PTR = 16;
 const DEFAULT_SCENARIO_SRC_PTR = 96;
 const DEFAULT_SCENARIO_DEST_PTR = 120;
+const INITIAL_WORKER_HANDOFF_GENERATION = 0;
 const READER_OPENING_WORKER_MESSAGE_TYPES = Object.freeze(
   new Set([runtimeAbi.runtimeBridge.workerMessages.COVERED_RANGE]),
 );
@@ -214,16 +215,21 @@ function makeProductionTopologyFixture(options = {}) {
     let handoff = workerIndexHandoffs.get(name);
 
     if (handoff === undefined) {
-      handoff = {
-        bytesWritten: 0,
-        flushed: false,
-        lastIndexId: null,
-        published: false,
-        publicationCallIndex: null,
-      };
+      handoff = makeWorkerIndexHandoff();
       workerIndexHandoffs.set(name, handoff);
     }
     return handoff;
+  }
+
+  function makeWorkerIndexHandoff() {
+    return {
+      bytesWrittenThisGeneration: 0,
+      flushed: false,
+      generation: INITIAL_WORKER_HANDOFF_GENERATION,
+      lastIndexId: null,
+      published: false,
+      publicationCallIndex: null,
+    };
   }
 
   function requireWorkerIndexHandoff(name, operation) {
@@ -246,6 +252,11 @@ function makeProductionTopologyFixture(options = {}) {
     assert.ok(
       handoff.published,
       `${operation}: worker must publish OPFS index ${name} before main-thread handoff`,
+    );
+    assert.notEqual(
+      handoff.publicationCallIndex,
+      null,
+      `${operation}: worker publication for OPFS index ${name} must record chronology`,
     );
     return handoff;
   }
@@ -287,10 +298,25 @@ function makeProductionTopologyFixture(options = {}) {
     return ingest;
   }
 
-  function prepareWorkerIndexWriteGeneration(handoff) {
-    if (handoff.flushed || handoff.published) {
-      handoff.bytesWritten = 0;
+  function startWorkerIndexGeneration(handoff, indexId) {
+    handoff.bytesWrittenThisGeneration = 0;
+    handoff.flushed = false;
+    handoff.generation += 1;
+    handoff.lastIndexId = indexId;
+    handoff.published = false;
+    handoff.publicationCallIndex = null;
+  }
+
+  function prepareWorkerIndexWriteGeneration(handoff, indexId) {
+    if (
+      handoff.generation === INITIAL_WORKER_HANDOFF_GENERATION ||
+      handoff.flushed ||
+      handoff.published
+    ) {
+      startWorkerIndexGeneration(handoff, indexId);
+      return;
     }
+    handoff.lastIndexId = indexId;
   }
 
   function canRecordMainThreadIndexOpen(name) {
@@ -306,10 +332,14 @@ function makeProductionTopologyFixture(options = {}) {
     const handoff = requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
 
     mainThreadIndexOpens.set(indexId, {
+      generation: handoff.generation,
+      indexId,
       name,
       publicationCallIndex: handoff.publicationCallIndex,
+      sourceCallIndex,
     });
     calls.push({
+      generation: handoff.generation,
       host: MAIN_HOST_ROLE,
       id: indexId,
       name,
@@ -338,6 +368,7 @@ function makeProductionTopologyFixture(options = {}) {
     sourceCallIndex,
   }) {
     calls.push({
+      generation: mainThreadIndexOpens.get(indexId)?.generation ?? null,
       host: MAIN_HOST_ROLE,
       id: indexId,
       len,
@@ -459,13 +490,9 @@ function makeProductionTopologyFixture(options = {}) {
         durableIndexes.set(name, { bytes: new Uint8Array(0), name });
         indexes.set(indexId, { id: indexId, name });
         if (host === WORKER_HOST_ROLE) {
-          workerIndexHandoffs.set(name, {
-            bytesWritten: 0,
-            flushed: false,
-            lastIndexId: indexId,
-            published: false,
-            publicationCallIndex: null,
-          });
+          const handoff = workerIndexHandoff(name);
+
+          startWorkerIndexGeneration(handoff, indexId);
         }
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexCreate });
         return indexId;
@@ -551,11 +578,8 @@ function makeProductionTopologyFixture(options = {}) {
         if (host === WORKER_HOST_ROLE) {
           const handoff = workerIndexHandoff(index.name);
 
-          prepareWorkerIndexWriteGeneration(handoff);
-          handoff.flushed = false;
-          handoff.bytesWritten += len;
-          handoff.lastIndexId = indexId;
-          handoff.published = false;
+          prepareWorkerIndexWriteGeneration(handoff, indexId);
+          handoff.bytesWrittenThisGeneration += len;
         }
         calls.push({
           host,
@@ -757,7 +781,7 @@ function makeProductionTopologyFixture(options = {}) {
       const handoff = requireWorkerIndexHandoff(name, FIXTURE_OPERATION.workerPublication);
 
       assert.ok(
-        handoff.bytesWritten > 0,
+        handoff.bytesWrittenThisGeneration > 0,
         `worker publication requires worker OPFS index ${name} to contain bytes`,
       );
       assert.ok(
@@ -767,6 +791,7 @@ function makeProductionTopologyFixture(options = {}) {
       handoff.published = true;
       handoff.publicationCallIndex = calls.length;
       calls.push({
+        generation: handoff.generation,
         host: WORKER_HOST_ROLE,
         id: indexId ?? handoff.lastIndexId,
         name,
@@ -786,6 +811,7 @@ function makeProductionTopologyFixture(options = {}) {
         (call) => call.host === MAIN_HOST_ROLE &&
           call.op === FIXTURE_OPERATION.mainThreadIndexOpen &&
           call.name === name &&
+          call.generation === handoff.generation &&
           call.sourceCallIndex > handoff.publicationCallIndex,
       );
       const rawOpenCallIndex = calls.findIndex(
@@ -832,13 +858,15 @@ function makeProductionTopologyFixture(options = {}) {
           call.id === indexId &&
           call.op === FIXTURE_OPERATION.mainThreadIndexRead &&
           Number(call.offset) === Number(offset) &&
+          call.sourceCallIndex > openRecord.sourceCallIndex &&
           call.len >= len,
       );
       const rawReadCallIndex = calls.findIndex(
-        (call) => call.host === MAIN_HOST_ROLE &&
+        (call, callIndex) => call.host === MAIN_HOST_ROLE &&
           call.id === indexId &&
           call.op === FIXTURE_OPERATION.indexRead &&
           Number(call.offset) === Number(offset) &&
+          callIndex > openRecord.sourceCallIndex &&
           call.len >= len,
       );
       if (readCall !== undefined) {
@@ -892,6 +920,7 @@ function makeProductionTopologyFixture(options = {}) {
         messageType: message.type,
         name: deliveredIndexName,
         op: FIXTURE_OPERATION.workerMessageDelivery,
+        generation: handoff?.generation ?? null,
         publicationCallIndex: handoff?.publicationCallIndex ?? null,
       });
       if (typeof worker?.emit === "function") {
