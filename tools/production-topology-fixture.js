@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const hostAbi = require("../abi/host.json");
+const runtimeAbi = require("../abi/runtime.json");
 
 function hostImportConstantName(name) {
   return name.toUpperCase();
@@ -41,6 +42,9 @@ const DEFAULT_WORKER_INDEX_ID_SEED = 222;
 const DEFAULT_SCENARIO_NAME_PTR = 16;
 const DEFAULT_SCENARIO_SRC_PTR = 96;
 const DEFAULT_SCENARIO_DEST_PTR = 120;
+const READER_OPENING_WORKER_MESSAGE_TYPES = Object.freeze(
+  new Set([runtimeAbi.runtimeBridge.workerMessages.COVERED_RANGE]),
+);
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
@@ -234,6 +238,18 @@ function makeProductionTopologyFixture(options = {}) {
       `${operation}: worker must publish OPFS index ${name} before main-thread handoff`,
     );
     return handoff;
+  }
+
+  function requireReaderOpeningWorkerMessageHandoff({ indexName, message, messageType }) {
+    if (!READER_OPENING_WORKER_MESSAGE_TYPES.has(messageType)) {
+      return null;
+    }
+    const name = requireIndexName(
+      indexName ?? message.indexName,
+      FIXTURE_OPERATION.workerMessageDelivery,
+    );
+
+    return requireWorkerPublishedIndex(name, FIXTURE_OPERATION.workerMessageDelivery);
   }
 
   function canRecordMainThreadIndexOpen(name) {
@@ -796,7 +812,7 @@ function makeProductionTopologyFixture(options = {}) {
 
       return read;
     },
-    workerMessageDelivery({ message, worker }) {
+    workerMessageDelivery({ indexName, message, worker }) {
       assert.equal(
         typeof message,
         "object",
@@ -811,11 +827,19 @@ function makeProductionTopologyFixture(options = {}) {
         selectedFileIngests.size > 0,
         `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file ingest first`,
       );
+      const handoff = requireReaderOpeningWorkerMessageHandoff({
+        indexName,
+        message,
+        messageType: message.type,
+      });
+      const deliveredIndexName = indexName ?? message.indexName ?? null;
       calls.push({
         host: WORKER_HOST_ROLE,
         ingestId: message.ingestId,
         messageType: message.type,
+        name: deliveredIndexName,
         op: FIXTURE_OPERATION.workerMessageDelivery,
+        publicationCallIndex: handoff?.publicationCallIndex ?? null,
       });
       if (typeof worker?.emit === "function") {
         worker.emit("message", message);

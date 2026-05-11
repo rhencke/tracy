@@ -476,7 +476,7 @@ async function checkInteractiveIngestGate() {
             return;
           }
 
-          opfsHarness.scenario.workerMessageDelivery({ message, worker: this });
+          opfsHarness.scenario.workerMessageDelivery({ indexName, message, worker: this });
         },
       });
     }
@@ -492,6 +492,7 @@ async function checkInteractiveIngestGate() {
       this.coveredRangesReleased = true;
       while (this.pendingCoveredRanges.length > 0) {
         opfsHarness.scenario.workerMessageDelivery({
+          indexName,
           message: this.pendingCoveredRanges.shift(),
           worker: this,
         });

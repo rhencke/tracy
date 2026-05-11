@@ -4,6 +4,7 @@
 
 const assert = require("node:assert/strict");
 const hostAbi = require("../abi/host.json");
+const runtimeAbi = require("../abi/runtime.json");
 const {
   FIXTURE_OPERATION: OP,
   DEFAULT_HOST_IMPORT_NAME: HOST,
@@ -13,6 +14,8 @@ const {
 const MAIN_HOST_ROLE = "main";
 const WORKER_HOST_ROLE = "worker";
 const STALE_SIZE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMarker;
+const WORKER_EVENT = runtimeAbi.runtimeBridge.worker;
+const WORKER_MESSAGE = runtimeAbi.runtimeBridge.workerMessages;
 
 function writeString(memory, ptr, value) {
   const bytes = new TextEncoder().encode(value);
@@ -383,7 +386,7 @@ async function checkTypedScenarioHelpers() {
   const workerMessageType = "progress";
   const workerMessage = { ingestId: workerMessageIngestId, type: workerMessageType };
   const expectedWorkerMessageDeliveryResult = true;
-  const expectedWorkerMessageEmitType = "message";
+  const expectedWorkerMessageEmitType = WORKER_EVENT.EVENT_MESSAGE;
 
   assert.equal(
     fixture.scenario.workerMessageDelivery({
@@ -493,6 +496,118 @@ async function checkTypedScenarioOrderGuards() {
     expectedNoSelectionMessageError,
     "worker message helper should reject delivery before selected-file ingest",
   );
+}
+
+async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
+  const coveredRangeMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: coveredRangeMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const selectedFileName = "covered-range.json";
+  const selectedFileBytes = new Uint8Array([81, 82]);
+  const selectedFileHandle = 93;
+  const selectedFileAcceptPointer = 8;
+  const selectedFileAcceptValue = ".json";
+  const indexName = "indexes/covered-range.idx";
+  const workerIndexNamePointer = 16;
+  const workerWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const expectedFlushResult = 0;
+  const coveredRangeMessage = {
+    end: selectedFileBytes.byteLength,
+    ingestId: selectedFileHandle,
+    start: 0,
+    type: WORKER_MESSAGE.COVERED_RANGE,
+  };
+  const expectedCreateBeforeMessageError = {
+    message: `${OP.workerMessageDelivery}: worker must create OPFS index ${indexName} before publication`,
+  };
+  const expectedPublishBeforeMessageError = {
+    message: `${OP.workerMessageDelivery}: worker must publish OPFS index ${indexName} before main-thread handoff`,
+  };
+  const selectedFile = {
+    bytes: selectedFileBytes,
+    name: selectedFileName,
+  };
+  let delivered = null;
+  const expectedWorkerMessageEmitType = "message";
+  const worker = {
+    emit(type, message) {
+      delivered = { message, type };
+    },
+  };
+  const acceptLen = writeString(
+    mainMemory,
+    selectedFileAcceptPointer,
+    selectedFileAcceptValue,
+  );
+
+  fixture.mainHost.setFileSelectedCallback(() => {});
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
+
+  assert.equal(
+    fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
+    selectedFileHandle,
+  );
+  assert.equal(await picker, selectedFileHandle);
+  await Promise.resolve();
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      indexName,
+      message: coveredRangeMessage,
+      worker,
+    }),
+    expectedCreateBeforeMessageError,
+    "covered_range delivery should reject missing worker index handoffs",
+  );
+
+  const workerHost = fixture.createWorkerHost();
+  const nameLen = writeString(workerHost.memory, workerIndexNamePointer, indexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](
+    workerIndexNamePointer,
+    nameLen,
+  );
+
+  new Uint8Array(
+    workerHost.memory.buffer,
+    workerWritePointer,
+    selectedFileBytes.byteLength,
+  ).set(selectedFileBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      workerWritePointer,
+      selectedFileBytes.byteLength,
+    ),
+    selectedFileBytes.byteLength,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      indexName,
+      message: coveredRangeMessage,
+      worker,
+    }),
+    expectedPublishBeforeMessageError,
+    "covered_range delivery should reject unpublished worker index handoffs",
+  );
+
+  assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      indexName,
+      message: coveredRangeMessage,
+      worker,
+    }),
+    true,
+  );
+  assert.deepEqual(delivered, {
+    message: coveredRangeMessage,
+    type: expectedWorkerMessageEmitType,
+  });
 }
 
 async function checkWorkerHandoffGenerationReset() {
@@ -961,6 +1076,7 @@ async function main() {
   await checkDurableIndexAcrossHosts();
   await checkTypedScenarioHelpers();
   await checkTypedScenarioOrderGuards();
+  await checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex();
   await checkWorkerHandoffGenerationReset();
   await checkWorkerPublicationRequiresWrittenBytes();
   await checkTypedScenarioChronology();
