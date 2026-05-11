@@ -17,8 +17,13 @@ const RUNTIME_SPEC = JSON.parse(
 );
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
-const FAILED_REQUEST_TRANSFER_BYTES = 0;
 const WARM_NAVIGATION_SAMPLE_COUNT = 3;
+const BENIGN_LOADING_FAILURES = Object.freeze([
+  Object.freeze({
+    canceled: true,
+    errorText: "net::ERR_ABORTED",
+  }),
+]);
 const CORE_TRANSFER_RESOURCE_TYPES = new Set([
   "Document",
   "Fetch",
@@ -582,9 +587,25 @@ async function waitUntil(predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
   throw new Error("timed out waiting for page condition");
 }
 
-function unfinishedTransferRequestIds(requestIds, cachedRequestIds, loadingBytes) {
+function isBenignLoadingFailure(failure) {
+  return BENIGN_LOADING_FAILURES.some(
+    (benignFailure) =>
+      failure?.canceled === benignFailure.canceled &&
+      failure?.errorText === benignFailure.errorText,
+  );
+}
+
+function unfinishedTransferRequestIds(
+  requestIds,
+  cachedRequestIds,
+  loadingBytes,
+  loadingFailures = new Map(),
+) {
   return [...requestIds].filter(
-    (requestId) => !cachedRequestIds.has(requestId) && !loadingBytes.has(requestId),
+    (requestId) =>
+      !cachedRequestIds.has(requestId) &&
+      !loadingBytes.has(requestId) &&
+      !loadingFailures.has(requestId),
   );
 }
 
@@ -592,6 +613,33 @@ function coreTransferBytesForRequests(requestIds, cachedRequestIds, loadingBytes
   return [...requestIds]
     .filter((requestId) => !cachedRequestIds.has(requestId))
     .reduce((total, requestId) => total + (loadingBytes.get(requestId) ?? 0), 0);
+}
+
+function failedCoreRequestReports(requestIds, loadingFailures, requestUrls) {
+  return [...requestIds]
+    .map((requestId) => {
+      const failure = loadingFailures.get(requestId);
+
+      if (failure === undefined || isBenignLoadingFailure(failure)) {
+        return null;
+      }
+
+      return [
+        requestUrls.get(requestId) ?? requestId,
+        failure.errorText ?? "unknown loading failure",
+      ].join(" ");
+    })
+    .filter((report) => report !== null);
+}
+
+function assertNoFailedCoreRequests(requestIds, loadingFailures, requestUrls) {
+  const failures = failedCoreRequestReports(requestIds, loadingFailures, requestUrls);
+
+  if (failures.length > 0) {
+    throw new Error(
+      `core startup requests failed before app-load transfer accounting completed: ${failures.join(", ")}`,
+    );
+  }
 }
 
 function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackRequestIds) {
@@ -725,6 +773,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestUrls = new Map();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
+  const loadingFailures = new Map();
   let coreRequestIds = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
@@ -765,7 +814,10 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     if (sessionId !== page.sessionId) {
       return;
     }
-    loadingBytes.set(event.requestId, FAILED_REQUEST_TRANSFER_BYTES);
+    loadingFailures.set(event.requestId, {
+      canceled: event.canceled === true,
+      errorText: event.errorText,
+    });
   });
 
   if (options.fast3g) {
@@ -846,8 +898,14 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     return status.fullReady === true;
   });
   await waitUntil(() =>
-    unfinishedTransferRequestIds(coreRequestIds, cachedRequestIds, loadingBytes).length === 0,
+    unfinishedTransferRequestIds(
+      coreRequestIds,
+      cachedRequestIds,
+      loadingBytes,
+      loadingFailures,
+    ).length === 0,
   );
+  assertNoFailedCoreRequests(coreRequestIds, loadingFailures, requestUrls);
   const coreTransferBytes = coreTransferBytesForRequests(
     coreRequestIds,
     cachedRequestIds,
@@ -996,8 +1054,14 @@ function runSelfTest() {
   const transferRequestIds = new Set(["bootstrap", "renderer", "cached"]);
   const cachedTransferRequestIds = new Set(["cached"]);
   const loadingTransferBytes = new Map([["bootstrap", 12]]);
+  const failedTransferRequests = new Map();
   assert.deepEqual(
-    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    unfinishedTransferRequestIds(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+      failedTransferRequests,
+    ),
     ["renderer"],
   );
   assert.equal(
@@ -1008,9 +1072,48 @@ function runSelfTest() {
     ),
     12,
   );
+  failedTransferRequests.set("renderer", {
+    canceled: false,
+    errorText: "net::ERR_FAILED",
+  });
+  assert.deepEqual(
+    unfinishedTransferRequestIds(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+      failedTransferRequests,
+    ),
+    [],
+  );
+  assert.throws(
+    () =>
+      assertNoFailedCoreRequests(
+        transferRequestIds,
+        failedTransferRequests,
+        new Map([["renderer", "http://127.0.0.1/bootstrap.mjs"]]),
+      ),
+    /core startup requests failed before app-load transfer accounting completed: http:\/\/127\.0\.0\.1\/bootstrap\.mjs net::ERR_FAILED/,
+  );
+  failedTransferRequests.set("renderer", {
+    canceled: true,
+    errorText: "net::ERR_ABORTED",
+  });
+  assert.doesNotThrow(() =>
+    assertNoFailedCoreRequests(
+      transferRequestIds,
+      failedTransferRequests,
+      new Map([["renderer", "http://127.0.0.1/bootstrap.mjs"]]),
+    ),
+  );
+  failedTransferRequests.clear();
   loadingTransferBytes.set("renderer", 34);
   assert.deepEqual(
-    unfinishedTransferRequestIds(transferRequestIds, cachedTransferRequestIds, loadingTransferBytes),
+    unfinishedTransferRequestIds(
+      transferRequestIds,
+      cachedTransferRequestIds,
+      loadingTransferBytes,
+      failedTransferRequests,
+    ),
     [],
   );
   assert.equal(
@@ -1414,7 +1517,7 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /unfinishedTransferRequestIds\(coreRequestIds, cachedRequestIds, loadingBytes\)/,
+    /unfinishedTransferRequestIds\([\s\S]+coreRequestIds,[\s\S]+cachedRequestIds,[\s\S]+loadingBytes,[\s\S]+loadingFailures/,
   );
   assert.match(
     navigateAndMeasure.toString(),
@@ -1422,7 +1525,11 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /loadingBytes\.set\(event\.requestId, FAILED_REQUEST_TRANSFER_BYTES\)/,
+    /loadingFailures\.set\(event\.requestId/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /assertNoFailedCoreRequests\(coreRequestIds, loadingFailures, requestUrls\)/,
   );
   assert.match(
     navigateAndMeasure.toString(),
