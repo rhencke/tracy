@@ -406,7 +406,7 @@ async function checkBrowserInteractiveIngest() {
     const box = await canvas.boundingBox();
     assert.notEqual(box, null, "trace canvas should be visible");
 
-    const chooserPromise = page.waitForFileChooser({ timeout: 1000 });
+    const chooserPromise = page.waitForFileChooser({ timeout: BROWSER_TIMEOUT_MS });
     const clickStartedAt = await page.evaluate(() => performance.now());
     await page.mouse.click(box.x + 12, box.y + 12);
     const chooser = await chooserPromise;
