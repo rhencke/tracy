@@ -195,6 +195,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     catalogPageCount: null,
     error: null,
     exports: null,
+    exportsLoadGeneration: 0,
     indexId: null,
     indexName: null,
     openPromise: null,
@@ -260,6 +261,8 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       return readerState.exports;
     }
 
+    const loadGeneration = readerState.exportsLoadGeneration + 1;
+    readerState.exportsLoadGeneration = loadGeneration;
     const loaded = await instantiate(
       RUNTIME_MODULES.INDEX,
       MAIN_THREAD,
@@ -271,8 +274,10 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       },
     );
     assertIndexReaderCappedQueryMetadataAbi(loaded.exports);
-    readerState.exports = loaded.exports;
-    return readerState.exports;
+    if (loadGeneration === readerState.exportsLoadGeneration) {
+      readerState.exports = loaded.exports;
+    }
+    return readerState.exports ?? loaded.exports;
   }
 
   async function loadSliceCatalogRebuild() {

@@ -1513,6 +1513,102 @@ async function checkMainThreadIndexReaderRequiresCappedQueryMetadataExports() {
   });
 }
 
+async function checkMainThreadIndexReaderIgnoresStalePreloadExports() {
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
+  const memory = new WebAssembly.Memory({ initial: 512 });
+  const indexName = "indexes/preload-race.idx";
+  const openedIndexId = 70;
+  const stalePreloadTrackCount = 0;
+  const initializedOpenTrackCount = 7;
+  const instantiateRequests = [];
+  const initializedIndexIds = [];
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](namePtr, nameLen) {
+      assert.equal(
+        new TextDecoder().decode(new Uint8Array(memory.buffer, namePtr, nameLen)),
+        indexName,
+      );
+      return openedIndexId;
+    },
+  };
+
+  function deferredInstantiate(label, trackCount) {
+    let resolve;
+    const promise = new Promise((promiseResolve) => {
+      resolve = () => promiseResolve({
+        exports: {
+          index_query_range() {
+            return 0;
+          },
+          index_query_range_capped() {
+            return 0;
+          },
+          index_query_range_matched_rows() {
+            return 0;
+          },
+          index_query_range_written_rows() {
+            return 0;
+          },
+          index_reader_init(indexId) {
+            initializedIndexIds.push({ indexId, label });
+          },
+          index_track_count() {
+            return trackCount;
+          },
+        },
+      });
+    });
+
+    return { label, promise, resolve };
+  }
+
+  const reader = runtime.createMainThreadIndexReaderController(memory, host, {
+    instantiateWasmModuleForThread: async (id, thread) => {
+      assert.equal(id, "index");
+      assert.equal(thread, "main");
+      const request = instantiateRequests.length === 0
+        ? deferredInstantiate("preload", stalePreloadTrackCount)
+        : deferredInstantiate("open", initializedOpenTrackCount);
+      instantiateRequests.push(request);
+      return request.promise;
+    },
+  });
+
+  const preloadPromise = reader.preload();
+  await Promise.resolve();
+  assert.deepEqual(
+    instantiateRequests.map((request) => request.label),
+    ["preload"],
+  );
+
+  const openPromise = reader.open(indexName, { forceReopen: true });
+  await Promise.resolve();
+  assert.deepEqual(
+    instantiateRequests.map((request) => request.label),
+    ["preload", "open"],
+  );
+
+  instantiateRequests[1].resolve();
+  await openPromise;
+  assert.deepEqual(initializedIndexIds, [
+    { indexId: openedIndexId, label: "open" },
+  ]);
+  assert.equal(reader.status().state, "ready");
+  assert.equal(reader.trackCount(), initializedOpenTrackCount);
+
+  instantiateRequests[0].resolve();
+  await preloadPromise;
+  assert.equal(
+    reader.trackCount(),
+    initializedOpenTrackCount,
+    "older preload exports must not replace the initialized open reader",
+  );
+  assert.deepEqual(initializedIndexIds, [
+    { indexId: openedIndexId, label: "open" },
+  ]);
+}
+
 async function checkMainThreadIndexReaderProbesStaleCatalogSize() {
   const runtime = await importRepoModule("host/runtime.mjs");
   const abi = await importRepoModule("host/abi.mjs");
@@ -3328,6 +3424,7 @@ async function main() {
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();
   await checkMainThreadIndexReaderRequiresCappedQueryMetadataExports();
+  await checkMainThreadIndexReaderIgnoresStalePreloadExports();
   await checkMainThreadIndexReaderProbesStaleCatalogSize();
   await checkMainThreadCoveredRangeRereadsUnqueryablePartialPage();
   await checkMainThreadSliceCatalogReportsCapacityOverflow();
