@@ -15,6 +15,7 @@ const MAIN_HOST_ROLE = "main";
 const WORKER_HOST_ROLE = "worker";
 const STALE_SIZE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMarker;
 const WORKER_EVENT = runtimeAbi.runtimeBridge.worker;
+const FILE_SELECTION = runtimeAbi.runtimeBridge.fileSelection;
 const WORKER_MESSAGE = runtimeAbi.runtimeBridge.workerMessages;
 
 function writeString(memory, ptr, value) {
@@ -26,6 +27,15 @@ function writeString(memory, ptr, value) {
 
 function readBytes(memory, ptr, len) {
   return Array.from(new Uint8Array(memory.buffer, ptr, len));
+}
+
+function indexPathForTraceName(traceName) {
+  const safeLeaf = traceName.replace(
+    new RegExp(FILE_SELECTION.UNSAFE_LEAF_PATTERN, "g"),
+    FILE_SELECTION.UNSAFE_LEAF_REPLACEMENT,
+  );
+
+  return `${FILE_SELECTION.INDEX_PREFIX}${safeLeaf}${FILE_SELECTION.INDEX_SUFFIX}`;
 }
 
 function withoutImportName(importNames, key) {
@@ -706,7 +716,7 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   const selectedFileHandle = 93;
   const selectedFileAcceptPointer = 8;
   const selectedFileAcceptValue = ".json";
-  const indexName = "indexes/covered-range.idx";
+  const indexName = indexPathForTraceName(selectedFileName);
   const workerIndexNamePointer = 16;
   const workerWritePointer = 96;
   const indexWriteOffset = 0n;
@@ -807,6 +817,102 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   assert.deepEqual(delivered, {
     message: coveredRangeMessage,
     type: expectedWorkerMessageEmitType,
+  });
+}
+
+async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
+  const coveredRangeMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: coveredRangeMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const selectedFileName = "active-covered-range.json";
+  const selectedFileBytes = new Uint8Array([81, 82]);
+  const selectedFileHandle = 93;
+  const selectedFileAcceptPointer = 8;
+  const selectedFileAcceptValue = ".json";
+  const activeIndexName = indexPathForTraceName(selectedFileName);
+  const unrelatedIndexName = indexPathForTraceName("unrelated-covered-range.json");
+  const unrelatedIndexBytes = new Uint8Array([83, 84]);
+  const firstSelectedFileIngestId = 1;
+  const coveredRangeMessage = {
+    end: selectedFileBytes.byteLength,
+    ingestId: firstSelectedFileIngestId,
+    start: 0,
+    type: WORKER_MESSAGE.COVERED_RANGE,
+  };
+  const coveredRangeMessageWithUnrelatedIndex = {
+    ...coveredRangeMessage,
+    indexName: unrelatedIndexName,
+  };
+  const expectedUnrelatedIndexError =
+    /requires worker message index .* to match active selected-file ingest index/;
+  const selectedFile = {
+    bytes: selectedFileBytes,
+    name: selectedFileName,
+  };
+  let delivered = null;
+  const worker = {
+    emit(type, message) {
+      delivered = { message, type };
+    },
+  };
+  const acceptLen = writeString(
+    mainMemory,
+    selectedFileAcceptPointer,
+    selectedFileAcceptValue,
+  );
+
+  fixture.mainHost.setFileSelectedCallback(() => {});
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
+
+  assert.equal(
+    fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
+    selectedFileHandle,
+  );
+  assert.equal(await picker, selectedFileHandle);
+  await Promise.resolve();
+  await fixture.scenario.workerPublication({
+    bytes: unrelatedIndexBytes,
+    indexName: unrelatedIndexName,
+    workerHost,
+  });
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      message: coveredRangeMessageWithUnrelatedIndex,
+      worker,
+    }),
+    expectedUnrelatedIndexError,
+    "covered_range delivery should reject an unrelated published index from the message payload",
+  );
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      indexName: unrelatedIndexName,
+      message: coveredRangeMessage,
+      worker,
+    }),
+    expectedUnrelatedIndexError,
+    "covered_range delivery should reject an unrelated published index from the helper argument",
+  );
+  await fixture.scenario.workerPublication({
+    bytes: selectedFileBytes,
+    indexName: activeIndexName,
+    workerHost,
+  });
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      indexName: activeIndexName,
+      message: coveredRangeMessage,
+      worker,
+    }),
+    true,
+    "covered_range delivery should accept the active ingest index after publication",
+  );
+  assert.deepEqual(delivered, {
+    message: coveredRangeMessage,
+    type: WORKER_EVENT.EVENT_MESSAGE,
   });
 }
 
@@ -1391,6 +1497,7 @@ async function main() {
   await checkWorkerMessageDeliveryRequiresActiveIngest();
   await checkWorkerMessageDeliveryRejectsRetiredIngests();
   await checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex();
+  await checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex();
   await checkWorkerHandoffGenerationReset();
   await checkWorkerPublicationRequiresWrittenBytes();
   await checkWorkerPublicationRequiresCurrentGenerationBytes();

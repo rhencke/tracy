@@ -54,6 +54,7 @@ const ACTIVE_INGEST_WORKER_MESSAGE_TYPES = Object.freeze(
     runtimeAbi.runtimeBridge.workerMessages.PROGRESS,
   ]),
 );
+const FILE_SELECTION = runtimeAbi.runtimeBridge.fileSelection;
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
@@ -162,7 +163,26 @@ function fileSize(file) {
 }
 
 function defaultSourceName(file) {
-  return `sources/${file.name ?? "trace"}`;
+  const rawName =
+    typeof file?.name === "string" && file.name.length > 0
+      ? file.name
+      : FILE_SELECTION.DEFAULT_TRACE_NAME;
+
+  return `${FILE_SELECTION.SOURCE_PREFIX}${rawName}`;
+}
+
+function defaultIndexName(file) {
+  const sourceName = defaultSourceName(file);
+  const leaf = sourceName
+    .split(FILE_SELECTION.PATH_SEPARATOR)
+    .filter((part) => part.length > 0)
+    .at(-1);
+  const safeLeaf = (leaf ?? FILE_SELECTION.DEFAULT_TRACE_NAME).replace(
+    new RegExp(FILE_SELECTION.UNSAFE_LEAF_PATTERN, "g"),
+    FILE_SELECTION.UNSAFE_LEAF_REPLACEMENT,
+  );
+
+  return `${FILE_SELECTION.INDEX_PREFIX}${safeLeaf}${FILE_SELECTION.INDEX_SUFFIX}`;
 }
 
 function makeProductionTopologyFixture(options = {}) {
@@ -262,7 +282,12 @@ function makeProductionTopologyFixture(options = {}) {
     return handoff;
   }
 
-  function requireReaderOpeningWorkerMessageHandoff({ indexName, message, messageType }) {
+  function requireReaderOpeningWorkerMessageHandoff({
+    indexName,
+    ingest,
+    message,
+    messageType,
+  }) {
     if (!READER_OPENING_WORKER_MESSAGE_TYPES.has(messageType)) {
       return null;
     }
@@ -270,6 +295,14 @@ function makeProductionTopologyFixture(options = {}) {
       indexName ?? message.indexName,
       FIXTURE_OPERATION.workerMessageDelivery,
     );
+
+    if (ingest !== null) {
+      assert.equal(
+        name,
+        ingest.indexName,
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message index ${name} to match active selected-file ingest index ${ingest.indexName}`,
+      );
+    }
 
     return requireWorkerPublishedIndex(name, FIXTURE_OPERATION.workerMessageDelivery);
   }
@@ -681,6 +714,7 @@ function makeProductionTopologyFixture(options = {}) {
         callbackRan: false,
         handle,
         ingestId,
+        indexName: defaultIndexName(file),
       };
 
       nextSelectedFileIngestId += 1;
@@ -934,6 +968,7 @@ function makeProductionTopologyFixture(options = {}) {
       const ingest = requireActiveSelectedFileIngest(message);
       const handoff = requireReaderOpeningWorkerMessageHandoff({
         indexName,
+        ingest,
         message,
         messageType: message.type,
       });
