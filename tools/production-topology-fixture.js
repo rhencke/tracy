@@ -43,8 +43,11 @@ const DEFAULT_SCENARIO_NAME_PTR = 16;
 const DEFAULT_SCENARIO_SRC_PTR = 96;
 const DEFAULT_SCENARIO_DEST_PTR = 120;
 const INITIAL_WORKER_HANDOFF_GENERATION = 0;
-const READER_OPENING_WORKER_MESSAGE_TYPES = Object.freeze(
-  new Set([runtimeAbi.runtimeBridge.workerMessages.COVERED_RANGE]),
+const PUBLISHED_HANDOFF_WORKER_MESSAGE_TYPES = Object.freeze(
+  new Set([
+    runtimeAbi.runtimeBridge.workerMessages.COMPLETE,
+    runtimeAbi.runtimeBridge.workerMessages.COVERED_RANGE,
+  ]),
 );
 const ACTIVE_INGEST_WORKER_MESSAGE_TYPES = Object.freeze(
   new Set([
@@ -282,17 +285,17 @@ function makeProductionTopologyFixture(options = {}) {
     return handoff;
   }
 
-  function requireReaderOpeningWorkerMessageHandoff({
+  function requirePublishedWorkerMessageHandoff({
     indexName,
     ingest,
     message,
     messageType,
   }) {
-    if (!READER_OPENING_WORKER_MESSAGE_TYPES.has(messageType)) {
+    if (!PUBLISHED_HANDOFF_WORKER_MESSAGE_TYPES.has(messageType)) {
       return null;
     }
     const name = requireIndexName(
-      indexName ?? message.indexName,
+      indexName ?? message.indexName ?? ingest?.indexName,
       FIXTURE_OPERATION.workerMessageDelivery,
     );
 
@@ -990,7 +993,7 @@ function makeProductionTopologyFixture(options = {}) {
         `${FIXTURE_OPERATION.workerMessageDelivery} requires a worker message object`,
       );
       const ingest = requireActiveSelectedFileIngest(message);
-      const handoff = requireReaderOpeningWorkerMessageHandoff({
+      const handoff = requirePublishedWorkerMessageHandoff({
         indexName,
         ingest,
         message,

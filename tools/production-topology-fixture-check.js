@@ -584,9 +584,11 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
   const retiredIngestMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: retiredIngestMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
   const firstSelectedFileBytes = new Uint8Array([81, 82]);
   const firstSelectedFileName = "retired-ingest-first.json";
   const firstSelectedFileHandle = 93;
+  const firstIndexName = indexPathForTraceName(firstSelectedFileName);
   const secondSelectedFileBytes = new Uint8Array([83, 84]);
   const secondSelectedFileName = "retired-ingest-second.json";
   const secondSelectedFileHandle = 94;
@@ -648,6 +650,11 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
   );
   assert.equal(await firstPicker, firstSelectedFileHandle);
   await Promise.resolve();
+  await fixture.scenario.workerPublication({
+    bytes: firstSelectedFileBytes,
+    indexName: firstIndexName,
+    workerHost,
+  });
   assert.equal(
     fixture.scenario.workerMessageDelivery({
       message: completeMessage,
@@ -705,6 +712,126 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
       type: WORKER_EVENT.EVENT_MESSAGE,
     },
   ]);
+}
+
+async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
+  const completeMessageMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: completeMessageMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const selectedFileBytes = new Uint8Array([81, 82]);
+  const selectedFileName = "complete-before-publication.json";
+  const selectedFileHandle = 93;
+  const selectedFileAcceptPointer = 8;
+  const selectedFileAcceptValue = ".json";
+  const activeIndexName = indexPathForTraceName(selectedFileName);
+  const unrelatedIndexName = indexPathForTraceName("unrelated-complete.json");
+  const unrelatedIndexBytes = new Uint8Array([83, 84]);
+  const workerIndexNamePointer = 16;
+  const workerWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const expectedFlushResult = 0;
+  const firstSelectedFileIngestId = 1;
+  const completeMessage = {
+    ingestId: firstSelectedFileIngestId,
+    type: WORKER_MESSAGE.COMPLETE,
+  };
+  const expectedPublishBeforeCompleteError = {
+    message: `${OP.workerMessageDelivery}: worker must publish OPFS index ${activeIndexName} before main-thread handoff`,
+  };
+  const expectedUnrelatedIndexError =
+    /requires worker message index .* to match active selected-file ingest index/;
+  const selectedFile = {
+    bytes: selectedFileBytes,
+    name: selectedFileName,
+  };
+  let delivered = null;
+  const worker = {
+    emit(type, message) {
+      delivered = { message, type };
+    },
+  };
+  const acceptLen = writeString(
+    mainMemory,
+    selectedFileAcceptPointer,
+    selectedFileAcceptValue,
+  );
+
+  fixture.mainHost.setFileSelectedCallback(() => {});
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
+
+  assert.equal(
+    fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
+    selectedFileHandle,
+  );
+  assert.equal(await picker, selectedFileHandle);
+  await Promise.resolve();
+
+  await fixture.scenario.workerPublication({
+    bytes: unrelatedIndexBytes,
+    indexName: unrelatedIndexName,
+    workerHost,
+  });
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      indexName: unrelatedIndexName,
+      message: completeMessage,
+      worker,
+    }),
+    expectedUnrelatedIndexError,
+    "complete delivery should reject an unrelated published index from the helper argument",
+  );
+
+  const nameLen = writeString(workerHost.memory, workerIndexNamePointer, activeIndexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](
+    workerIndexNamePointer,
+    nameLen,
+  );
+
+  new Uint8Array(
+    workerHost.memory.buffer,
+    workerWritePointer,
+    selectedFileBytes.byteLength,
+  ).set(selectedFileBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      workerWritePointer,
+      selectedFileBytes.byteLength,
+    ),
+    selectedFileBytes.byteLength,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      message: completeMessage,
+      worker,
+    }),
+    expectedPublishBeforeCompleteError,
+    "complete delivery should reject unpublished worker index handoffs",
+  );
+  assert.equal(delivered, null);
+
+  assert.equal(
+    await fixture.scenario.workerPublication({ indexName: activeIndexName }),
+    workerIndexId,
+  );
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      message: completeMessage,
+      worker,
+    }),
+    true,
+    "complete delivery should accept the active ingest index after publication",
+  );
+  assert.deepEqual(delivered, {
+    message: completeMessage,
+    type: WORKER_EVENT.EVENT_MESSAGE,
+  });
 }
 
 async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
@@ -1624,6 +1751,7 @@ async function main() {
   await checkTypedScenarioOrderGuards();
   await checkWorkerMessageDeliveryRequiresActiveIngest();
   await checkWorkerMessageDeliveryRejectsRetiredIngests();
+  await checkWorkerMessageDeliveryRequiresPublishedCompleteIndex();
   await checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex();
   await checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex();
   await checkWorkerHandoffGenerationReset();
