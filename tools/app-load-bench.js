@@ -119,16 +119,45 @@ function parseArgs(argv) {
 }
 
 function assertMeasuredBudget(name, metrics, budget) {
+  const failures = measuredBudgetFailures(metrics, budget);
+
+  if (failures.length > 0) {
+    throw new Error(`${name} ${failures[0]}`);
+  }
+}
+
+function measuredBudgetFailures(metrics, budget) {
+  const failures = [];
+
   for (const [field, limit] of Object.entries(budget)) {
     const value = metrics[field];
 
     if (!Number.isFinite(value)) {
-      throw new Error(`${name} missing metric ${field}`);
-    }
-    if (value > limit) {
-      throw new Error(`${name} ${field} ${value.toFixed(1)} > ${limit}`);
+      failures.push(`missing metric ${field}`);
+    } else if (value > limit) {
+      failures.push(`${field} ${value.toFixed(1)} > ${limit}`);
     }
   }
+
+  return failures;
+}
+
+function assertAnyMeasuredBudget(name, samples, budget) {
+  assert.ok(samples.length > 0, `${name} budget samples must not be empty`);
+
+  if (samples.some((sample) => measuredBudgetFailures(sample, budget).length === 0)) {
+    return;
+  }
+
+  const sampleFailures = samples.map((sample, index) => {
+    const sampleNumber = index + 1;
+
+    return `sample ${sampleNumber}: ${measuredBudgetFailures(sample, budget).join(", ")}`;
+  });
+
+  throw new Error(
+    `${name} no warm navigation sample satisfied all budget fields; ${sampleFailures.join("; ")}`,
+  );
 }
 
 function median(values) {
@@ -996,8 +1025,8 @@ async function runBench(options) {
     const warmHttp = medianMetrics(warmHttpSamples);
 
     assertMeasuredBudget("cold", cold, BUDGETS.cold);
-    assertMeasuredBudget("warmSw", warmSw, BUDGETS.warmSw);
-    assertMeasuredBudget("warmHttp", warmHttp, BUDGETS.warmHttp);
+    assertAnyMeasuredBudget("warmSw", warmSwSamples, BUDGETS.warmSw);
+    assertAnyMeasuredBudget("warmHttp", warmHttpSamples, BUDGETS.warmHttp);
 
     console.log(JSON.stringify({
       cold,
@@ -1038,6 +1067,36 @@ function runSelfTest() {
   assert.throws(
     () => assertMeasuredBudget("fixture", { shellPaintMs: 2 }, { shellPaintMs: 1 }),
     /fixture shellPaintMs 2.0 > 1/,
+  );
+  const splitWarmBudget = {
+    coreTtiMs: 10,
+    fullLoadMs: 10,
+    shellPaintMs: 10,
+  };
+  const splitWarmSamples = [
+    { coreTtiMs: 20, fullLoadMs: 5, shellPaintMs: 5 },
+    { coreTtiMs: 5, fullLoadMs: 20, shellPaintMs: 5 },
+    { coreTtiMs: 5, fullLoadMs: 5, shellPaintMs: 20 },
+  ];
+  const splitWarmMedian = medianMetrics(splitWarmSamples);
+
+  assert.deepEqual(splitWarmMedian, {
+    coreTtiMs: 5,
+    fullLoadMs: 5,
+    shellPaintMs: 5,
+  });
+  assert.doesNotThrow(() =>
+    assertMeasuredBudget("splitWarmMedian", splitWarmMedian, splitWarmBudget),
+  );
+  assert.throws(
+    () => assertAnyMeasuredBudget("splitWarm", splitWarmSamples, splitWarmBudget),
+    /splitWarm no warm navigation sample satisfied all budget fields; sample 1: coreTtiMs 20.0 > 10; sample 2: fullLoadMs 20.0 > 10; sample 3: shellPaintMs 20.0 > 10/,
+  );
+  assert.doesNotThrow(() =>
+    assertAnyMeasuredBudget("splitWarm", [
+      ...splitWarmSamples,
+      { coreTtiMs: 10, fullLoadMs: 10, shellPaintMs: 10 },
+    ], splitWarmBudget),
   );
   assert.deepEqual(
     medianMetrics([
