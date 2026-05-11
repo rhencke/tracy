@@ -693,13 +693,14 @@ function makeProductionTopologyFixture(options = {}) {
           call.op === FIXTURE_OPERATION.indexOpen &&
           call.name === name,
       );
+      const rawOpenCallNotFoundIndex = -1;
 
       requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
       if (opened !== undefined) {
         mainThreadIndexOpens.set(opened.id, name);
         return opened.id;
       }
-      if (rawOpenCallIndex !== -1) {
+      if (rawOpenCallIndex !== rawOpenCallNotFoundIndex) {
         const rawOpenCall = calls[rawOpenCallIndex];
 
         recordMainThreadIndexOpen(rawOpenCall.id, name, rawOpenCallIndex);
