@@ -3,6 +3,8 @@
 const assert = require("node:assert/strict");
 const { pathToFileURL } = require("node:url");
 const path = require("node:path");
+
+const { runCheck } = require("./check-runner.js");
 const {
   installBrowserGlobals,
   installRuntimeBrowserGlobals,
@@ -127,7 +129,4 @@ async function main() {
   assert.deepEqual(Array.from(new Uint8Array(memory.buffer, 32, 2)), [8, 9]);
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message || String(error));
-  process.exitCode = 1;
-});
+runCheck(main);
