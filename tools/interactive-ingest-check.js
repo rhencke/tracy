@@ -481,7 +481,14 @@ async function checkInteractiveIngestGate() {
       });
     }
 
-    flushCoveredRanges() {
+    async flushCoveredRanges() {
+      await waitForAsyncAction(
+        () =>
+          opfsHarness.scenario.workerPublication({
+            indexName,
+          }),
+        `worker should publish the current OPFS index before covered_range delivery; calls=${JSON.stringify(opfsHarness.calls)}`,
+      );
       this.coveredRangesReleased = true;
       while (this.pendingCoveredRanges.length > 0) {
         opfsHarness.scenario.workerMessageDelivery({
@@ -489,6 +496,7 @@ async function checkInteractiveIngestGate() {
           worker: this,
         });
       }
+      this.coveredRangesReleased = false;
     }
 
     flushComplete() {
@@ -681,7 +689,7 @@ async function checkInteractiveIngestGate() {
         call.name === indexName,
     )?.id,
   );
-  controller.worker.flushCoveredRanges();
+  await controller.worker.flushCoveredRanges();
   await flushAsyncWork();
 
   let nextFrameAt = 10;
@@ -695,11 +703,17 @@ async function checkInteractiveIngestGate() {
   ) {
     if (frames.length === 0) {
       await flushAsyncWork();
+      if (controller.worker?.pendingCoveredRanges?.length > 0) {
+        await controller.worker.flushCoveredRanges();
+      }
       continue;
     }
 
     await runInteractiveFrame(frames, canvasHarness, nextFrameAt, frameDurations);
     await flushAsyncWork();
+    if (controller.worker?.pendingCoveredRanges?.length > 0) {
+      await controller.worker.flushCoveredRanges();
+    }
     nextFrameAt += 16;
   }
   await flushAsyncWork();

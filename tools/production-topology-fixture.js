@@ -239,11 +239,19 @@ function makeProductionTopologyFixture(options = {}) {
   function canRecordMainThreadIndexOpen(name) {
     const handoff = workerIndexHandoffs.get(name);
 
-    return handoff !== undefined && handoff.flushed && handoff.published;
+    return handoff !== undefined &&
+      handoff.flushed &&
+      handoff.published &&
+      handoff.publicationCallIndex !== null;
   }
 
   function recordMainThreadIndexOpen(indexId, name, sourceCallIndex) {
-    mainThreadIndexOpens.set(indexId, name);
+    const handoff = requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
+
+    mainThreadIndexOpens.set(indexId, {
+      name,
+      publicationCallIndex: handoff.publicationCallIndex,
+    });
     calls.push({
       host: MAIN_HOST_ROLE,
       id: indexId,
@@ -251,6 +259,17 @@ function makeProductionTopologyFixture(options = {}) {
       op: FIXTURE_OPERATION.mainThreadIndexOpen,
       sourceCallIndex,
     });
+  }
+
+  function requireFreshMainThreadIndexOpen(indexId, operation) {
+    const opened = mainThreadIndexOpens.get(indexId);
+
+    assert.ok(
+      opened !== undefined,
+      `${operation}: main thread must open OPFS index before read`,
+    );
+    requireWorkerPublishedIndex(opened.name, operation);
+    return opened;
   }
 
   function recordMainThreadIndexRead({
@@ -426,6 +445,10 @@ function makeProductionTopologyFixture(options = {}) {
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr) {
         const index = requireIndex(indexId);
+
+        if (host === MAIN_HOST_ROLE && mainThreadIndexOpens.has(indexId)) {
+          requireFreshMainThreadIndexOpen(indexId, FIXTURE_OPERATION.indexRead);
+        }
         const start = Number(offset);
         const bytes = durableIndex(index.name).bytes;
         const chunk = bytes.subarray(start, Math.min(bytes.byteLength, start + len));
@@ -702,7 +725,6 @@ function makeProductionTopologyFixture(options = {}) {
       );
 
       if (opened !== undefined) {
-        mainThreadIndexOpens.set(opened.id, name);
         return opened.id;
       }
       if (rawOpenCallIndex !== rawOpenCallNotFoundIndex) {
@@ -729,12 +751,11 @@ function makeProductionTopologyFixture(options = {}) {
       observeOnly = false,
       offset = 0n,
     }) {
-      const name = mainThreadIndexOpens.get(indexId);
-
-      assert.ok(
-        name !== undefined,
-        `${FIXTURE_OPERATION.mainThreadIndexRead}: main thread must open OPFS index before read`,
+      const openRecord = requireFreshMainThreadIndexOpen(
+        indexId,
+        FIXTURE_OPERATION.mainThreadIndexRead,
       );
+      const { name } = openRecord;
       const readCall = calls.find(
         (call) => call.host === MAIN_HOST_ROLE &&
           call.id === indexId &&

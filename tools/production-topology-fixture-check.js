@@ -832,6 +832,69 @@ async function checkObserveOnlyIndexOpenRejectsStaleRawOpen() {
   );
 }
 
+async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
+  const readFreshnessMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: readFreshnessMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/read-freshness.idx";
+  const firstGenerationBytes = new Uint8Array([101]);
+  const secondGenerationBytes = new Uint8Array([102]);
+  const secondGenerationWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const mainReadOffset = 0n;
+  const mainReadLength = firstGenerationBytes.byteLength;
+  const mainReadDestinationPointer = 120;
+  const expectedSecondGenerationWriteCount = secondGenerationBytes.byteLength;
+  const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedRawReadFreshnessError = new RegExp(
+    `${OP.indexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
+  );
+  const expectedTypedReadFreshnessError = new RegExp(
+    `${OP.mainThreadIndexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
+  );
+  const workerIndexId = await fixture.scenario.workerPublication({
+    bytes: firstGenerationBytes,
+    indexName,
+    workerHost,
+  });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+
+  new Uint8Array(
+    workerHost.memory.buffer,
+    secondGenerationWritePointer,
+    secondGenerationBytes.byteLength,
+  ).set(secondGenerationBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      secondGenerationWritePointer,
+      secondGenerationBytes.byteLength,
+    ),
+    expectedSecondGenerationWriteCount,
+  );
+  assert.throws(
+    () => fixture.mainHost[HOST.OPFS_INDEX_READ](
+      mainIndexId,
+      mainReadOffset,
+      mainReadLength,
+      mainReadDestinationPointer,
+    ),
+    expectedRawReadFreshnessError,
+    "raw main-thread read should reject newer unpublished worker generations",
+  );
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexRead({
+      indexId: mainIndexId,
+      len: mainReadLength,
+      observeOnly: true,
+    }),
+    expectedTypedReadFreshnessError,
+    "typed main-thread read should reject newer unpublished worker generations",
+  );
+}
+
 async function checkObservedIndexReadPreservesRawReadCount() {
   const observedReadMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: observedReadMemoryPageCount });
@@ -902,6 +965,7 @@ async function main() {
   await checkWorkerPublicationRequiresWrittenBytes();
   await checkTypedScenarioChronology();
   await checkObserveOnlyIndexOpenRejectsStaleRawOpen();
+  await checkMainThreadIndexReadRejectsNewerUnpublishedGeneration();
   await checkObservedIndexReadPreservesRawReadCount();
 }
 
