@@ -23,6 +23,10 @@ const MAIN_INDEX_SIZE_MAY_BE_STALE = hostAbi.opfsBridge.mainIndexSizeMayBeStale;
 const MAIN_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.defaultPersistsFileSources;
 const WORKER_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.workerPersistsFileSources;
 const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze(Object.keys(FIXTURE_OPERATION));
+// Fixture host-role labels mirror the production topology boundary that decides
+// whether OPFS state is owned by the browser main thread or by a worker handoff.
+const MAIN_HOST_ROLE = "main";
+const WORKER_HOST_ROLE = "worker";
 // The fixture writes only small scratch buffers, but two pages catches accidental
 // main/worker memory sharing without pretending this is a production heap size.
 const DEFAULT_FIXTURE_MEMORY_PAGES = 2;
@@ -240,7 +244,7 @@ function makeProductionTopologyFixture(options = {}) {
   function recordMainThreadIndexOpen(indexId, name, sourceCallIndex) {
     mainThreadIndexOpens.set(indexId, name);
     calls.push({
-      host: "main",
+      host: MAIN_HOST_ROLE,
       id: indexId,
       name,
       op: FIXTURE_OPERATION.mainThreadIndexOpen,
@@ -257,7 +261,7 @@ function makeProductionTopologyFixture(options = {}) {
     sourceCallIndex,
   }) {
     calls.push({
-      host: "main",
+      host: MAIN_HOST_ROLE,
       id: indexId,
       len,
       name,
@@ -270,12 +274,12 @@ function makeProductionTopologyFixture(options = {}) {
 
   function sourceFromSelectedFile(host, sources, files, fileHandle) {
     const file = files.get(fileHandle);
-    const sourceId = host === "main" ? nextMainSourceId : nextWorkerSourceId;
+    const sourceId = host === MAIN_HOST_ROLE ? nextMainSourceId : nextWorkerSourceId;
     const persistFileSource =
-      host === "main" ? MAIN_PERSISTS_FILE_SOURCES : WORKER_PERSISTS_FILE_SOURCES;
+      host === MAIN_HOST_ROLE ? MAIN_PERSISTS_FILE_SOURCES : WORKER_PERSISTS_FILE_SOURCES;
 
     assert.ok(file !== undefined, `unknown ${host} selected file handle ${fileHandle}`);
-    if (host === "main") {
+    if (host === MAIN_HOST_ROLE) {
       nextMainSourceId += 1;
     } else {
       nextWorkerSourceId += 1;
@@ -377,7 +381,7 @@ function makeProductionTopologyFixture(options = {}) {
 
         durableIndexes.set(name, { bytes: new Uint8Array(0), name });
         indexes.set(indexId, { id: indexId, name });
-        if (host === "worker") {
+        if (host === WORKER_HOST_ROLE) {
           workerIndexHandoffs.set(name, {
             bytesWritten: 0,
             flushed: false,
@@ -393,7 +397,7 @@ function makeProductionTopologyFixture(options = {}) {
         const indexId = idState.nextIndexId();
         const workerHandoff = workerIndexHandoffs.get(name);
 
-        if (host === "main" && workerHandoff !== undefined) {
+        if (host === MAIN_HOST_ROLE && workerHandoff !== undefined) {
           assert.ok(
             workerHandoff.flushed,
             `main-thread index open must wait for worker publication of ${name}`,
@@ -408,7 +412,7 @@ function makeProductionTopologyFixture(options = {}) {
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexOpen });
         const sourceCallIndex = calls.length - 1;
 
-        if (host === "main" && canRecordMainThreadIndexOpen(name)) {
+        if (host === MAIN_HOST_ROLE && canRecordMainThreadIndexOpen(name)) {
           recordMainThreadIndexOpen(indexId, name, sourceCallIndex);
         }
         return indexId;
@@ -434,7 +438,7 @@ function makeProductionTopologyFixture(options = {}) {
           op: FIXTURE_OPERATION.indexRead,
           readCount,
         });
-        if (host === "main" && mainThreadIndexOpens.has(indexId)) {
+        if (host === MAIN_HOST_ROLE && mainThreadIndexOpens.has(indexId)) {
           recordMainThreadIndexRead({
             indexId,
             len,
@@ -462,7 +466,7 @@ function makeProductionTopologyFixture(options = {}) {
         }
         nextBytes.set(new Uint8Array(memory.buffer, srcPtr, len), start);
         durable.bytes = nextBytes;
-        if (host === "worker") {
+        if (host === WORKER_HOST_ROLE) {
           const handoff = workerIndexHandoff(index.name);
 
           handoff.flushed = false;
@@ -483,7 +487,7 @@ function makeProductionTopologyFixture(options = {}) {
       async [HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId) {
         const index = requireIndex(indexId);
 
-        if (host === "worker") {
+        if (host === WORKER_HOST_ROLE) {
           const handoff = workerIndexHandoff(index.name);
 
           handoff.flushed = true;
@@ -548,7 +552,7 @@ function makeProductionTopologyFixture(options = {}) {
       selectedFileIngests.add(handle);
       calls.push({
         handle,
-        host: "main",
+        host: MAIN_HOST_ROLE,
         name: defaultSourceName(file),
         op: FIXTURE_OPERATION.selectedFileIngest,
       });
@@ -559,7 +563,7 @@ function makeProductionTopologyFixture(options = {}) {
     setFileSelectedCallback(callback) {
       calls.push({
         callbackType: typeof callback,
-        host: "main",
+        host: MAIN_HOST_ROLE,
         op: FIXTURE_OPERATION.setFileSelectedCallback,
       });
       fileSelectedCallback = callback;
@@ -572,14 +576,14 @@ function makeProductionTopologyFixture(options = {}) {
       );
       calls.push({
         accept: decodeString(mainMemory, acceptPtr, acceptLen),
-        host: "main",
+        host: MAIN_HOST_ROLE,
         op: FIXTURE_OPERATION.filePickerOpen,
       });
       return new Promise((resolve) => {
         pendingFilePickerOpen = { resolve };
       });
     },
-    ...makeOpfsHost("main", mainMemory, selectedFiles, mainIdState),
+    ...makeOpfsHost(MAIN_HOST_ROLE, mainMemory, selectedFiles, mainIdState),
   };
 
   function createWorkerHost(options = {}) {
@@ -592,7 +596,7 @@ function makeProductionTopologyFixture(options = {}) {
     );
 
     const files = options.files ?? new Map(selectedFiles);
-    const workerHost = makeOpfsHost("worker", workerMemory, files, workerIdState);
+    const workerHost = makeOpfsHost(WORKER_HOST_ROLE, workerMemory, files, workerIdState);
 
     assert.notEqual(workerHost, mainHost);
     workerHost.memory = workerMemory;
@@ -602,7 +606,7 @@ function makeProductionTopologyFixture(options = {}) {
 
   function makeSameMemoryWorkerHostForTests(options = {}) {
     const files = options.files ?? new Map(selectedFiles);
-    const workerHost = makeOpfsHost("worker", mainMemory, files, workerIdState);
+    const workerHost = makeOpfsHost(WORKER_HOST_ROLE, mainMemory, files, workerIdState);
 
     workerHost.memory = mainMemory;
     createdWorkerHosts.push(workerHost);
@@ -610,7 +614,7 @@ function makeProductionTopologyFixture(options = {}) {
   }
 
   function makeSameHostWorkerHostForTests() {
-    calls.push({ host: "worker", op: FIXTURE_OPERATION.sameHostTestShortcut });
+    calls.push({ host: WORKER_HOST_ROLE, op: FIXTURE_OPERATION.sameHostTestShortcut });
     createdWorkerHosts.push(mainHost);
     return mainHost;
   }
@@ -666,7 +670,7 @@ function makeProductionTopologyFixture(options = {}) {
       );
       handoff.published = true;
       calls.push({
-        host: "worker",
+        host: WORKER_HOST_ROLE,
         id: indexId ?? handoff.lastIndexId,
         name,
         op: FIXTURE_OPERATION.workerPublication,
@@ -680,12 +684,12 @@ function makeProductionTopologyFixture(options = {}) {
     }) {
       const name = requireIndexName(indexName, FIXTURE_OPERATION.mainThreadIndexOpen);
       const opened = calls.find(
-        (call) => call.host === "main" &&
+        (call) => call.host === MAIN_HOST_ROLE &&
           call.op === FIXTURE_OPERATION.mainThreadIndexOpen &&
           call.name === name,
       );
       const rawOpenCallIndex = calls.findIndex(
-        (call) => call.host === "main" &&
+        (call) => call.host === MAIN_HOST_ROLE &&
           call.op === FIXTURE_OPERATION.indexOpen &&
           call.name === name,
       );
@@ -726,14 +730,14 @@ function makeProductionTopologyFixture(options = {}) {
         `${FIXTURE_OPERATION.mainThreadIndexRead}: main thread must open OPFS index before read`,
       );
       const readCall = calls.find(
-        (call) => call.host === "main" &&
+        (call) => call.host === MAIN_HOST_ROLE &&
           call.id === indexId &&
           call.op === FIXTURE_OPERATION.mainThreadIndexRead &&
           Number(call.offset) === Number(offset) &&
           call.len >= len,
       );
       const rawReadCallIndex = calls.findIndex(
-        (call) => call.host === "main" &&
+        (call) => call.host === MAIN_HOST_ROLE &&
           call.id === indexId &&
           call.op === FIXTURE_OPERATION.indexRead &&
           Number(call.offset) === Number(offset) &&
@@ -781,7 +785,7 @@ function makeProductionTopologyFixture(options = {}) {
         `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file ingest first`,
       );
       calls.push({
-        host: "worker",
+        host: WORKER_HOST_ROLE,
         ingestId: message.ingestId,
         messageType: message.type,
         op: FIXTURE_OPERATION.workerMessageDelivery,
