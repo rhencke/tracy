@@ -25,15 +25,11 @@ const {
 let FIXTURE_SIZE_BYTES;
 let INGEST_WINDOW_BYTES;
 let FRAME_BUDGET_MS;
+let ASYNC_WAIT_TIMEOUT_MS;
+let ASYNC_POLL_INTERVAL_MS;
 let FILE_SELECTION;
 let REQUIRED_TRACE_RENDER_PLANNER_EXPORTS;
 
-// Long enough for the fake worker's setImmediate and promise chain to settle,
-// short enough that a missing handoff fails the acceptance check promptly.
-const ASYNC_WAIT_TIMEOUT_MS = 2000;
-// One-millisecond polls let queued microtasks and timer callbacks run between
-// scenario checks without hiding a stalled production handoff behind sleeps.
-const ASYNC_POLL_INTERVAL_MS = 1;
 const FIRST_EVENTS_BUDGET_MS = 100;
 // The fixture name is deliberately browser-file shaped so the generated
 // file-selection contract can derive the source and index paths under test.
@@ -54,6 +50,8 @@ async function loadGeneratedInteractiveIngestCheckSpec() {
   FIXTURE_SIZE_BYTES = INTERACTIVE_INGEST_CHECK.FIXTURE_SIZE_BYTES;
   INGEST_WINDOW_BYTES = INTERACTIVE_INGEST_CHECK.INGEST_WINDOW_BYTES;
   FRAME_BUDGET_MS = INTERACTIVE_INGEST_CHECK.FRAME_BUDGET_MS;
+  ASYNC_WAIT_TIMEOUT_MS = INTERACTIVE_INGEST_CHECK.ASYNC_WAIT_TIMEOUT_MS;
+  ASYNC_POLL_INTERVAL_MS = INTERACTIVE_INGEST_CHECK.ASYNC_POLL_INTERVAL_MS;
   FILE_SELECTION = RUNTIME_BRIDGE.fileSelection;
   REQUIRED_TRACE_RENDER_PLANNER_EXPORTS = TRACE_RENDERER_REQUIRED_EXPORTS;
 }
