@@ -601,21 +601,40 @@ async function checkWorkerPublicationRequiresWrittenBytes() {
 
 async function checkTypedScenarioChronology() {
   const chronologyMemoryPageCount = 2;
+  const mainThreadHostRole = "main";
+  const earlyIndexName = "indexes/early-open.idx";
+  const earlyIndexNamePointer = 16;
+  const earlyWorkerWriteBytes = new Uint8Array([71]);
+  const earlyWorkerWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const expectedFlushSuccess = 0;
+  const expectedEarlyWriteCount = earlyWorkerWriteBytes.byteLength;
+  const escapedEarlyIndexName = earlyIndexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedEarlyOpenBeforePublicationError =
+    new RegExp(`main-thread index open must wait for worker publication of ${escapedEarlyIndexName}`);
   const mainMemory = new WebAssembly.Memory({ initial: chronologyMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
-  const earlyIndexName = "indexes/early-open.idx";
-  const earlyNameLen = writeString(workerHost.memory, 16, earlyIndexName);
-  const earlyWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](16, earlyNameLen);
+  const earlyNameLen = writeString(workerHost.memory, earlyIndexNamePointer, earlyIndexName);
+  const earlyWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](earlyIndexNamePointer, earlyNameLen);
 
-  new Uint8Array(workerHost.memory.buffer, 96, 1).set([71]);
-  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](earlyWorkerIndexId, 0n, 96, 1), 1);
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](earlyWorkerIndexId), 0);
-  const earlyMainNameLen = writeString(mainMemory, 16, earlyIndexName);
+  new Uint8Array(workerHost.memory.buffer, earlyWorkerWritePointer, earlyWorkerWriteBytes.byteLength)
+    .set(earlyWorkerWriteBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      earlyWorkerIndexId,
+      indexWriteOffset,
+      earlyWorkerWritePointer,
+      earlyWorkerWriteBytes.byteLength,
+    ),
+    expectedEarlyWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](earlyWorkerIndexId), expectedFlushSuccess);
+  const earlyMainNameLen = writeString(mainMemory, earlyIndexNamePointer, earlyIndexName);
 
   assert.throws(
-    () => fixture.mainHost[HOST.OPFS_INDEX_OPEN](16, earlyMainNameLen),
-    /main-thread index open must wait for worker publication of indexes\/early-open\.idx/,
+    () => fixture.mainHost[HOST.OPFS_INDEX_OPEN](earlyIndexNamePointer, earlyMainNameLen),
+    expectedEarlyOpenBeforePublicationError,
     "raw main-thread open should reject flushed but unpublished worker indexes",
   );
   assert.equal(await fixture.scenario.workerPublication({ indexName: earlyIndexName }), earlyWorkerIndexId);
@@ -629,7 +648,7 @@ async function checkTypedScenarioChronology() {
     earlyMainIndexId,
   );
   const typedEarlyOpen = fixture.calls.find(
-    (call) => call.host === "main" &&
+    (call) => call.host === mainThreadHostRole &&
       call.op === OP.mainThreadIndexOpen &&
       call.name === earlyIndexName,
   );
@@ -637,7 +656,7 @@ async function checkTypedScenarioChronology() {
   assert.equal(
     typedEarlyOpen.sourceCallIndex,
     fixture.calls.findIndex(
-      (call) => call.host === "main" &&
+      (call) => call.host === mainThreadHostRole &&
         call.op === OP.indexOpen &&
         call.name === earlyIndexName,
     ),
@@ -645,30 +664,58 @@ async function checkTypedScenarioChronology() {
   );
 
   const readIndexName = "indexes/read-order.idx";
-  const readWorkerNameLen = writeString(workerHost.memory, 48, readIndexName);
-  const readWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](48, readWorkerNameLen);
+  const readIndexNamePointer = 48;
+  const readWorkerWriteBytes = new Uint8Array([72]);
+  const readWorkerWritePointer = 104;
+  const expectedReadWriteCount = readWorkerWriteBytes.byteLength;
+  const rawReadOffset = 0n;
+  const rawReadLength = readWorkerWriteBytes.byteLength;
+  const rawReadDestinationPointer = 120;
+  const expectedRawReadCount = rawReadLength;
+  const readWorkerNameLen = writeString(workerHost.memory, readIndexNamePointer, readIndexName);
+  const readWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](readIndexNamePointer, readWorkerNameLen);
 
-  new Uint8Array(workerHost.memory.buffer, 104, 1).set([72]);
-  assert.equal(workerHost[HOST.OPFS_INDEX_WRITE](readWorkerIndexId, 0n, 104, 1), 1);
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](readWorkerIndexId), 0);
+  new Uint8Array(workerHost.memory.buffer, readWorkerWritePointer, readWorkerWriteBytes.byteLength)
+    .set(readWorkerWriteBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      readWorkerIndexId,
+      indexWriteOffset,
+      readWorkerWritePointer,
+      readWorkerWriteBytes.byteLength,
+    ),
+    expectedReadWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](readWorkerIndexId), expectedFlushSuccess);
   assert.equal(await fixture.scenario.workerPublication({ indexName: readIndexName }), readWorkerIndexId);
   const readMainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName: readIndexName });
 
-  assert.equal(fixture.mainHost[HOST.OPFS_INDEX_READ](readMainIndexId, 0n, 1, 120), 1);
+  assert.equal(
+    fixture.mainHost[HOST.OPFS_INDEX_READ](
+      readMainIndexId,
+      rawReadOffset,
+      rawReadLength,
+      rawReadDestinationPointer,
+    ),
+    expectedRawReadCount,
+  );
   const laterIndexName = "indexes/later-marker.idx";
+  const laterMarkerBytes = new Uint8Array([73]);
+  const observeOnlyReadLength = rawReadLength;
+  const expectedObserveOnlyReadCount = observeOnlyReadLength;
 
   await fixture.scenario.workerPublication({
-    bytes: new Uint8Array([73]),
+    bytes: laterMarkerBytes,
     indexName: laterIndexName,
     workerHost,
   });
   assert.equal(
     fixture.scenario.mainThreadIndexRead({
       indexId: readMainIndexId,
-      len: 1,
+      len: observeOnlyReadLength,
       observeOnly: true,
     }),
-    1,
+    expectedObserveOnlyReadCount,
   );
   const typedOps = fixture.calls.filter((call) => [
     OP.mainThreadIndexRead,
@@ -680,9 +727,18 @@ async function checkTypedScenarioChronology() {
   const laterPublicationIndex = typedOps.findIndex(
     (call) => call.op === OP.workerPublication && call.name === laterIndexName,
   );
+  const findIndexMissingSentinel = -1;
 
-  assert.notEqual(readIndex, -1, "raw main-thread read should record typed metadata at read time");
-  assert.notEqual(laterPublicationIndex, -1, "later publication marker should be present");
+  assert.notEqual(
+    readIndex,
+    findIndexMissingSentinel,
+    "raw main-thread read should record typed metadata at read time",
+  );
+  assert.notEqual(
+    laterPublicationIndex,
+    findIndexMissingSentinel,
+    "later publication marker should be present",
+  );
   assert.ok(
     readIndex < laterPublicationIndex,
     "typed-only filtering should preserve the raw read chronology",
@@ -690,7 +746,7 @@ async function checkTypedScenarioChronology() {
   assert.equal(
     typedOps[readIndex].sourceCallIndex,
     fixture.calls.findIndex(
-      (call) => call.host === "main" &&
+      (call) => call.host === mainThreadHostRole &&
         call.op === OP.indexRead &&
         call.name === readIndexName,
     ),
