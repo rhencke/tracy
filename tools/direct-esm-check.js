@@ -20,6 +20,22 @@ const FORBIDDEN_BUNDLE_PATTERNS = [
 ];
 const LEGACY_BOOTSTRAP_ENTRYPOINT = "bootstrap" + ".js";
 const LEGACY_BOOTSTRAP_PATTERN = new RegExp(`${"bootstrap"}\\.js`);
+const WASM_BOUNDARY_HELPER_NAMES = Object.freeze([
+  "errorMessage",
+  "globalValue",
+  "normalizedPositiveInteger",
+  "normalizedRowCap",
+  "numericSize",
+  "promisingWasmExport",
+  "wasmNumber",
+]);
+const WASM_BOUNDARY_HELPER_CONSUMERS = Object.freeze([
+  "host/index-reader-catalog.mjs",
+  "host/ingest-worker-runtime.mjs",
+  "host/opfs-source.mjs",
+  "host/progressive-trace-renderer.mjs",
+  "host/runtime.mjs",
+]);
 
 function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
@@ -165,6 +181,46 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
     /call \$index_validate_page[\s\S]+call \$index_page_catalog_add_slice_page/,
     "Wasm catalog contract should validate pages before adding slice pages",
   );
+}
+
+function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, shimSource) {
+  const memorySource = readRepoFile("host/memory.mjs");
+
+  assert.match(
+    shimSource,
+    /from "\.\/memory\.mjs"/,
+    "shared Wasm boundary helpers must stay in host/memory.mjs, which shim.mjs already fetches during startup",
+  );
+  assert.match(
+    bootstrapSource,
+    /const shimModulePromise = import\("\.\/host\/shim\.mjs"\)/,
+    "bootstrap should keep shim.mjs on the startup path before runtime imports shared Wasm boundary helpers",
+  );
+
+  for (const name of WASM_BOUNDARY_HELPER_NAMES) {
+    assert.match(
+      memorySource,
+      new RegExp(`export function ${name}\\(`),
+      `host/memory.mjs should own shared Wasm boundary helper ${name}`,
+    );
+  }
+
+  for (const relativePath of WASM_BOUNDARY_HELPER_CONSUMERS) {
+    const source = readRepoFile(relativePath);
+
+    assert.match(
+      source,
+      /from "\.\/memory\.mjs"/,
+      `${relativePath} should reuse shared Wasm boundary helpers from startup-fetched host/memory.mjs`,
+    );
+    for (const name of WASM_BOUNDARY_HELPER_NAMES) {
+      assert.doesNotMatch(
+        source,
+        new RegExp(`function ${name}\\(`),
+        `${relativePath} should not duplicate shared Wasm boundary helper ${name}`,
+      );
+    }
+  }
 }
 
 function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
@@ -793,6 +849,7 @@ function main() {
   const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
   const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
   const runtimeSource = readRepoFile("host/runtime.mjs");
+  const shimSource = readRepoFile("host/shim.mjs");
   const indexFormatSpecSource = readRepoFile("host/index-format-spec.mjs");
   const hostAbiSource = readRepoFile("host/abi.mjs");
   const opfsSourceSource = readRepoFile("host/opfs-source.mjs");
@@ -812,6 +869,7 @@ function main() {
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
   assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
   assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
+  assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, shimSource);
 
   assert.match(
     buildScript,
@@ -1015,6 +1073,7 @@ function main() {
     "Makefile",
     "README.md",
     "host/runtime.mjs",
+    "host/memory.mjs",
     "host/index-format-spec.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/startup-spec.mjs",
@@ -1030,6 +1089,7 @@ function main() {
     "host/ingest-worker-runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/runtime.mjs",
+    "host/memory.mjs",
     "host/index-format-spec.mjs",
     "host/startup-spec.mjs",
     "host/trace-renderer-spec.mjs",
@@ -1044,6 +1104,7 @@ function main() {
     "bootstrap.mjs",
     "worker.js",
     "host/runtime.mjs",
+    "host/memory.mjs",
     "host/index-format-spec.mjs",
     "host/progressive-trace-renderer-loader.mjs",
     "host/startup-spec.mjs",
