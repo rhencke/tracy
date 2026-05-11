@@ -1452,6 +1452,54 @@ async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
   );
 }
 
+async function checkMainThreadIndexSizeRejectsNewerUnpublishedGeneration() {
+  const sizeFreshnessMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: sizeFreshnessMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/size-freshness.idx";
+  const firstGenerationBytes = new Uint8Array([111]);
+  const secondGenerationBytes = new Uint8Array([112, 113]);
+  const secondGenerationWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const expectedSecondGenerationWriteCount = secondGenerationBytes.byteLength;
+  const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedRawSizeFreshnessError = new RegExp(
+    `${OP.indexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
+  );
+  const workerIndexId = await fixture.scenario.workerPublication({
+    bytes: firstGenerationBytes,
+    indexName,
+    workerHost,
+  });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+
+  assert.equal(
+    fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId),
+    BigInt(firstGenerationBytes.byteLength),
+    "raw main-thread size should report the current published worker generation",
+  );
+  new Uint8Array(
+    workerHost.memory.buffer,
+    secondGenerationWritePointer,
+    secondGenerationBytes.byteLength,
+  ).set(secondGenerationBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      secondGenerationWritePointer,
+      secondGenerationBytes.byteLength,
+    ),
+    expectedSecondGenerationWriteCount,
+  );
+  assert.throws(
+    () => fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId),
+    expectedRawSizeFreshnessError,
+    "raw main-thread size should reject newer unpublished worker generations",
+  );
+}
+
 async function checkMainThreadIndexReadRejectsSupersededPublishedGeneration() {
   const readFreshnessMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: readFreshnessMemoryPageCount });
@@ -1585,6 +1633,7 @@ async function main() {
   await checkObserveOnlyIndexOpenRejectsStaleRawOpen();
   await checkRawIndexReadRejectsPreHandoffMainThreadOpen();
   await checkMainThreadIndexReadRejectsNewerUnpublishedGeneration();
+  await checkMainThreadIndexSizeRejectsNewerUnpublishedGeneration();
   await checkMainThreadIndexReadRejectsSupersededPublishedGeneration();
   await checkObservedIndexReadPreservesRawReadCount();
 }

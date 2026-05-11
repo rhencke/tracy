@@ -592,6 +592,13 @@ function makeProductionTopologyFixture(options = {}) {
       [HOST_IMPORT_NAME.OPFS_INDEX_SIZE](indexId) {
         const index = requireIndex(indexId);
 
+        if (host === MAIN_HOST_ROLE) {
+          requireFreshMainThreadIndexRead(
+            indexId,
+            index.name,
+            FIXTURE_OPERATION.indexRead,
+          );
+        }
         return BigInt(durableIndex(index.name).bytes.byteLength);
       },
       [HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr) {
