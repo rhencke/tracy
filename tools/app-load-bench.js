@@ -17,6 +17,10 @@ const RUNTIME_SPEC = JSON.parse(
 );
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
+// Warm samples reuse a page, so let post-ready frame callbacks start their
+// deferred preload requests and then require a short quiet window before reuse.
+const POST_READY_SETTLE_FRAME_COUNT = 2;
+const POST_READY_NETWORK_QUIET_MS = 50;
 const WARM_NAVIGATION_SAMPLE_COUNT = 3;
 const BENIGN_LOADING_FAILURES = Object.freeze([
   Object.freeze({
@@ -671,6 +675,38 @@ function assertNoFailedCoreRequests(requestIds, loadingFailures, requestUrls) {
   }
 }
 
+async function waitForAnimationFrames(cdp, page, frameCount) {
+  await cdp.send("Runtime.evaluate", {
+    awaitPromise: true,
+    expression: `new Promise((resolve) => {
+      let remainingFrames = ${JSON.stringify(frameCount)};
+      const tick = () => {
+        remainingFrames -= 1;
+        if (remainingFrames <= 0) {
+          resolve(true);
+        } else {
+          requestAnimationFrame(tick);
+        }
+      };
+      requestAnimationFrame(tick);
+    })`,
+    returnByValue: true,
+  }, page.sessionId);
+}
+
+async function waitForNetworkQuiet(activeRequestIds, quietMs) {
+  let quietSince = Date.now();
+
+  await waitUntil(() => {
+    if (activeRequestIds.size > 0) {
+      quietSince = Date.now();
+      return false;
+    }
+
+    return Date.now() - quietSince >= quietMs;
+  });
+}
+
 function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackRequestIds) {
   if (!Number.isFinite(wallTimeMs)) {
     return new Set(fallbackRequestIds);
@@ -800,6 +836,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestStartWallMs = new Map();
   const requestTypes = new Map();
   const requestUrls = new Map();
+  const activeRequestIds = new Set();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
   const loadingFailures = new Map();
@@ -810,6 +847,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
+    activeRequestIds.add(event.requestId);
     if (event.frameId !== undefined) {
       requestFrameIds.set(event.requestId, event.frameId);
     }
@@ -837,12 +875,14 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     if (sessionId !== page.sessionId) {
       return;
     }
+    activeRequestIds.delete(event.requestId);
     loadingBytes.set(event.requestId, event.encodedDataLength ?? 0);
   });
   const offLoadingFailed = cdp.on("Network.loadingFailed", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
       return;
     }
+    activeRequestIds.delete(event.requestId);
     loadingFailures.set(event.requestId, {
       canceled: event.canceled === true,
       errorText: event.errorText,
@@ -971,6 +1011,9 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const metrics = result.result.value;
 
   metrics.transferBytes = coreTransferBytes;
+
+  await waitForAnimationFrames(cdp, page, POST_READY_SETTLE_FRAME_COUNT);
+  await waitForNetworkQuiet(activeRequestIds, POST_READY_NETWORK_QUIET_MS);
 
   offRequest();
   offCache();
