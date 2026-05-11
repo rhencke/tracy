@@ -19,6 +19,20 @@ const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
 const FAILED_REQUEST_TRANSFER_BYTES = 0;
 const WARM_NAVIGATION_SAMPLE_COUNT = 3;
+const CORE_TRANSFER_RESOURCE_TYPES = new Set([
+  "Document",
+  "Fetch",
+  "Font",
+  "Image",
+  "Manifest",
+  "Media",
+  "Prefetch",
+  "Script",
+  "SignedExchange",
+  "Stylesheet",
+  "TextTrack",
+  "XHR",
+]);
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
   latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -603,6 +617,16 @@ function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackReq
   return requestIds;
 }
 
+function coreTransferRequestIds(requestIds, requestTypes) {
+  return new Set(
+    [...requestIds].filter((requestId) => {
+      const requestType = requestTypes.get(requestId);
+
+      return requestType === undefined || CORE_TRANSFER_RESOURCE_TYPES.has(requestType);
+    }),
+  );
+}
+
 function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPaths) {
   const paths = new Set(protectedPaths);
   const violations = [];
@@ -684,6 +708,7 @@ async function createPage(cdp) {
 async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
   const requestStartWallMs = new Map();
+  const requestTypes = new Map();
   const requestUrls = new Map();
   const cachedRequestIds = new Set();
   const loadingBytes = new Map();
@@ -694,6 +719,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
+    requestTypes.set(event.requestId, event.type);
     requestUrls.set(event.requestId, event.request.url);
     if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
       requestStartWallMs.set(event.requestId, event.wallTime * 1000);
@@ -764,10 +790,13 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     return status.coreReady === true;
   });
   const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
-  coreRequestIds = requestIdsStartedAtOrBefore(
-    requestStartWallMs,
-    coreReadyWallMs,
-    requestIds,
+  coreRequestIds = coreTransferRequestIds(
+    requestIdsStartedAtOrBefore(
+      requestStartWallMs,
+      coreReadyWallMs,
+      requestIds,
+    ),
+    requestTypes,
   );
   assertNoProtectedStartupBoundaryRequests(
     coreRequestIds,
@@ -999,6 +1028,17 @@ function runSelfTest() {
       new Set(["bootstrap", "renderer"]),
     ),
     new Set(["bootstrap", "renderer"]),
+  );
+  assert.deepEqual(
+    coreTransferRequestIds(
+      new Set(["document", "bootstrap", "favicon", "untyped"]),
+      new Map([
+        ["document", "Document"],
+        ["bootstrap", "Script"],
+        ["favicon", "Other"],
+      ]),
+    ),
+    new Set(["document", "bootstrap", "untyped"]),
   );
   const requestUrls = new Map([
     ["bootstrap", "http://127.0.0.1/bootstrap.mjs"],
@@ -1291,7 +1331,11 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds/,
+    /coreTransferRequestIds\([\s\S]+requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds,[\s\S]+requestTypes/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestTypes\.set\(event\.requestId, event\.type\)/,
   );
   assert.match(
     navigateAndMeasure.toString(),
