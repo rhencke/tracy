@@ -43,6 +43,9 @@ const SELECTED_FILE_HANDLE = 77;
 // A single byte is enough to prove the main thread read from the published
 // worker index while keeping the observation independent of index encoding.
 const MAIN_THREAD_INDEX_READ_PROBE_BYTES = 1;
+// Scenario probes write short OPFS names into scratch memory, not app heap data.
+const MAIN_THREAD_INDEX_NAME_PTR = 16;
+const MAIN_THREAD_INDEX_READ_DEST_PTR = 120;
 
 async function loadGeneratedInteractiveIngestCheckSpec() {
   const { BOOTSTRAP_WASM_MEMORY, INTERACTIVE_INGEST_CHECK, RUNTIME_BRIDGE } =
@@ -103,6 +106,13 @@ function sourcePathForTraceName(traceName) {
 
 function indexPathForTraceName(traceName) {
   return `${FILE_SELECTION.INDEX_PREFIX}${traceName}${FILE_SELECTION.INDEX_SUFFIX}`;
+}
+
+function writeString(memory, ptr, value) {
+  const bytes = new TextEncoder().encode(value);
+
+  new Uint8Array(memory.buffer, ptr, bytes.byteLength).set(bytes);
+  return bytes.byteLength;
 }
 
 const FakeWorker = createFakeWorkerClass();
@@ -763,10 +773,24 @@ async function checkInteractiveIngestGate() {
     ),
     "worker should deliver progress through the typed message-delivery helper",
   );
+  const mainThreadIndexNameLen = writeString(
+    memory,
+    MAIN_THREAD_INDEX_NAME_PTR,
+    indexName,
+  );
+  const rawMainThreadIndexId = opfsHarness.mainHost[abi.HOST_IMPORT_NAME.OPFS_INDEX_OPEN](
+    MAIN_THREAD_INDEX_NAME_PTR,
+    mainThreadIndexNameLen,
+  );
   const mainThreadIndexId = opfsHarness.scenario.mainThreadIndexOpen({
     indexName,
     observeOnly: true,
   });
+  assert.equal(
+    mainThreadIndexId,
+    rawMainThreadIndexId,
+    "observe-only helper should validate the production main-thread OPFS index open",
+  );
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
@@ -803,11 +827,21 @@ async function checkInteractiveIngestGate() {
     ),
     "worker should publish index bytes through the named OPFS index",
   );
-  opfsHarness.scenario.mainThreadIndexRead({
-    indexId: mainThreadIndexId,
-    len: MAIN_THREAD_INDEX_READ_PROBE_BYTES,
-    observeOnly: true,
-  });
+  const rawMainThreadIndexReadCount = opfsHarness.mainHost[abi.HOST_IMPORT_NAME.OPFS_INDEX_READ](
+    mainThreadIndexId,
+    0n,
+    MAIN_THREAD_INDEX_READ_PROBE_BYTES,
+    MAIN_THREAD_INDEX_READ_DEST_PTR,
+  );
+  assert.equal(
+    opfsHarness.scenario.mainThreadIndexRead({
+      indexId: mainThreadIndexId,
+      len: MAIN_THREAD_INDEX_READ_PROBE_BYTES,
+      observeOnly: true,
+    }),
+    rawMainThreadIndexReadCount,
+    "observe-only helper should validate the production main-thread OPFS index read",
+  );
   assert.ok(
     opfsHarness.calls.some(
       (call) => call.host === "main" &&
