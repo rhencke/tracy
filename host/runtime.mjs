@@ -558,6 +558,12 @@ export function createIngestWorkerController(options = {}) {
     return Number.isInteger(message?.ingestId) && message.ingestId === activeIngestId;
   }
 
+  function retireActiveIngest(ingestId) {
+    if (ingestId === activeIngestId) {
+      activeIngestId = null;
+    }
+  }
+
   function handleWorkerMessage(event) {
     const message = event?.data ?? event;
 
@@ -600,9 +606,11 @@ export function createIngestWorkerController(options = {}) {
     } else if (message?.type === INGEST_WORKER_MESSAGE.COMPLETE) {
       status.result = message;
       status.state = WORKER_STATUS.COMPLETE;
+      retireActiveIngest(message.ingestId);
     } else if (message?.type === INGEST_WORKER_MESSAGE.ERROR) {
       status.error = message.message ?? RUNTIME_ERRORS.WORKER_INGEST_FAILED;
       status.state = WORKER_STATUS.ERROR;
+      retireActiveIngest(message.ingestId);
     } else {
       return;
     }
@@ -617,6 +625,7 @@ export function createIngestWorkerController(options = {}) {
 
     status.state = WORKER_STATUS.ERROR;
     status.error = event?.message ?? RUNTIME_ERRORS.INGEST_WORKER_FAILED;
+    activeIngestId = null;
     preloadReject?.(new Error(status.error));
     preloadResolve = null;
     preloadReject = null;

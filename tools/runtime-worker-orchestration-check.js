@@ -1170,6 +1170,76 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   assert.equal(controller.status().result.committedEvents, 7);
   assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
   assert.equal(workerStatus.at(-1).message.ingestId, 2);
+
+  secondWorker.emit("message", {
+    committedPages: 99,
+    fileOffset: 999,
+    ingestId: 2,
+    type: "progress",
+  });
+  secondWorker.emit("message", {
+    end: 999,
+    ingestId: 2,
+    start: 900,
+    type: "covered_range",
+    valid: true,
+  });
+  assert.equal(
+    controller.status().state,
+    "complete",
+    "late same-ingest messages should not revive a completed ingest",
+  );
+  assert.equal(controller.status().progress.fileOffset, 64);
+  assert.equal(controller.status().coveredRange.end, 132);
+  assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
+
+  assert.equal(controller.preload() instanceof Promise, true);
+  assert.equal(secondWorker.posted.at(-1).type, "preload");
+  secondWorker.emit("message", { type: "preloaded" });
+  assert.equal(await controller.preload(), true);
+
+  const errorController = runtime.createIngestWorkerController({
+    Worker: FakeWorker,
+    indexReader: {
+      open(indexName) {
+        indexReaderOpenCalls.push(indexName);
+        return Promise.resolve(true);
+      },
+    },
+    workerUrl: "worker.js",
+  });
+  assert.equal(
+    errorController.start({
+      indexName: "indexes/error.idx",
+      sourceName: "sources/error.json",
+    }),
+    true,
+  );
+  const errorWorker = errorController.worker;
+  errorWorker.emit("message", {
+    ingestId: 1,
+    message: "ingest failed",
+    type: "error",
+  });
+  errorWorker.emit("message", {
+    committedPages: 42,
+    fileOffset: 4242,
+    ingestId: 1,
+    type: "progress",
+  });
+  errorWorker.emit("message", {
+    end: 4242,
+    ingestId: 1,
+    start: 4200,
+    type: "covered_range",
+    valid: true,
+  });
+  assert.equal(errorController.status().state, "error");
+  assert.equal(errorController.status().error, "ingest failed");
+  assert.equal(errorController.status().progress, null);
+  assert.equal(errorController.status().coveredRange, null);
+  assert.equal(errorController.preload() instanceof Promise, true);
+  assert.equal(errorWorker.posted.at(-1).type, "preload");
 }
 
 async function checkFileSelectionSetupErrorsReportStatus() {
