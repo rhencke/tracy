@@ -87,6 +87,8 @@ ifneq ($(MODULE_DOC_GENERATOR),)
 CLEAN_GENERATED_FILES += docs/MODULES.md
 endif
 
+GENERATED_SUPPORT_INPUTS := $(filter-out %-check.js,$(wildcard tools/generated-*.js))
+
 GENERATED_INPUTS := \
 	abi/host.json \
 	abi/layout.json \
@@ -101,6 +103,7 @@ GENERATED_INPUTS := \
 	tools/generate-parser-state-abi.js \
 	tools/generate-runtime-spec.js \
 	tools/generate-wasm-modules-abi.js \
+	$(GENERATED_SUPPORT_INPUTS) \
 	tools/layout-spec.js \
 	tools/wat-parser.js \
 	$(MODULE_DOC_GENERATOR) \
@@ -262,6 +265,7 @@ test: dist check-generated
 	node tools/interactive-ingest-browser-check.js
 	node tools/direct-esm-check.js
 	node tools/service-worker-check.js
+	node tools/generated-file-writer-check.js
 	node tools/dist-budget-check.js --self-test
 	node tools/app-load-bench.js --self-test
 	node tools/lighthouse-ci-check.js

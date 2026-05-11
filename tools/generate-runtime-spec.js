@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
+const { createGeneratedFileWriter } = require("./generated-file-writer.js");
 
 const root = dirname(__dirname);
 const checkOnly = process.argv.includes("--check");
+const { writeIfChanged } = createGeneratedFileWriter({
+  root,
+  checkOnly,
+  command: "node tools/generate-runtime-spec.js",
+});
 const sourcePath = join(root, "abi/runtime.json");
 const spec = JSON.parse(readFileSync(sourcePath, "utf8"));
 const paletteSpec = JSON.parse(readFileSync(join(root, "abi/palette.json"), "utf8"));
@@ -400,31 +406,6 @@ function assertTraceRendererInlineContract() {
       "host/progressive-trace-renderer.mjs inline renderer contract is out of date with abi/runtime.json and abi/layout.json",
     );
   }
-}
-
-function writeIfChanged(path, content) {
-  const absolute = join(root, path);
-  let previous = null;
-
-  try {
-    previous = readFileSync(absolute, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  if (previous === content) {
-    return true;
-  }
-
-  if (checkOnly) {
-    console.error(`${path} is out of date; run node tools/generate-runtime-spec.js`);
-    return false;
-  }
-
-  writeFileSync(absolute, content);
-  return true;
 }
 
 assertDuplicateNumericValuesAudited();
