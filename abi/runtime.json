@@ -37,22 +37,22 @@
     "budgets": {
       "cold": {
         "coreTtiMs": 250,
-        "fcpMs": 1100,
         "fullLoadMs": 1000,
+        "shellPaintMs": 1100,
         "transferBytes": 75000,
         "wasmInstantiateMs": 200
       },
       "warmHttp": {
         "coreTtiMs": 25,
-        "fcpMs": 50,
         "fullLoadMs": 25,
+        "shellPaintMs": 50,
         "transferBytes": 0,
         "wasmInstantiateMs": 25
       },
       "warmSw": {
         "coreTtiMs": 25,
-        "fcpMs": 45,
         "fullLoadMs": 25,
+        "shellPaintMs": 45,
         "transferBytes": 0,
         "wasmInstantiateMs": 15
       }

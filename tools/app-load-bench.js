@@ -856,12 +856,8 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
-      const fcp = performance.getEntriesByName("first-contentful-paint")[0];
       const shellPaintEntries = performance.getEntriesByName("tracy.app.shell.paint");
       const shellPaint = shellPaintEntries.at(-1)?.startTime;
-      if (fcp === undefined) {
-        throw new Error("missing first-contentful-paint performance entry");
-      }
       if (shellPaint === undefined) {
         throw new Error("missing shell paint performance entry");
       }
@@ -871,7 +867,6 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
         coreTtiMs: coreReady - coreStart,
-        fcpMs: fcp.startTime,
         fullLoadMs: appLoad,
         shellPaintMs: shellPaint,
         wasmInstantiateMs: wasm,
@@ -970,33 +965,33 @@ function runSelfTest() {
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
       coreTtiMs: 1,
-      fcpMs: 1,
       fullLoadMs: 2,
+      shellPaintMs: 1,
       transferBytes: 0,
       wasmInstantiateMs: 3,
     }, {
       coreTtiMs: 1,
-      fcpMs: 1,
       fullLoadMs: 2,
+      shellPaintMs: 1,
       transferBytes: 0,
       wasmInstantiateMs: 3,
     }),
   );
   assert.throws(
-    () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
-    /fixture fcpMs 2.0 > 1/,
+    () => assertMeasuredBudget("fixture", { shellPaintMs: 2 }, { shellPaintMs: 1 }),
+    /fixture shellPaintMs 2.0 > 1/,
   );
   assert.deepEqual(
     medianMetrics([
-      { fcpMs: 53, fullLoadMs: 21, transferBytes: 0 },
-      { fcpMs: 42, fullLoadMs: 27, transferBytes: 0 },
-      { fcpMs: 45, fullLoadMs: 24, transferBytes: 0 },
+      { shellPaintMs: 53, fullLoadMs: 21, transferBytes: 0 },
+      { shellPaintMs: 42, fullLoadMs: 27, transferBytes: 0 },
+      { shellPaintMs: 45, fullLoadMs: 24, transferBytes: 0 },
     ]),
-    { fcpMs: 45, fullLoadMs: 24, transferBytes: 0 },
+    { shellPaintMs: 45, fullLoadMs: 24, transferBytes: 0 },
   );
   assert.throws(
-    () => medianMetrics([{ fcpMs: Number.NaN }]),
-    /app-load metric samples must include finite fcpMs/,
+    () => medianMetrics([{ shellPaintMs: Number.NaN }]),
+    /app-load metric samples must include finite shellPaintMs/,
   );
   const transferRequestIds = new Set(["bootstrap", "renderer", "cached"]);
   const cachedTransferRequestIds = new Set(["cached"]);
@@ -1426,18 +1421,8 @@ function runSelfTest() {
     navigateAndMeasure.toString(),
     /shellPaintMs: shellPaint/,
   );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /performance\.getEntriesByName\("first-contentful-paint"\)\[0\]/,
-  );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /missing first-contentful-paint performance entry/,
-  );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /fcpMs: fcp\.startTime/,
-  );
+  assert.doesNotMatch(navigateAndMeasure.toString(), /first-contentful-paint/);
+  assert.doesNotMatch(navigateAndMeasure.toString(), /fcpMs:/);
   assert.doesNotMatch(
     navigateAndMeasure.toString(),
     /fcpMs: fcp\?\.startTime \?\? shellPaint/,
