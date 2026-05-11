@@ -4,7 +4,11 @@ const firstFramePromise = new Promise((resolve) => requestAnimationFrame(resolve
 const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
 const warmProgressiveTraceRendererPromise = serviceWorkerController === null ? null : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
 const importProgressiveTraceRenderer = () => warmProgressiveTraceRendererPromise ?? import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
-const importWasmModules = () => import(`./host/${RUNTIME_URLS.WASM_MODULES_URL.replace(/^\.\//, "")}`);
+const coreReadyPromise = new Promise((resolve) => {
+  if (performance.getEntriesByName(PERFORMANCE_MARKS.coreReady).length > 0 || typeof globalThis.addEventListener !== "function") resolve();
+  else globalThis.addEventListener(PERFORMANCE_MARKS.coreReady, resolve, { once: true });
+});
+const importWasmModules = async () => { await coreReadyPromise; return import(`./host/${RUNTIME_URLS.WASM_MODULES_URL.replace(/^\.\//, "")}`); };
 const shimModulePromise = import("./host/shim.mjs"), runtimeModulePromise = import("./host/runtime.mjs");
 const instantiateWasmModuleForThread = async (id, thread, imports, options = {}) => {
   if (id !== "app" || thread !== "main") {

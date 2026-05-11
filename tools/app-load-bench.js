@@ -1160,7 +1160,8 @@ function runSelfTest() {
   const bootstrapStartOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart)");
   const bootstrapShellPaintOffset = bootstrap.indexOf("performance?.mark?.(PERFORMANCE_MARKS.appShellPaint)");
   const bootstrapFirstFramePromiseOffset = bootstrap.indexOf("const firstFramePromise");
-  const bootstrapCoreReadyOffset = bootstrap.indexOf("PERFORMANCE_MARKS.coreReady");
+  const bootstrapCoreReadyPromiseOffset = bootstrap.indexOf("const coreReadyPromise");
+  const bootstrapWasmModuleImportOffset = bootstrap.indexOf("const importWasmModules");
   const bootstrapRendererPreloadOffset = bootstrap.indexOf(
     "const importProgressiveTraceRenderer = () =>",
   );
@@ -1195,7 +1196,10 @@ function runSelfTest() {
   assert.notEqual(bootstrapStartOffset, -1);
   assert.notEqual(bootstrapShellPaintOffset, -1);
   assert.notEqual(bootstrapFirstFramePromiseOffset, -1);
-  assert.equal(bootstrapCoreReadyOffset, -1);
+  assert.notEqual(bootstrapCoreReadyPromiseOffset, -1);
+  assert.notEqual(bootstrapWasmModuleImportOffset, -1);
+  assert.doesNotMatch(bootstrap, /markPerformance\(PERFORMANCE_MARKS\.coreReady/);
+  assert.doesNotMatch(bootstrap, /performance\??\.mark\??\.\(PERFORMANCE_MARKS\.coreReady/);
   assert.ok(
     bootstrapStartOffset < bootstrapShellPaintOffset,
     "bootstrap should mark app shell paint after startup begins",
@@ -1207,6 +1211,10 @@ function runSelfTest() {
   );
   assert.notEqual(bootstrapRendererPreloadOffset, -1);
   assert.notEqual(bootstrapRuntimeImportOffset, -1);
+  assert.ok(
+    bootstrapCoreReadyPromiseOffset < bootstrapWasmModuleImportOffset,
+    "bootstrap should prepare the core-ready gate before broad wasm graph imports can run",
+  );
   assert.notEqual(runtimeCoreStartOffset, -1);
   assert.notEqual(runtimeWasmStartOffset, -1);
   assert.notEqual(defaultRendererPreloadOffset, -1);
@@ -1294,6 +1302,13 @@ function runSelfTest() {
   assert.doesNotMatch(bootstrap, /setTimeout/);
   assert.doesNotMatch(bootstrap, /setTimeout\(register/);
   assert.doesNotMatch(startupSpec, /BOOTSTRAP_TIMING/);
+  assert.match(bootstrap, /const coreReadyPromise = new Promise/);
+  assert.match(bootstrap, /PERFORMANCE_MARKS\.coreReady/);
+  assert.match(
+    bootstrap,
+    /globalThis\.addEventListener\(PERFORMANCE_MARKS\.coreReady, resolve, \{ once: true \}\)/,
+  );
+  assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.coreReady\)\)/);
   assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.doesNotMatch(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);
@@ -1303,7 +1318,15 @@ function runSelfTest() {
   );
   assert.match(
     bootstrap,
-    /const importWasmModules = \(\) => import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+    /const importWasmModules = async \(\) =>/,
+  );
+  assert.match(
+    bootstrap,
+    /await coreReadyPromise/,
+  );
+  assert.match(
+    bootstrap,
+    /return import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
   );
   assert.match(
     bootstrap,

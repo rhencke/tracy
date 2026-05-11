@@ -865,6 +865,13 @@ function main() {
   assert.doesNotMatch(bootstrapSource, /SERVICE_WORKER_READY_/);
   assert.doesNotMatch(bootstrapSource, /setTimeout/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(register/);
+  assert.match(bootstrapSource, /const coreReadyPromise = new Promise/);
+  assert.match(bootstrapSource, /PERFORMANCE_MARKS\.coreReady/);
+  assert.match(
+    bootstrapSource,
+    /globalThis\.addEventListener\(PERFORMANCE_MARKS\.coreReady, resolve, \{ once: true \}\)/,
+  );
+  assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.coreReady\)\)/);
   assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(
     bootstrapSource,
@@ -880,7 +887,15 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /const importWasmModules = \(\) => import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+    /const importWasmModules = async \(\) =>/,
+  );
+  assert.match(
+    bootstrapSource,
+    /await coreReadyPromise/,
+  );
+  assert.match(
+    bootstrapSource,
+    /return import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
   );
   assert.match(
     bootstrapSource,

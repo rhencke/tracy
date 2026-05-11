@@ -1102,6 +1102,7 @@ async function loadApp(memory, host, options = {}) {
     options,
   );
   markPerformance(PERFORMANCE_MARKS.coreReady, options);
+  globalThis.dispatchEvent?.(new Event(PERFORMANCE_MARKS.coreReady));
 
   const deferredRendererReadyPromise =
     progressiveTraceRenderer === null
