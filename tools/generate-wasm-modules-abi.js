@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
+const { createGeneratedFileWriter } = require("./generated-file-writer.js");
 
 const root = dirname(__dirname);
 const checkOnly = process.argv.includes("--check");
+const { writeIfChanged } = createGeneratedFileWriter({
+  root,
+  checkOnly,
+  command: "node tools/generate-wasm-modules-abi.js",
+});
 const sourcePath = join(root, "abi/wasm-modules.json");
 const source = JSON.parse(readFileSync(sourcePath, "utf8"));
 const modules = source.modules;
@@ -360,31 +366,6 @@ export function wasmModuleIdForPath(value) {
   return null;
 }`,
   ].join("\n")}\n`;
-}
-
-function writeIfChanged(path, content) {
-  const absolute = join(root, path);
-  let previous = null;
-
-  try {
-    previous = readFileSync(absolute, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  if (previous === content) {
-    return true;
-  }
-
-  if (checkOnly) {
-    console.error(`${path} is out of date; run node tools/generate-wasm-modules-abi.js`);
-    return false;
-  }
-
-  writeFileSync(absolute, content);
-  return true;
 }
 
 const ok = writeIfChanged("host/wasm-modules.mjs", renderWasmModulesModule());

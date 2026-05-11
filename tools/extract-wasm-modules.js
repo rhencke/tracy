@@ -4,10 +4,16 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { assembleWatFile, collectWatInputs } = require("./assemble-wat.js");
+const { createGeneratedFileWriter } = require("./generated-file-writer.js");
 const { TokenReader, WatParseError, skipWatList } = require("./wat-parser.js");
 
 const root = path.dirname(__dirname);
 const checkOnly = process.argv.includes("--check");
+const { writeIfChangedAsync } = createGeneratedFileWriter({
+  root,
+  checkOnly,
+  staleMessage: (relativePath) => `${relativePath} is out of date`,
+});
 const watRoot = path.join(root, "wat");
 const outputPath = path.join(root, "abi/wasm-modules.json");
 const validThreads = new Set(["main", "worker", "shared"]);
@@ -213,32 +219,13 @@ function renderJson(value) {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
-async function writeIfChanged(filePath, content) {
-  let previous = null;
-
-  try {
-    previous = await fs.readFile(filePath, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  if (previous === content) {
-    return false;
-  }
-
-  if (checkOnly) {
-    throw new Error(`${path.relative(root, filePath)} is out of date`);
-  }
-
-  await fs.writeFile(filePath, content);
-  return true;
-}
-
 async function main() {
   const manifest = await extractWasmModules();
-  await writeIfChanged(outputPath, renderJson(manifest));
+  const ok = await writeIfChangedAsync(outputPath, renderJson(manifest));
+
+  if (!ok) {
+    process.exitCode = 1;
+  }
 }
 
 if (require.main === module) {

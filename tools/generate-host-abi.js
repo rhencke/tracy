@@ -1,10 +1,16 @@
 #!/usr/bin/env node
 
-const { readFileSync, writeFileSync } = require("node:fs");
+const { readFileSync } = require("node:fs");
 const { dirname, join } = require("node:path");
+const { createGeneratedFileWriter } = require("./generated-file-writer.js");
 
 const root = dirname(__dirname);
 const checkOnly = process.argv.includes("--check");
+const { updateMarkedFile, writeIfChanged } = createGeneratedFileWriter({
+  root,
+  checkOnly,
+  command: "node tools/generate-host-abi.js",
+});
 const sourcePath = join(root, "abi/host.json");
 const source = JSON.parse(readFileSync(sourcePath, "utf8"));
 const constants = source.constants;
@@ -110,18 +116,6 @@ function renderHostAbiModule() {
 function renderWatBlock(setName) {
   const names = source.watImportSets[setName];
   return names.map((name) => watImport(importsByName.get(name))).join("\n");
-}
-
-function replaceGeneratedBlock(text, start, end, body) {
-  const startIndex = text.indexOf(start);
-  const endIndex = text.indexOf(end);
-
-  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
-    throw new Error(`missing generated block ${start} ${end}`);
-  }
-
-  const bodyStart = startIndex + start.length;
-  return `${text.slice(0, bodyStart)}\n${body}\n${text.slice(endIndex)}`;
 }
 
 function renderDocs() {
@@ -256,42 +250,6 @@ function renderMemorySection() {
   );
 
   return lines.join("\n");
-}
-
-function writeIfChanged(path, content) {
-  const absolute = join(root, path);
-  let previous = null;
-
-  try {
-    previous = readFileSync(absolute, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  if (previous === content) {
-    return true;
-  }
-
-  if (checkOnly) {
-    console.error(`${path} is out of date; run node tools/generate-host-abi.js`);
-    return false;
-  }
-
-  writeFileSync(absolute, content);
-  return true;
-}
-
-function updateMarkedFile(path, replacements) {
-  const absolute = join(root, path);
-  let text = readFileSync(absolute, "utf8");
-
-  for (const replacement of replacements) {
-    text = replaceGeneratedBlock(text, replacement.start, replacement.end, replacement.body);
-  }
-
-  return writeIfChanged(path, text);
 }
 
 const ok = [
