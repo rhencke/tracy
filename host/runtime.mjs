@@ -202,6 +202,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     state: READER_STATUS.IDLE,
   };
   let operationQueue = Promise.resolve();
+  let queuedOpenForceReopen = false;
   let queuedOpenName = null;
   let queuedOpenPromise = null;
 
@@ -212,13 +213,21 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     return nextOperation;
   }
 
-  function queueOpen(indexName) {
-    if (queuedOpenPromise !== null && queuedOpenName === indexName) {
+  function queueOpen(indexName, { forceReopen = false } = {}) {
+    if (
+      queuedOpenPromise !== null &&
+      queuedOpenName === indexName &&
+      queuedOpenForceReopen === forceReopen
+    ) {
       return queuedOpenPromise;
     }
 
+    queuedOpenForceReopen = forceReopen;
     queuedOpenName = indexName;
-    queuedOpenPromise = runExclusive(() => open(indexName)).finally(() => {
+    queuedOpenPromise = runExclusive(() =>
+      open(indexName, { forceReopen })
+    ).finally(() => {
+      queuedOpenForceReopen = false;
       queuedOpenName = null;
       queuedOpenPromise = null;
     });
@@ -370,11 +379,12 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
     return rebuilt.rebuilt;
   }
 
-  async function open(indexName) {
+  async function open(indexName, { forceReopen = false } = {}) {
     if (typeof indexName !== "string" || indexName.length === 0) {
       return false;
     }
     if (
+      !forceReopen &&
       readerState.state === READER_STATUS.READY &&
       readerState.indexName === indexName
     ) {
@@ -409,6 +419,7 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
 
     readerState.error = null;
     readerState.catalogFull = false;
+    readerState.catalogPageCount = null;
     readerState.indexName = indexName;
     readerState.state = READER_STATUS.OPENING;
     readerState.openPromise = (async () => {
@@ -464,8 +475,8 @@ export function createMainThreadIndexReaderController(memory, host, options = {}
       await loadSliceCatalogRebuild();
       return true;
     },
-    async open(indexName) {
-      return queueOpen(indexName);
+    async open(indexName, openOptions = {}) {
+      return queueOpen(indexName, openOptions);
     },
     async queryRange(
       trackId,
@@ -573,11 +584,13 @@ export function createIngestWorkerController(options = {}) {
       status.coveredRange = message;
       status.state = WORKER_STATUS.RUNNING;
       if (typeof status.ingest?.indexName === "string") {
-        indexReader?.open(status.ingest.indexName)?.catch((error) => {
-          status.error = errorMessage(error);
-          status.state = WORKER_STATUS.ERROR;
-          notifyWorkerStatus(status, options, null);
-        });
+        indexReader
+          ?.open(status.ingest.indexName, { forceReopen: true })
+          ?.catch((error) => {
+            status.error = errorMessage(error);
+            status.state = WORKER_STATUS.ERROR;
+            notifyWorkerStatus(status, options, null);
+          });
       }
     } else if (message?.type === INGEST_WORKER_MESSAGE.COMPLETE) {
       status.result = message;

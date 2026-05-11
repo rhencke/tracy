@@ -794,6 +794,9 @@ function makeProductionTopologyFixture(options = {}) {
         handoff.flushed,
         `worker publication requires worker OPFS index ${name} to be flushed`,
       );
+      if (handoff.published && handoff.publicationCallIndex !== null) {
+        return indexId ?? handoff.lastIndexId;
+      }
       handoff.published = true;
       handoff.publicationCallIndex = calls.length;
       calls.push({
