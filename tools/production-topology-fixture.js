@@ -252,6 +252,12 @@ function makeProductionTopologyFixture(options = {}) {
     return requireWorkerPublishedIndex(name, FIXTURE_OPERATION.workerMessageDelivery);
   }
 
+  function prepareWorkerIndexWriteGeneration(handoff) {
+    if (handoff.flushed || handoff.published) {
+      handoff.bytesWritten = 0;
+    }
+  }
+
   function canRecordMainThreadIndexOpen(name) {
     const handoff = workerIndexHandoffs.get(name);
 
@@ -510,6 +516,7 @@ function makeProductionTopologyFixture(options = {}) {
         if (host === WORKER_HOST_ROLE) {
           const handoff = workerIndexHandoff(index.name);
 
+          prepareWorkerIndexWriteGeneration(handoff);
           handoff.flushed = false;
           handoff.bytesWritten += len;
           handoff.lastIndexId = indexId;

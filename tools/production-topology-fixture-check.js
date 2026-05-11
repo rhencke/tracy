@@ -722,6 +722,62 @@ async function checkWorkerPublicationRequiresWrittenBytes() {
   );
 }
 
+async function checkWorkerPublicationRequiresCurrentGenerationBytes() {
+  const workerPublicationMemoryPageCount = 2;
+  const workerIndexName = "indexes/zero-byte-republish.idx";
+  const workerIndexNamePointer = 16;
+  const indexWriteOffset = 0n;
+  const firstWriteBytes = new Uint8Array([67, 68]);
+  const firstWritePointer = 96;
+  const zeroByteWritePointer = 100;
+  const zeroByteWriteLength = 0;
+  const expectedFirstWriteCount = firstWriteBytes.byteLength;
+  const expectedZeroByteWriteCount = zeroByteWriteLength;
+  const expectedFlushResult = 0;
+  const escapedWorkerIndexName = workerIndexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedPublicationWithoutCurrentBytesError = new RegExp(
+    `worker publication requires worker OPFS index ${escapedWorkerIndexName} to contain bytes`,
+  );
+  const mainMemory = new WebAssembly.Memory({ initial: workerPublicationMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const nameLen = writeString(workerHost.memory, workerIndexNamePointer, workerIndexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](
+    workerIndexNamePointer,
+    nameLen,
+  );
+
+  new Uint8Array(workerHost.memory.buffer, firstWritePointer, firstWriteBytes.byteLength)
+    .set(firstWriteBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      firstWritePointer,
+      firstWriteBytes.byteLength,
+    ),
+    expectedFirstWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
+  assert.equal(await fixture.scenario.workerPublication({ indexName: workerIndexName }), workerIndexId);
+
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      zeroByteWritePointer,
+      zeroByteWriteLength,
+    ),
+    expectedZeroByteWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
+  await assert.rejects(
+    () => fixture.scenario.workerPublication({ indexName: workerIndexName }),
+    expectedPublicationWithoutCurrentBytesError,
+    "zero-length writes after publication should not reuse bytes from an older generation",
+  );
+}
+
 async function checkTypedScenarioChronology() {
   const chronologyMemoryPageCount = 2;
   const earlyIndexName = "indexes/early-open.idx";
@@ -1079,6 +1135,7 @@ async function main() {
   await checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex();
   await checkWorkerHandoffGenerationReset();
   await checkWorkerPublicationRequiresWrittenBytes();
+  await checkWorkerPublicationRequiresCurrentGenerationBytes();
   await checkTypedScenarioChronology();
   await checkObserveOnlyIndexOpenRejectsStaleRawOpen();
   await checkMainThreadIndexReadRejectsNewerUnpublishedGeneration();
