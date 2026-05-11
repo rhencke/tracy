@@ -205,6 +205,7 @@ function makeProductionTopologyFixture(options = {}) {
         flushed: false,
         lastIndexId: null,
         published: false,
+        publicationCallIndex: null,
       };
       workerIndexHandoffs.set(name, handoff);
     }
@@ -387,6 +388,7 @@ function makeProductionTopologyFixture(options = {}) {
             flushed: false,
             lastIndexId: indexId,
             published: false,
+            publicationCallIndex: null,
           });
         }
         calls.push({ host, id: indexId, name, op: FIXTURE_OPERATION.indexCreate });
@@ -669,6 +671,7 @@ function makeProductionTopologyFixture(options = {}) {
         `worker publication requires worker OPFS index ${name} to be flushed`,
       );
       handoff.published = true;
+      handoff.publicationCallIndex = calls.length;
       calls.push({
         host: WORKER_HOST_ROLE,
         id: indexId ?? handoff.lastIndexId,
@@ -683,19 +686,21 @@ function makeProductionTopologyFixture(options = {}) {
       observeOnly = false,
     }) {
       const name = requireIndexName(indexName, FIXTURE_OPERATION.mainThreadIndexOpen);
+      const handoff = requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
+      const rawOpenCallNotFoundIndex = -1;
       const opened = calls.find(
         (call) => call.host === MAIN_HOST_ROLE &&
           call.op === FIXTURE_OPERATION.mainThreadIndexOpen &&
-          call.name === name,
+          call.name === name &&
+          call.sourceCallIndex > handoff.publicationCallIndex,
       );
       const rawOpenCallIndex = calls.findIndex(
-        (call) => call.host === MAIN_HOST_ROLE &&
+        (call, callIndex) => call.host === MAIN_HOST_ROLE &&
           call.op === FIXTURE_OPERATION.indexOpen &&
-          call.name === name,
+          call.name === name &&
+          callIndex > handoff.publicationCallIndex,
       );
-      const rawOpenCallNotFoundIndex = -1;
 
-      requireWorkerPublishedIndex(name, FIXTURE_OPERATION.mainThreadIndexOpen);
       if (opened !== undefined) {
         mainThreadIndexOpens.set(opened.id, name);
         return opened.id;

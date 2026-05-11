@@ -768,6 +768,70 @@ async function checkTypedScenarioChronology() {
   );
 }
 
+async function checkObserveOnlyIndexOpenRejectsStaleRawOpen() {
+  const staleOpenMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: staleOpenMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/reused.idx";
+  const indexNamePointer = 16;
+  const workerWriteBytes = new Uint8Array([91]);
+  const workerWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const expectedWorkerWriteCount = workerWriteBytes.byteLength;
+  const expectedFlushSuccess = 0;
+  const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedObserveOnlyStaleOpenError = new RegExp(
+    `${OP.mainThreadIndexOpen}: production must open OPFS index ${escapedIndexName}`,
+  );
+  const mainNameLen = writeString(mainMemory, indexNamePointer, indexName);
+  const staleMainIndexId = fixture.mainHost[HOST.OPFS_INDEX_CREATE](
+    indexNamePointer,
+    mainNameLen,
+  );
+  const staleOpenIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](
+    indexNamePointer,
+    mainNameLen,
+  );
+  const workerNameLen = writeString(workerHost.memory, indexNamePointer, indexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](indexNamePointer, workerNameLen);
+
+  assert.notEqual(
+    staleOpenIndexId,
+    staleMainIndexId,
+    "raw main-thread open before worker publication should create a distinct stale id",
+  );
+  new Uint8Array(workerHost.memory.buffer, workerWritePointer, workerWriteBytes.byteLength)
+    .set(workerWriteBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      workerWritePointer,
+      workerWriteBytes.byteLength,
+    ),
+    expectedWorkerWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushSuccess);
+  assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
+  assert.throws(
+    () => fixture.scenario.mainThreadIndexOpen({ indexName, observeOnly: true }),
+    expectedObserveOnlyStaleOpenError,
+    "observe-only open should reject raw main-thread opens from before worker publication",
+  );
+
+  const freshOpenIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](
+    indexNamePointer,
+    mainNameLen,
+  );
+
+  assert.equal(
+    fixture.scenario.mainThreadIndexOpen({ indexName, observeOnly: true }),
+    freshOpenIndexId,
+    "observe-only open should accept raw main-thread opens after worker publication",
+  );
+}
+
 async function checkObservedIndexReadPreservesRawReadCount() {
   const observedReadMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: observedReadMemoryPageCount });
@@ -837,6 +901,7 @@ async function main() {
   await checkWorkerHandoffGenerationReset();
   await checkWorkerPublicationRequiresWrittenBytes();
   await checkTypedScenarioChronology();
+  await checkObserveOnlyIndexOpenRejectsStaleRawOpen();
   await checkObservedIndexReadPreservesRawReadCount();
 }
 
