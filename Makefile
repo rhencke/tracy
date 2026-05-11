@@ -254,6 +254,7 @@ check-generated: generated
 
 test: dist check-generated
 	bash tools/check-bootstrap-lines.sh
+	node tools/check-runner-check.js
 	node tools/generate-runtime-spec.js --check
 	node tools/generate-palette-spec.js --check
 	node tools/wasm-modules-check.js
