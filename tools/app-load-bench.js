@@ -808,9 +808,13 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       const fcp = performance.getEntriesByName("first-contentful-paint")[0];
-      const shellPaint = performance.getEntriesByName("tracy.app.shell.paint")[0]?.startTime;
-      if (fcp === undefined && shellPaint === undefined) {
-        throw new Error("missing first visible paint performance entry");
+      const shellPaintEntries = performance.getEntriesByName("tracy.app.shell.paint");
+      const shellPaint = shellPaintEntries.at(-1)?.startTime;
+      if (fcp === undefined) {
+        throw new Error("missing first-contentful-paint performance entry");
+      }
+      if (shellPaint === undefined) {
+        throw new Error("missing shell paint performance entry");
       }
       const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
       const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
@@ -818,7 +822,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
       return {
         coreTtiMs: coreReady - coreStart,
-        fcpMs: fcp?.startTime ?? shellPaint,
+        fcpMs: fcp.startTime,
         fullLoadMs: appLoad,
         shellPaintMs: shellPaint,
         wasmInstantiateMs: wasm,
@@ -1323,6 +1327,10 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
+    /shellPaintEntries\.at\(-1\)\?\.startTime/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
     /shellPaintMs: shellPaint/,
   );
   assert.match(
@@ -1331,9 +1339,13 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /missing first visible paint performance entry/,
+    /missing first-contentful-paint performance entry/,
   );
   assert.match(
+    navigateAndMeasure.toString(),
+    /fcpMs: fcp\.startTime/,
+  );
+  assert.doesNotMatch(
     navigateAndMeasure.toString(),
     /fcpMs: fcp\?\.startTime \?\? shellPaint/,
   );
