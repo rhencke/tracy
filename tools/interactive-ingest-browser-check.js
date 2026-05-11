@@ -14,10 +14,11 @@ const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
   fs.readFileSync(repoPath("abi/runtime.json"), "utf8"),
 );
-const { FIXTURE_SIZE_BYTES, FRAME_BUDGET_MS } =
+const { FIXTURE_SIZE_BYTES, FRAME_BUDGET_MS, FILE_CHOOSER_TIMEOUT_MS } =
   RUNTIME_SPEC.interactiveIngestCheck;
 const TRACE_SIZE_BYTES = FIXTURE_SIZE_BYTES.value;
 const FRAME_BUDGET = FRAME_BUDGET_MS.value;
+const FILE_CHOOSER_TIMEOUT = FILE_CHOOSER_TIMEOUT_MS.value;
 const FIRST_EVENTS_BUDGET_MS = 100;
 const BROWSER_TIMEOUT_MS = 15_000;
 
@@ -406,7 +407,7 @@ async function checkBrowserInteractiveIngest() {
     const box = await canvas.boundingBox();
     assert.notEqual(box, null, "trace canvas should be visible");
 
-    const chooserPromise = page.waitForFileChooser({ timeout: 1000 });
+    const chooserPromise = page.waitForFileChooser({ timeout: FILE_CHOOSER_TIMEOUT });
     const clickStartedAt = await page.evaluate(() => performance.now());
     await page.mouse.click(box.x + 12, box.y + 12);
     const chooser = await chooserPromise;

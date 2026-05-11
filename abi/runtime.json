@@ -64,9 +64,10 @@
         "numericValue": 1000,
         "paths": [
           "appLoadBench.budgets.cold.fullLoadMs",
+          "interactiveIngestCheck.FILE_CHOOSER_TIMEOUT_MS",
           "traceRenderer.query.DEFAULT_TRACE_QUERY_WINDOW"
         ],
-        "description": "Cold full-load readiness and the default renderer query time window are intentionally distinct budgets that happen to share a value."
+        "description": "Cold full-load readiness, the browser ingest file chooser open wait, and the default renderer query time window are intentionally distinct budgets that happen to share a value."
       },
       {
         "numericValue": 25,
@@ -247,6 +248,10 @@
     "FRAME_BUDGET_MS": {
       "value": 16.67,
       "description": "60 fps pan/zoom frame budget enforced by the interactive ingest verification gate."
+    },
+    "FILE_CHOOSER_TIMEOUT_MS": {
+      "value": 1000,
+      "description": "Maximum time the browser interactive ingest verification gate waits for the native file chooser after clicking the trace canvas."
     },
     "ASYNC_WAIT_TIMEOUT_MS": {
       "value": 2000,

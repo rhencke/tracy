@@ -6,6 +6,8 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
+const { runCheck } = require("./check-runner.js");
+
 const ROOT_DIR = path.resolve(__dirname, "..");
 
 function readRepoFile(relativePath) {
@@ -93,9 +95,4 @@ function main() {
   }
 }
 
-try {
-  main();
-} catch (error) {
-  console.error(error.stack || error.message || String(error));
-  process.exitCode = 1;
-}
+runCheck(main);

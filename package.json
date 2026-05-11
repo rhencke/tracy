@@ -19,6 +19,7 @@
     "test:wasm-modules-abi": "node tools/extract-wasm-modules.js --check",
     "test:wasm-modules-loader": "node tools/generate-wasm-modules-abi.js --check",
     "test:bootstrap-lines": "bash tools/check-bootstrap-lines.sh",
+    "test:check-runner": "node tools/check-runner-check.js",
     "test:wasm-modules": "node tools/wasm-modules-check.js",
     "test:host-shim": "node tools/host-shim-check.js",
     "test:ingest-worker-runtime": "node tools/ingest-worker-runtime-check.js",
