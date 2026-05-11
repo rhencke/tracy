@@ -773,7 +773,7 @@ async function checkRuntimeOrchestratesWorker() {
   await harness.runFrame(122);
   await harness.runFrame(123);
   await importRepoModule("host/trace-renderer-spec.mjs");
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
     {
@@ -938,7 +938,7 @@ async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
   );
 
   resolveIndexPreload(true);
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
 
   assert.deepEqual(
     preloadCalls,
@@ -1012,7 +1012,7 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   assert.equal(callbacks.length, 1);
 
   callbacks[0]({ file: selectedFile, handle: selectedFileHandle });
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
 
   const worker = controller.worker;
   assert.deepEqual(worker.posted, [
@@ -1028,7 +1028,7 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   ]);
 
   resolveIndexPreload(true);
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
 
   assert.deepEqual(
     worker.posted.map((message) => message.type),
@@ -3391,7 +3391,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
     },
   });
   await importRepoModule("host/trace-renderer-spec.mjs");
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
     {
