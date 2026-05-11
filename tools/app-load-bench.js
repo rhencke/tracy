@@ -627,6 +627,18 @@ function coreTransferRequestIds(requestIds, requestTypes) {
   );
 }
 
+function navigationFrameRequestIds(requestIds, requestFrameIds, navigationFrameId) {
+  if (navigationFrameId === undefined) {
+    return new Set(requestIds);
+  }
+
+  return new Set(
+    [...requestIds].filter(
+      (requestId) => requestFrameIds.get(requestId) === navigationFrameId,
+    ),
+  );
+}
+
 function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPaths) {
   const paths = new Set(protectedPaths);
   const violations = [];
@@ -707,6 +719,7 @@ async function createPage(cdp) {
 
 async function navigateAndMeasure(cdp, page, url, options = {}) {
   const requestIds = new Set();
+  const requestFrameIds = new Map();
   const requestStartWallMs = new Map();
   const requestTypes = new Map();
   const requestUrls = new Map();
@@ -719,6 +732,9 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       return;
     }
     requestIds.add(event.requestId);
+    if (event.frameId !== undefined) {
+      requestFrameIds.set(event.requestId, event.frameId);
+    }
     requestTypes.set(event.requestId, event.type);
     requestUrls.set(event.requestId, event.request.url);
     if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
@@ -766,7 +782,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   }, page.sessionId);
 
   const loaded = waitForSessionEvent(cdp, page.sessionId, "Page.loadEventFired");
-  await cdp.send("Page.navigate", { url }, page.sessionId);
+  const navigation = await cdp.send("Page.navigate", { url }, page.sessionId);
   await loaded;
   await waitUntil(async () => {
     const result = await cdp.send("Runtime.evaluate", {
@@ -790,13 +806,17 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     return status.coreReady === true;
   });
   const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
-  coreRequestIds = coreTransferRequestIds(
-    requestIdsStartedAtOrBefore(
-      requestStartWallMs,
-      coreReadyWallMs,
-      requestIds,
+  coreRequestIds = navigationFrameRequestIds(
+    coreTransferRequestIds(
+      requestIdsStartedAtOrBefore(
+        requestStartWallMs,
+        coreReadyWallMs,
+        requestIds,
+      ),
+      requestTypes,
     ),
-    requestTypes,
+    requestFrameIds,
+    navigation.frameId,
   );
   assertNoProtectedStartupBoundaryRequests(
     coreRequestIds,
@@ -1039,6 +1059,22 @@ function runSelfTest() {
       ]),
     ),
     new Set(["document", "bootstrap", "untyped"]),
+  );
+  assert.deepEqual(
+    navigationFrameRequestIds(
+      new Set(["document", "bootstrap", "service-worker-cache"]),
+      new Map([
+        ["document", "main-frame"],
+        ["bootstrap", "main-frame"],
+        ["service-worker-cache", "worker-frame"],
+      ]),
+      "main-frame",
+    ),
+    new Set(["document", "bootstrap"]),
+  );
+  assert.deepEqual(
+    navigationFrameRequestIds(new Set(["document"]), new Map(), undefined),
+    new Set(["document"]),
   );
   const requestUrls = new Map([
     ["bootstrap", "http://127.0.0.1/bootstrap.mjs"],
@@ -1331,7 +1367,15 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /coreTransferRequestIds\([\s\S]+requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds,[\s\S]+requestTypes/,
+    /navigationFrameRequestIds\([\s\S]+coreTransferRequestIds\([\s\S]+requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds,[\s\S]+requestTypes,[\s\S]+requestFrameIds,[\s\S]+navigation\.frameId/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /requestFrameIds\.set\(event\.requestId, event\.frameId\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /const navigation = await cdp\.send\("Page\.navigate"/,
   );
   assert.match(
     navigateAndMeasure.toString(),
