@@ -184,6 +184,7 @@ function makeProductionTopologyFixture(options = {}) {
   const mainThreadIndexOpens = new Map();
   let fileSelectedCallback = null;
   let pendingFilePickerOpen = null;
+  let activeSelectedFileIngestId = null;
   let nextSelectedFileIngestId = 1;
   let nextMainSourceId = options.nextMainSourceId ?? DEFAULT_MAIN_SOURCE_ID_SEED;
   let nextMainIndexId = options.nextMainIndexId ?? DEFAULT_MAIN_INDEX_ID_SEED;
@@ -291,11 +292,25 @@ function makeProductionTopologyFixture(options = {}) {
       ingest !== undefined,
       `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message ingestId ${message.ingestId} to match an active selected-file ingest`,
     );
+    assert.equal(
+      activeSelectedFileIngestId,
+      message.ingestId,
+      `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message ingestId ${message.ingestId} to match the current active selected-file ingest`,
+    );
     assert.ok(
       ingest.callbackRan,
       `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file callback for ingest ${message.ingestId} to run before worker message delivery`,
     );
     return ingest;
+  }
+
+  function retireActiveSelectedFileIngest(message) {
+    if (
+      message.type === runtimeAbi.runtimeBridge.workerMessages.COMPLETE ||
+      message.type === runtimeAbi.runtimeBridge.workerMessages.ERROR
+    ) {
+      activeSelectedFileIngestId = null;
+    }
   }
 
   function startWorkerIndexGeneration(handoff, indexId) {
@@ -672,6 +687,7 @@ function makeProductionTopologyFixture(options = {}) {
       selectedFiles.set(handle, file);
       selectedFileIngestsByHandle.set(handle, ingest);
       selectedFileIngestsByIngestId.set(ingestId, ingest);
+      activeSelectedFileIngestId = ingestId;
       calls.push({
         handle,
         host: MAIN_HOST_ROLE,
@@ -934,10 +950,12 @@ function makeProductionTopologyFixture(options = {}) {
       });
       if (typeof worker?.emit === "function") {
         worker.emit("message", message);
+        retireActiveSelectedFileIngest(message);
         return true;
       }
       if (typeof worker?.onmessage === "function") {
         worker.onmessage({ data: message });
+        retireActiveSelectedFileIngest(message);
         return true;
       }
       throw new Error("worker message delivery requires emit or onmessage");

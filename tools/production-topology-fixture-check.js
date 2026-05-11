@@ -570,6 +570,133 @@ async function checkWorkerMessageDeliveryRequiresActiveIngest() {
   });
 }
 
+async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
+  const retiredIngestMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: retiredIngestMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const firstSelectedFileBytes = new Uint8Array([81, 82]);
+  const firstSelectedFileName = "retired-ingest-first.json";
+  const firstSelectedFileHandle = 93;
+  const secondSelectedFileBytes = new Uint8Array([83, 84]);
+  const secondSelectedFileName = "retired-ingest-second.json";
+  const secondSelectedFileHandle = 94;
+  const selectedFileAcceptPointer = 8;
+  const selectedFileAcceptValue = ".json";
+  const firstSelectedFileIngestId = 1;
+  const secondSelectedFileIngestId = 2;
+  const completeMessage = {
+    ingestId: firstSelectedFileIngestId,
+    type: WORKER_MESSAGE.COMPLETE,
+  };
+  const staleProgressAfterCompleteMessage = {
+    ingestId: firstSelectedFileIngestId,
+    type: WORKER_MESSAGE.PROGRESS,
+  };
+  const staleProgressAfterNewSelectionMessage = {
+    ingestId: firstSelectedFileIngestId,
+    type: WORKER_MESSAGE.PROGRESS,
+  };
+  const activeProgressMessage = {
+    ingestId: secondSelectedFileIngestId,
+    type: WORKER_MESSAGE.PROGRESS,
+  };
+  const expectedFirstIngestNoLongerActiveError = new RegExp(
+    `${OP.workerMessageDelivery} requires worker message ingestId ${firstSelectedFileIngestId} to match the current active selected-file ingest`,
+  );
+  const firstSelectedFile = {
+    bytes: firstSelectedFileBytes,
+    name: firstSelectedFileName,
+  };
+  const secondSelectedFile = {
+    bytes: secondSelectedFileBytes,
+    name: secondSelectedFileName,
+  };
+  const acceptLen = writeString(
+    mainMemory,
+    selectedFileAcceptPointer,
+    selectedFileAcceptValue,
+  );
+  const delivered = [];
+  const worker = {
+    emit(type, message) {
+      delivered.push({ message, type });
+    },
+  };
+
+  fixture.mainHost.setFileSelectedCallback(() => {});
+  const firstPicker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
+
+  assert.equal(
+    fixture.scenario.selectedFileIngest({
+      file: firstSelectedFile,
+      handle: firstSelectedFileHandle,
+    }),
+    firstSelectedFileHandle,
+  );
+  assert.equal(await firstPicker, firstSelectedFileHandle);
+  await Promise.resolve();
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      message: completeMessage,
+      worker,
+    }),
+    true,
+    "terminal complete should deliver for the current active ingest",
+  );
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      message: staleProgressAfterCompleteMessage,
+      worker,
+    }),
+    expectedFirstIngestNoLongerActiveError,
+    "worker message delivery should reject messages for an ingest retired by complete",
+  );
+
+  const secondPicker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
+
+  assert.equal(
+    fixture.scenario.selectedFileIngest({
+      file: secondSelectedFile,
+      handle: secondSelectedFileHandle,
+    }),
+    secondSelectedFileHandle,
+  );
+  assert.equal(await secondPicker, secondSelectedFileHandle);
+  await Promise.resolve();
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      message: staleProgressAfterNewSelectionMessage,
+      worker,
+    }),
+    expectedFirstIngestNoLongerActiveError,
+    "worker message delivery should reject messages for an ingest superseded by a newer selection",
+  );
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      message: activeProgressMessage,
+      worker,
+    }),
+    true,
+    "worker message delivery should still accept the current active ingest",
+  );
+  assert.deepEqual(delivered, [
+    {
+      message: completeMessage,
+      type: WORKER_EVENT.EVENT_MESSAGE,
+    },
+    {
+      message: activeProgressMessage,
+      type: WORKER_EVENT.EVENT_MESSAGE,
+    },
+  ]);
+}
+
 async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   const coveredRangeMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: coveredRangeMemoryPageCount });
@@ -1262,6 +1389,7 @@ async function main() {
   await checkTypedScenarioHelpers();
   await checkTypedScenarioOrderGuards();
   await checkWorkerMessageDeliveryRequiresActiveIngest();
+  await checkWorkerMessageDeliveryRejectsRetiredIngests();
   await checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex();
   await checkWorkerHandoffGenerationReset();
   await checkWorkerPublicationRequiresWrittenBytes();
