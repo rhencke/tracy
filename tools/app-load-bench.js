@@ -18,6 +18,7 @@ const RUNTIME_SPEC = JSON.parse(
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
 const FAILED_REQUEST_TRANSFER_BYTES = 0;
+const WARM_NAVIGATION_SAMPLE_COUNT = 3;
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
   latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -109,6 +110,29 @@ function assertMeasuredBudget(name, metrics, budget) {
       throw new Error(`${name} ${field} ${value.toFixed(1)} > ${limit}`);
     }
   }
+}
+
+function median(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function medianMetrics(samples) {
+  assert.ok(samples.length > 0, "app-load metric samples must not be empty");
+  const fields = Object.keys(samples[0]);
+  const result = {};
+
+  for (const field of fields) {
+    const values = samples.map((sample) => sample[field]);
+
+    assert.ok(
+      values.every(Number.isFinite),
+      `app-load metric samples must include finite ${field}`,
+    );
+    result[field] = median(values);
+  }
+
+  return result;
 }
 
 function findBrowser(explicitPath) {
@@ -849,17 +873,33 @@ async function runBench(options) {
 
     const swPage = await createPage(cdp);
     await primeServiceWorker(cdp, swPage, url);
-    const warmSw = await navigateAndMeasure(cdp, swPage, url);
+    const warmSwSamples = [];
+    for (let index = 0; index < WARM_NAVIGATION_SAMPLE_COUNT; index += 1) {
+      warmSwSamples.push(await navigateAndMeasure(cdp, swPage, url));
+    }
+    const warmSw = medianMetrics(warmSwSamples);
 
     const httpPage = await createPage(cdp);
     await navigateAndMeasure(cdp, httpPage, url, { bypassServiceWorker: true });
-    const warmHttp = await navigateAndMeasure(cdp, httpPage, url, { bypassServiceWorker: true });
+    const warmHttpSamples = [];
+    for (let index = 0; index < WARM_NAVIGATION_SAMPLE_COUNT; index += 1) {
+      warmHttpSamples.push(await navigateAndMeasure(cdp, httpPage, url, {
+        bypassServiceWorker: true,
+      }));
+    }
+    const warmHttp = medianMetrics(warmHttpSamples);
 
     assertMeasuredBudget("cold", cold, BUDGETS.cold);
     assertMeasuredBudget("warmSw", warmSw, BUDGETS.warmSw);
     assertMeasuredBudget("warmHttp", warmHttp, BUDGETS.warmHttp);
 
-    console.log(JSON.stringify({ cold, warmHttp, warmSw }, null, 2));
+    console.log(JSON.stringify({
+      cold,
+      warmHttp,
+      warmHttpSamples,
+      warmSw,
+      warmSwSamples,
+    }, null, 2));
   } finally {
     cdp.close();
     await browser.close();
@@ -892,6 +932,18 @@ function runSelfTest() {
   assert.throws(
     () => assertMeasuredBudget("fixture", { fcpMs: 2 }, { fcpMs: 1 }),
     /fixture fcpMs 2.0 > 1/,
+  );
+  assert.deepEqual(
+    medianMetrics([
+      { fcpMs: 53, fullLoadMs: 21, transferBytes: 0 },
+      { fcpMs: 42, fullLoadMs: 27, transferBytes: 0 },
+      { fcpMs: 45, fullLoadMs: 24, transferBytes: 0 },
+    ]),
+    { fcpMs: 45, fullLoadMs: 24, transferBytes: 0 },
+  );
+  assert.throws(
+    () => medianMetrics([{ fcpMs: Number.NaN }]),
+    /app-load metric samples must include finite fcpMs/,
   );
   const transferRequestIds = new Set(["bootstrap", "renderer", "cached"]);
   const cachedTransferRequestIds = new Set(["cached"]);
