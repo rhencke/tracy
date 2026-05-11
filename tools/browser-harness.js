@@ -243,6 +243,19 @@ function createRuntimeAppHarness(options = {}) {
     await flushRuntimeWork(frameOptions.microtasks);
   }
 
+  async function advanceAppReadyFrame(appReadyOptions = {}) {
+    requireBooted();
+
+    const appReadyFrameCallbacks = browserGlobals.frames.splice(0);
+    for (const frame of appReadyFrameCallbacks) {
+      frame(
+        appReadyOptions.appReadyFrameTimestamp ??
+          RUNTIME_APP_READY_FRAME_TIMESTAMP_MS,
+      );
+    }
+    await flushRuntimeWork(appReadyOptions.microtasks);
+  }
+
   async function bootToAppReady(appReadyOptions = {}) {
     if (controller === null) {
       await boot(appReadyOptions);
@@ -254,17 +267,11 @@ function createRuntimeAppHarness(options = {}) {
       appReadyOptions.firstFrameTimestamp ?? RUNTIME_APP_FIRST_FRAME_TIMESTAMP_MS,
       appReadyOptions,
     );
-    const appReadyFrameCallbacks = browserGlobals.frames.splice(0);
-    for (const frame of appReadyFrameCallbacks) {
-      frame(
-        appReadyOptions.appReadyFrameTimestamp ??
-          RUNTIME_APP_READY_FRAME_TIMESTAMP_MS,
-      );
-    }
-    await flushRuntimeWork(appReadyOptions.microtasks);
+    await advanceAppReadyFrame(appReadyOptions);
   }
 
   return {
+    advanceAppReadyFrame,
     boot,
     bootToAppReady,
     flushRuntimeWork,
