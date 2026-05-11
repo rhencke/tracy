@@ -961,6 +961,103 @@ async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
   );
 }
 
+async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
+  const { frames } = installRuntimeBrowserGlobals();
+  FakeWorker.reset();
+
+  const runtime = await importRepoModule("host/runtime.mjs");
+  const abi = await importRepoModule("host/abi.mjs");
+  const runtimeMemoryPages = 1;
+  const memory = new WebAssembly.Memory({ initial: runtimeMemoryPages });
+  const selectedFileSizeBytes = 1234;
+  const selectedFile = Object.freeze({
+    name: "pending preload trace.json",
+    size: selectedFileSizeBytes,
+  });
+  const selectedFileHandle = 9;
+  const expectedSourceName = `sources/${selectedFile.name}`;
+  const expectedIndexName = "indexes/pending_preload_trace.json.idx";
+  const workerUrl = "worker.js";
+  const firstFrameTimestampMs = 0;
+  const appReadyFrameTimestampMs = 16;
+  const preloadCalls = [];
+  const callbacks = [];
+  let resolveIndexPreload;
+  const indexPreload = new Promise((resolve) => {
+    resolveIndexPreload = resolve;
+  });
+  const host = {
+    [abi.HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE]() {
+      throw new Error("file object selections should not need an OPFS source copy");
+    },
+    opfs_index_create() {
+      return 0;
+    },
+    setFileSelectedCallback(callback) {
+      callbacks.push(callback);
+    },
+  };
+
+  const controller = runtime.runApp(memory, host, {
+    indexReader: {
+      preload() {
+        preloadCalls.push("index-reader");
+        return indexPreload;
+      },
+    },
+    instantiateWasmModuleForThread: async () => ({
+      exports: makeAppExports(),
+    }),
+    progressiveTraceRenderer: false,
+    worker: {
+      Worker: FakeWorker,
+      workerUrl,
+    },
+  });
+
+  await flushRuntimeMicrotasks();
+  frames[0](firstFrameTimestampMs);
+  await flushRuntimeMicrotasks();
+  const appReadyFrameCallbacks = frames.splice(0);
+  for (const frame of appReadyFrameCallbacks) {
+    frame(appReadyFrameTimestampMs);
+  }
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    preloadCalls,
+    ["index-reader"],
+    "reader preload should be held before the worker preload can run",
+  );
+  assert.equal(controller.worker, null);
+  assert.equal(callbacks.length, 1);
+
+  callbacks[0]({ file: selectedFile, handle: selectedFileHandle });
+  await flushRuntimeMicrotasks();
+
+  const worker = controller.worker;
+  assert.deepEqual(worker.posted, [
+    {
+      ingestId: 1,
+      indexName: expectedIndexName,
+      sourceFile: selectedFile,
+      sourceFileHandle: selectedFileHandle,
+      sourceName: expectedSourceName,
+      sourceSize: selectedFile.size,
+      type: "start",
+    },
+  ]);
+
+  resolveIndexPreload(true);
+  await flushRuntimeMicrotasks();
+
+  assert.deepEqual(
+    worker.posted.map((message) => message.type),
+    ["start"],
+    "late worker preload should not post after selected-file ingest has started",
+  );
+}
+
 async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   installRuntimeBrowserGlobals();
 
@@ -3226,6 +3323,7 @@ async function main() {
   await checkRuntimeOrchestratesWorker();
   await checkRuntimeStartsIngestFromFileSelection();
   await checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal();
+  await checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart();
   await checkRuntimeIgnoresStaleIngestWorkerMessages();
   await checkFileSelectionSetupErrorsReportStatus();
   await checkMainThreadIndexReaderQueriesCommittedPages();

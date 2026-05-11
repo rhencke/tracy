@@ -698,6 +698,11 @@ export function createIngestWorkerController(options = {}) {
         return preloadPromise;
       }
 
+      if (activeIngestId !== null) {
+        preloadPromise = Promise.resolve(false);
+        return preloadPromise;
+      }
+
       const activeWorker = ensureWorker();
       if (activeWorker === null) {
         preloadPromise = Promise.resolve(false);
