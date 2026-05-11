@@ -743,13 +743,20 @@ async function checkTypedScenarioChronology() {
     readIndex < laterPublicationIndex,
     "typed-only filtering should preserve the raw read chronology",
   );
+  const rawReadCallIndex = fixture.calls.findIndex(
+    (call) => call.host === mainThreadHostRole &&
+      call.op === OP.indexRead &&
+      call.name === readIndexName,
+  );
+
+  assert.notEqual(
+    rawReadCallIndex,
+    findIndexMissingSentinel,
+    "raw main-thread index read should be present",
+  );
   assert.equal(
     typedOps[readIndex].sourceCallIndex,
-    fixture.calls.findIndex(
-      (call) => call.host === mainThreadHostRole &&
-        call.op === OP.indexRead &&
-        call.name === readIndexName,
-    ),
+    rawReadCallIndex,
     "typed read metadata should carry the original raw read index",
   );
 }
