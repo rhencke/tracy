@@ -45,6 +45,14 @@ const DEFAULT_SCENARIO_DEST_PTR = 120;
 const READER_OPENING_WORKER_MESSAGE_TYPES = Object.freeze(
   new Set([runtimeAbi.runtimeBridge.workerMessages.COVERED_RANGE]),
 );
+const ACTIVE_INGEST_WORKER_MESSAGE_TYPES = Object.freeze(
+  new Set([
+    runtimeAbi.runtimeBridge.workerMessages.COMPLETE,
+    runtimeAbi.runtimeBridge.workerMessages.COVERED_RANGE,
+    runtimeAbi.runtimeBridge.workerMessages.ERROR,
+    runtimeAbi.runtimeBridge.workerMessages.PROGRESS,
+  ]),
+);
 
 function assertHostImportNames(HOST_IMPORT_NAME) {
   for (const key of REQUIRED_HOST_IMPORT_KEYS) {
@@ -169,11 +177,13 @@ function makeProductionTopologyFixture(options = {}) {
   const durableSources = new Map(options.durableSources ?? []);
   const durableIndexes = new Map(options.durableIndexes ?? []);
   const createdWorkerHosts = [];
-  const selectedFileIngests = new Set();
+  const selectedFileIngestsByHandle = new Map();
+  const selectedFileIngestsByIngestId = new Map();
   const workerIndexHandoffs = new Map();
   const mainThreadIndexOpens = new Map();
   let fileSelectedCallback = null;
   let pendingFilePickerOpen = null;
+  let nextSelectedFileIngestId = 1;
   let nextMainSourceId = options.nextMainSourceId ?? DEFAULT_MAIN_SOURCE_ID_SEED;
   let nextMainIndexId = options.nextMainIndexId ?? DEFAULT_MAIN_INDEX_ID_SEED;
   let nextWorkerSourceId = options.nextWorkerSourceId ?? DEFAULT_WORKER_SOURCE_ID_SEED;
@@ -250,6 +260,31 @@ function makeProductionTopologyFixture(options = {}) {
     );
 
     return requireWorkerPublishedIndex(name, FIXTURE_OPERATION.workerMessageDelivery);
+  }
+
+  function requireActiveSelectedFileIngest(message) {
+    if (!ACTIVE_INGEST_WORKER_MESSAGE_TYPES.has(message.type)) {
+      return null;
+    }
+    assert.ok(
+      selectedFileIngestsByIngestId.size > 0,
+      `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file ingest first`,
+    );
+    assert.ok(
+      Number.isInteger(message.ingestId),
+      `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message ingestId`,
+    );
+    const ingest = selectedFileIngestsByIngestId.get(message.ingestId);
+
+    assert.ok(
+      ingest !== undefined,
+      `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message ingestId ${message.ingestId} to match an active selected-file ingest`,
+    );
+    assert.ok(
+      ingest.callbackRan,
+      `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file callback for ingest ${message.ingestId} to run before worker message delivery`,
+    );
+    return ingest;
   }
 
   function prepareWorkerIndexWriteGeneration(handoff) {
@@ -596,15 +631,28 @@ function makeProductionTopologyFixture(options = {}) {
         "function",
         `production topology fixture must install a file-selection callback; calls=${JSON.stringify(calls)}`,
       );
+      const ingestId = nextSelectedFileIngestId;
+      const ingest = {
+        callbackRan: false,
+        handle,
+        ingestId,
+      };
+
+      nextSelectedFileIngestId += 1;
       selectedFiles.set(handle, file);
-      selectedFileIngests.add(handle);
+      selectedFileIngestsByHandle.set(handle, ingest);
+      selectedFileIngestsByIngestId.set(ingestId, ingest);
       calls.push({
         handle,
         host: MAIN_HOST_ROLE,
+        ingestId,
         name: defaultSourceName(file),
         op: FIXTURE_OPERATION.selectedFileIngest,
       });
-      queueMicrotask(() => callback({ file, handle }));
+      queueMicrotask(() => {
+        ingest.callbackRan = true;
+        callback({ file, handle });
+      });
       pendingFilePickerOpen.resolve(handle);
       pendingFilePickerOpen = null;
     },
@@ -830,10 +878,7 @@ function makeProductionTopologyFixture(options = {}) {
         null,
         `${FIXTURE_OPERATION.workerMessageDelivery} requires a worker message object`,
       );
-      assert.ok(
-        selectedFileIngests.size > 0,
-        `${FIXTURE_OPERATION.workerMessageDelivery} requires selected-file ingest first`,
-      );
+      const ingest = requireActiveSelectedFileIngest(message);
       const handoff = requireReaderOpeningWorkerMessageHandoff({
         indexName,
         message,
@@ -841,6 +886,7 @@ function makeProductionTopologyFixture(options = {}) {
       });
       const deliveredIndexName = indexName ?? message.indexName ?? null;
       calls.push({
+        handle: ingest?.handle ?? null,
         host: WORKER_HOST_ROLE,
         ingestId: message.ingestId,
         messageType: message.type,

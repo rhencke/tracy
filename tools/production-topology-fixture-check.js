@@ -498,6 +498,78 @@ async function checkTypedScenarioOrderGuards() {
   );
 }
 
+async function checkWorkerMessageDeliveryRequiresActiveIngest() {
+  const activeIngestMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: activeIngestMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const selectedFileBytes = new Uint8Array([81, 82]);
+  const selectedFileName = "active-ingest.json";
+  const selectedFileHandle = 93;
+  const selectedFileAcceptPointer = 8;
+  const selectedFileAcceptValue = ".json";
+  const firstSelectedFileIngestId = 1;
+  const workerMessageType = "progress";
+  const workerMessage = {
+    ingestId: firstSelectedFileIngestId,
+    type: workerMessageType,
+  };
+  const expectedCallbackBeforeDeliveryError = {
+    message: `${OP.workerMessageDelivery} requires selected-file callback for ingest ${firstSelectedFileIngestId} to run before worker message delivery`,
+  };
+  const selectedFile = {
+    bytes: selectedFileBytes,
+    name: selectedFileName,
+  };
+  const acceptLen = writeString(
+    mainMemory,
+    selectedFileAcceptPointer,
+    selectedFileAcceptValue,
+  );
+  let callbackRan = false;
+  let delivered = null;
+  const worker = {
+    emit(type, message) {
+      delivered = { message, type };
+    },
+  };
+
+  fixture.mainHost.setFileSelectedCallback(() => {
+    callbackRan = true;
+  });
+  const picker = fixture.mainHost[HOST.FILE_PICKER_OPEN](
+    selectedFileAcceptPointer,
+    acceptLen,
+  );
+
+  assert.equal(
+    fixture.scenario.selectedFileIngest({ file: selectedFile, handle: selectedFileHandle }),
+    selectedFileHandle,
+  );
+  assert.equal(callbackRan, false);
+  assert.throws(
+    () => fixture.scenario.workerMessageDelivery({
+      message: workerMessage,
+      worker,
+    }),
+    expectedCallbackBeforeDeliveryError,
+    "worker message delivery should reject a selected-file ingest before its callback runs",
+  );
+  assert.equal(await picker, selectedFileHandle);
+  await Promise.resolve();
+  assert.equal(callbackRan, true);
+  assert.equal(
+    fixture.scenario.workerMessageDelivery({
+      message: workerMessage,
+      worker,
+    }),
+    true,
+  );
+  assert.deepEqual(delivered, {
+    message: workerMessage,
+    type: WORKER_EVENT.EVENT_MESSAGE,
+  });
+}
+
 async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   const coveredRangeMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: coveredRangeMemoryPageCount });
@@ -512,9 +584,10 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   const workerWritePointer = 96;
   const indexWriteOffset = 0n;
   const expectedFlushResult = 0;
+  const firstSelectedFileIngestId = 1;
   const coveredRangeMessage = {
     end: selectedFileBytes.byteLength,
-    ingestId: selectedFileHandle,
+    ingestId: firstSelectedFileIngestId,
     start: 0,
     type: WORKER_MESSAGE.COVERED_RANGE,
   };
@@ -1132,6 +1205,7 @@ async function main() {
   await checkDurableIndexAcrossHosts();
   await checkTypedScenarioHelpers();
   await checkTypedScenarioOrderGuards();
+  await checkWorkerMessageDeliveryRequiresActiveIngest();
   await checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex();
   await checkWorkerHandoffGenerationReset();
   await checkWorkerPublicationRequiresWrittenBytes();
