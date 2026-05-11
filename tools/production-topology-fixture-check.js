@@ -1309,6 +1309,86 @@ async function checkObserveOnlyIndexOpenRejectsStaleRawOpen() {
   );
 }
 
+async function checkRawIndexReadRejectsPreHandoffMainThreadOpen() {
+  const preHandoffReadMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: preHandoffReadMemoryPageCount });
+  const fixture = makeProductionTopologyFixture({ mainMemory });
+  const workerHost = fixture.createWorkerHost();
+  const indexName = "indexes/pre-handoff-read.idx";
+  const indexNamePointer = 16;
+  const workerWriteBytes = new Uint8Array([95]);
+  const workerWritePointer = 96;
+  const indexWriteOffset = 0n;
+  const mainReadOffset = 0n;
+  const mainReadLength = workerWriteBytes.byteLength;
+  const mainReadDestinationPointer = 120;
+  const expectedWorkerWriteCount = workerWriteBytes.byteLength;
+  const expectedFlushSuccess = 0;
+  const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const expectedPreHandoffReadError = new RegExp(
+    `${OP.indexRead}: main thread must open OPFS index ${escapedIndexName} after worker publication before read`,
+  );
+  const mainNameLen = writeString(mainMemory, indexNamePointer, indexName);
+  const staleMainIndexId = fixture.mainHost[HOST.OPFS_INDEX_CREATE](
+    indexNamePointer,
+    mainNameLen,
+  );
+  const staleOpenIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](
+    indexNamePointer,
+    mainNameLen,
+  );
+  const workerNameLen = writeString(workerHost.memory, indexNamePointer, indexName);
+  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](
+    indexNamePointer,
+    workerNameLen,
+  );
+
+  assert.notEqual(
+    staleOpenIndexId,
+    staleMainIndexId,
+    "raw main-thread open before worker handoff should create a distinct stale id",
+  );
+  new Uint8Array(workerHost.memory.buffer, workerWritePointer, workerWriteBytes.byteLength)
+    .set(workerWriteBytes);
+  assert.equal(
+    workerHost[HOST.OPFS_INDEX_WRITE](
+      workerIndexId,
+      indexWriteOffset,
+      workerWritePointer,
+      workerWriteBytes.byteLength,
+    ),
+    expectedWorkerWriteCount,
+  );
+  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushSuccess);
+  assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
+  assert.throws(
+    () => fixture.mainHost[HOST.OPFS_INDEX_READ](
+      staleOpenIndexId,
+      mainReadOffset,
+      mainReadLength,
+      mainReadDestinationPointer,
+    ),
+    expectedPreHandoffReadError,
+    "raw main-thread read should reject ids opened before the worker handoff existed",
+  );
+
+  const freshOpenIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](
+    indexNamePointer,
+    mainNameLen,
+  );
+
+  assert.equal(
+    fixture.mainHost[HOST.OPFS_INDEX_READ](
+      freshOpenIndexId,
+      mainReadOffset,
+      mainReadLength,
+      mainReadDestinationPointer,
+    ),
+    mainReadLength,
+    "raw main-thread read should accept an id opened after worker publication",
+  );
+}
+
 async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
   const readFreshnessMemoryPageCount = 2;
   const mainMemory = new WebAssembly.Memory({ initial: readFreshnessMemoryPageCount });
@@ -1503,6 +1583,7 @@ async function main() {
   await checkWorkerPublicationRequiresCurrentGenerationBytes();
   await checkTypedScenarioChronology();
   await checkObserveOnlyIndexOpenRejectsStaleRawOpen();
+  await checkRawIndexReadRejectsPreHandoffMainThreadOpen();
   await checkMainThreadIndexReadRejectsNewerUnpublishedGeneration();
   await checkMainThreadIndexReadRejectsSupersededPublishedGeneration();
   await checkObservedIndexReadPreservesRawReadCount();

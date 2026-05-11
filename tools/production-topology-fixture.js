@@ -413,6 +413,19 @@ function makeProductionTopologyFixture(options = {}) {
     return opened;
   }
 
+  function requireFreshMainThreadIndexRead(indexId, name, operation) {
+    if (!workerIndexHandoffs.has(name)) {
+      return null;
+    }
+    const opened = mainThreadIndexOpens.get(indexId);
+
+    assert.ok(
+      opened !== undefined,
+      `${operation}: main thread must open OPFS index ${name} after worker publication before read`,
+    );
+    return requireFreshMainThreadIndexOpen(indexId, operation);
+  }
+
   function recordMainThreadIndexRead({
     indexId,
     len,
@@ -584,8 +597,12 @@ function makeProductionTopologyFixture(options = {}) {
       [HOST_IMPORT_NAME.OPFS_INDEX_READ](indexId, offset, len, destPtr) {
         const index = requireIndex(indexId);
 
-        if (host === MAIN_HOST_ROLE && mainThreadIndexOpens.has(indexId)) {
-          requireFreshMainThreadIndexOpen(indexId, FIXTURE_OPERATION.indexRead);
+        if (host === MAIN_HOST_ROLE) {
+          requireFreshMainThreadIndexRead(
+            indexId,
+            index.name,
+            FIXTURE_OPERATION.indexRead,
+          );
         }
         const start = Number(offset);
         const bytes = durableIndex(index.name).bytes;
