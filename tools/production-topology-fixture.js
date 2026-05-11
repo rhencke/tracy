@@ -22,23 +22,7 @@ const INDEX_SIZE_MAY_BE_STALE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMar
 const MAIN_INDEX_SIZE_MAY_BE_STALE = hostAbi.opfsBridge.mainIndexSizeMayBeStale;
 const MAIN_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.defaultPersistsFileSources;
 const WORKER_PERSISTS_FILE_SOURCES = hostAbi.opfsBridge.workerPersistsFileSources;
-const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze([
-  "filePickerOpen",
-  "indexCreate",
-  "indexFlush",
-  "indexOpen",
-  "indexRead",
-  "indexWrite",
-  "mainThreadIndexOpen",
-  "mainThreadIndexRead",
-  "sameHostTestShortcut",
-  "setFileSelectedCallback",
-  "selectedFileIngest",
-  "sourceFromFile",
-  "sourceOpen",
-  "workerMessageDelivery",
-  "workerPublication",
-]);
+const REQUIRED_FIXTURE_OPERATION_KEYS = Object.freeze(Object.keys(FIXTURE_OPERATION));
 // The fixture writes only small scratch buffers, but two pages catches accidental
 // main/worker memory sharing without pretending this is a production heap size.
 const DEFAULT_FIXTURE_MEMORY_PAGES = 2;
