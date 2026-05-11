@@ -870,13 +870,21 @@ function main() {
     bootstrapSource,
     /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
+  assert.doesNotMatch(
+    bootstrapSource,
+    /import\("\.\/host\/wasm-modules\.mjs"\)/,
+  );
   assert.match(
     bootstrapSource,
     /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
   );
   assert.match(
     bootstrapSource,
-    /await import\("\.\/host\/wasm-modules\.mjs"\)/,
+    /const importWasmModules = \(\) => import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+  );
+  assert.match(
+    bootstrapSource,
+    /await importWasmModules\(\)/,
   );
   assert.match(
     bootstrapSource,

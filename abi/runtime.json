@@ -11,6 +11,10 @@
     "PROGRESSIVE_TRACE_RENDERER_URL": {
       "value": "./progressive-trace-renderer.mjs",
       "description": "Deferred progressive trace renderer implementation module URL, relative to host/runtime.mjs."
+    },
+    "WASM_MODULES_URL": {
+      "value": "./wasm-modules.mjs",
+      "description": "Deferred generated wasm module graph URL, relative to host/runtime.mjs."
     }
   },
   "wasmMemory": {

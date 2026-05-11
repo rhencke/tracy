@@ -5,6 +5,7 @@ export const RUNTIME_URLS = Object.freeze({
   WORKER_URL: "worker.js",
   SERVICE_WORKER_URL: "service-worker.js",
   PROGRESSIVE_TRACE_RENDERER_URL: "./progressive-trace-renderer.mjs",
+  WASM_MODULES_URL: "./wasm-modules.mjs",
 });
 
 export const APP_SHELL_COLORS = Object.freeze({
