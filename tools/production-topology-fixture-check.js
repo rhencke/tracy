@@ -10,6 +10,8 @@ const {
   makeProductionTopologyFixture,
 } = require("./production-topology-fixture.js");
 
+const MAIN_HOST_ROLE = "main";
+const WORKER_HOST_ROLE = "worker";
 const STALE_SIZE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMarker;
 
 function writeString(memory, ptr, value) {
@@ -234,7 +236,8 @@ async function checkSelectedFileAndDurableSourceReads() {
 }
 
 async function checkDurableIndexAcrossHosts() {
-  const mainMemory = new WebAssembly.Memory({ initial: 2 });
+  const fixtureMemoryPageCount = 2;
+  const mainMemory = new WebAssembly.Memory({ initial: fixtureMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/trace.idx";
@@ -277,9 +280,9 @@ async function checkDurableIndexAcrossHosts() {
       OP.mainThreadIndexRead,
     ].includes(call.op)).map((call) => [call.host, call.op, call.name]),
     [
-      ["worker", OP.workerPublication, indexName],
-      ["main", OP.mainThreadIndexOpen, indexName],
-      ["main", OP.mainThreadIndexRead, indexName],
+      [WORKER_HOST_ROLE, OP.workerPublication, indexName],
+      [MAIN_HOST_ROLE, OP.mainThreadIndexOpen, indexName],
+      [MAIN_HOST_ROLE, OP.mainThreadIndexRead, indexName],
     ],
   );
 }
@@ -320,7 +323,7 @@ async function checkTypedScenarioHelpers() {
   assert.deepEqual(selected, [{ file: selectedFile, handle: selectedFileHandle }]);
   assert.ok(
     fixture.calls.some(
-      (call) => call.host === "main" &&
+      (call) => call.host === MAIN_HOST_ROLE &&
         call.op === OP.selectedFileIngest &&
         call.handle === selectedFileHandle,
     ),
@@ -368,10 +371,10 @@ async function checkTypedScenarioHelpers() {
       OP.mainThreadIndexRead,
     ].includes(call.op)).map((call) => [call.host, call.op, call.name ?? call.messageType]),
     [
-      ["main", OP.selectedFileIngest, expectedSelectedFileSourceName],
-      ["worker", OP.workerPublication, workerPublicationIndexName],
-      ["main", OP.mainThreadIndexOpen, workerPublicationIndexName],
-      ["main", OP.mainThreadIndexRead, workerPublicationIndexName],
+      [MAIN_HOST_ROLE, OP.selectedFileIngest, expectedSelectedFileSourceName],
+      [WORKER_HOST_ROLE, OP.workerPublication, workerPublicationIndexName],
+      [MAIN_HOST_ROLE, OP.mainThreadIndexOpen, workerPublicationIndexName],
+      [MAIN_HOST_ROLE, OP.mainThreadIndexRead, workerPublicationIndexName],
     ],
   );
 
@@ -413,7 +416,12 @@ async function checkTypedScenarioOrderGuards() {
   const expectedWorkerWriteCount = workerWriteLength;
   const expectedFlushResult = 0;
   const mainThreadReadLengthBeforeOpen = workerWriteLength;
-  const noSelectionWorkerMessage = { ingestId: 1, type: "progress" };
+  const noSelectionWorkerMessageIngestId = 1;
+  const noSelectionWorkerMessageType = "progress";
+  const noSelectionWorkerMessage = {
+    ingestId: noSelectionWorkerMessageIngestId,
+    type: noSelectionWorkerMessageType,
+  };
   const expectedCreateBeforePublicationError = {
     message: `${OP.mainThreadIndexOpen}: worker must create OPFS index ${indexName} before publication`,
   };
@@ -471,7 +479,7 @@ async function checkTypedScenarioOrderGuards() {
       indexId: workerIndexId,
       len: mainThreadReadLengthBeforeOpen,
     }),
-    /main thread must open OPFS index before read/,
+    { message: `${OP.mainThreadIndexRead}: main thread must open OPFS index before read` },
     "main-thread read helper should reject reads before a typed main-thread open",
   );
 
@@ -601,7 +609,6 @@ async function checkWorkerPublicationRequiresWrittenBytes() {
 
 async function checkTypedScenarioChronology() {
   const chronologyMemoryPageCount = 2;
-  const mainThreadHostRole = "main";
   const earlyIndexName = "indexes/early-open.idx";
   const earlyIndexNamePointer = 16;
   const earlyWorkerWriteBytes = new Uint8Array([71]);
@@ -648,7 +655,7 @@ async function checkTypedScenarioChronology() {
     earlyMainIndexId,
   );
   const typedEarlyOpen = fixture.calls.find(
-    (call) => call.host === mainThreadHostRole &&
+    (call) => call.host === MAIN_HOST_ROLE &&
       call.op === OP.mainThreadIndexOpen &&
       call.name === earlyIndexName,
   );
@@ -656,7 +663,7 @@ async function checkTypedScenarioChronology() {
   assert.equal(
     typedEarlyOpen.sourceCallIndex,
     fixture.calls.findIndex(
-      (call) => call.host === mainThreadHostRole &&
+      (call) => call.host === MAIN_HOST_ROLE &&
         call.op === OP.indexOpen &&
         call.name === earlyIndexName,
     ),
@@ -744,7 +751,7 @@ async function checkTypedScenarioChronology() {
     "typed-only filtering should preserve the raw read chronology",
   );
   const rawReadCallIndex = fixture.calls.findIndex(
-    (call) => call.host === mainThreadHostRole &&
+    (call) => call.host === MAIN_HOST_ROLE &&
       call.op === OP.indexRead &&
       call.name === readIndexName,
   );
@@ -768,6 +775,8 @@ async function checkObservedIndexReadPreservesRawReadCount() {
   const workerHost = fixture.createWorkerHost();
   const indexName = "indexes/short-read.idx";
   const requestedLen = 4;
+  const rawReadOffset = 0n;
+  const rawReadDestinationPointer = 120;
   const actualBytes = new Uint8Array([81, 82]);
 
   await fixture.scenario.workerPublication({
@@ -778,7 +787,12 @@ async function checkObservedIndexReadPreservesRawReadCount() {
   const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
   assert.equal(
-    fixture.mainHost[HOST.OPFS_INDEX_READ](mainIndexId, 0n, requestedLen, 120),
+    fixture.mainHost[HOST.OPFS_INDEX_READ](
+      mainIndexId,
+      rawReadOffset,
+      requestedLen,
+      rawReadDestinationPointer,
+    ),
     actualBytes.byteLength,
     "raw index read should report the bytes actually copied",
   );
@@ -793,13 +807,13 @@ async function checkObservedIndexReadPreservesRawReadCount() {
   );
 
   const rawRead = fixture.calls.find(
-    (call) => call.host === "main" &&
+    (call) => call.host === MAIN_HOST_ROLE &&
       call.id === mainIndexId &&
       call.op === OP.indexRead &&
       call.name === indexName,
   );
   const typedRead = fixture.calls.find(
-    (call) => call.host === "main" &&
+    (call) => call.host === MAIN_HOST_ROLE &&
       call.id === mainIndexId &&
       call.op === OP.mainThreadIndexRead &&
       call.name === indexName,
