@@ -261,6 +261,7 @@ function assertBrowserDiscovery() {
   );
 
   const commandLookupAttempts = [];
+  const statLookupAttempts = [];
   assert.equal(
     safeCommandPath("chromium", {
       accessSync: (file) => {
@@ -273,13 +274,20 @@ function assertBrowserDiscovery() {
       },
       env: { PATH: "/missing:/tools" },
       pathDelimiter: ":",
+      statSync: (file) => {
+        statLookupAttempts.push(file);
+        return {
+          isFile: () => file === "/tools/chromium",
+        };
+      },
     }),
     "/tools/chromium",
   );
-  assert.deepEqual(commandLookupAttempts, [
+  assert.deepEqual(statLookupAttempts, [
     "/missing/chromium",
     "/tools/chromium",
   ]);
+  assert.deepEqual(commandLookupAttempts, ["/tools/chromium"]);
 
   const safeLookupDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-browser-path-"));
   try {
@@ -306,6 +314,46 @@ function assertBrowserDiscovery() {
     assert.equal(fs.existsSync(markerPath), false);
   } finally {
     fs.rmSync(safeLookupDir, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    });
+  }
+
+  const directoryLookupRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-browser-dir-"));
+  try {
+    const directoryEntry = path.join(directoryLookupRoot, "directory");
+    const binaryEntry = path.join(directoryLookupRoot, "binary");
+    const browserDirectory = path.join(directoryEntry, "chromium");
+    const browserPath = path.join(binaryEntry, "chromium");
+    fs.mkdirSync(browserDirectory, { recursive: true });
+    fs.mkdirSync(binaryEntry, { recursive: true });
+    fs.writeFileSync(browserPath, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(browserPath, 0o755);
+
+    assert.equal(
+      safeCommandPath("chromium", {
+        env: { PATH: `${directoryEntry}:${binaryEntry}` },
+        pathDelimiter: ":",
+      }),
+      browserPath,
+    );
+    assert.equal(
+      browserExecutablePath({
+        commandNames: ["chromium"],
+        commandPath: (command) =>
+          safeCommandPath(command, {
+            env: { PATH: `${directoryEntry}:${binaryEntry}` },
+            pathDelimiter: ":",
+          }),
+        env: {},
+        existsSync: fs.existsSync,
+      }),
+      browserPath,
+    );
+  } finally {
+    fs.rmSync(directoryLookupRoot, {
       force: true,
       maxRetries: 5,
       recursive: true,

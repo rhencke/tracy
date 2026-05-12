@@ -192,6 +192,7 @@ function commandPath(command, options = {}) {
 
   const env = options.env ?? process.env;
   const accessSync = options.accessSync ?? fs.accessSync;
+  const statSync = options.statSync ?? fs.statSync;
   const pathEnv = options.pathEnv ?? env.PATH ?? "";
   const pathDelimiter = options.pathDelimiter ?? path.delimiter;
 
@@ -199,10 +200,13 @@ function commandPath(command, options = {}) {
     const dir = entry === "" ? "." : entry;
     const file = path.resolve(dir, command);
     try {
+      if (!statSync(file).isFile()) {
+        continue;
+      }
       accessSync(file, fs.constants.X_OK);
       return file;
     } catch {
-      // Keep searching PATH entries until an executable filesystem path exists.
+      // Keep searching PATH entries until an executable regular file exists.
     }
   }
 
