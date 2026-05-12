@@ -1521,6 +1521,10 @@ async function runSelfTest() {
     bootstrap,
     /globalThis\.addEventListener\(PERFORMANCE_MARKS\.coreReady, resolve, \{ once: true \}\)/,
   );
+  assert.match(
+    bootstrap,
+    /const postCoreReadyFramePromise = coreReadyPromise\.then\(\(\) => new Promise\(\(resolve\) => requestAnimationFrame\(resolve\)\)\)/,
+  );
   assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.coreReady\)\)/);
   assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
@@ -1535,7 +1539,7 @@ async function runSelfTest() {
   );
   assert.match(
     bootstrap,
-    /await coreReadyPromise/,
+    /await postCoreReadyFramePromise/,
   );
   assert.match(
     bootstrap,

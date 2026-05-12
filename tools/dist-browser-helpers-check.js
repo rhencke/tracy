@@ -467,15 +467,29 @@ function assertInteractiveCheckUsesSharedHelpers() {
 
 function assertDelayedWasmImportBoundary() {
   const bootstrap = readRepoFile("bootstrap.mjs");
-  const coreReadyOffset = bootstrap.indexOf("await coreReadyPromise");
+  const coreReadyOffset = bootstrap.indexOf("const coreReadyPromise");
+  const postCoreReadyFrameOffset = bootstrap.indexOf("const postCoreReadyFramePromise");
+  const postCoreReadyAwaitOffset = bootstrap.indexOf("await postCoreReadyFramePromise");
   const wasmModulesUrlOffset = bootstrap.indexOf("const wasmModulesUrl");
   const dynamicImportOffset = bootstrap.indexOf("return import(wasmModulesUrl)");
 
   assert.match(bootstrap, /const coreReadyPromise = new Promise/);
-  assert.ok(coreReadyOffset >= 0, "Wasm module graph import must await core readiness");
+  assert.match(
+    bootstrap,
+    /const postCoreReadyFramePromise = coreReadyPromise\.then\(\(\) => new Promise\(\(resolve\) => requestAnimationFrame\(resolve\)\)\)/,
+  );
+  assert.ok(coreReadyOffset >= 0, "Wasm module graph import must gate on core readiness");
   assert.ok(
-    wasmModulesUrlOffset > coreReadyOffset,
-    "Wasm module graph URL must be discovered after core readiness",
+    postCoreReadyFrameOffset > coreReadyOffset,
+    "Wasm module graph import must wait for a frame after core readiness",
+  );
+  assert.ok(
+    postCoreReadyAwaitOffset > postCoreReadyFrameOffset,
+    "Wasm module graph import must await the post-core-ready frame",
+  );
+  assert.ok(
+    wasmModulesUrlOffset > postCoreReadyAwaitOffset,
+    "Wasm module graph URL must be discovered after the post-core-ready frame",
   );
   assert.ok(
     dynamicImportOffset > wasmModulesUrlOffset,
