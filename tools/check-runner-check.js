@@ -7,7 +7,6 @@ const path = require("node:path");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const MIGRATED_CHECK_FILES = Object.freeze([
-  "tools/generated-file-writer-check.js",
   "tools/host-shim-check.js",
   "tools/service-worker-check.js",
 ]);
