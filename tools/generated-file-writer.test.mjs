@@ -1,9 +1,10 @@
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -27,6 +28,7 @@ const {
 } = require("./generated-file-writer.js");
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const execFileAsync = promisify(execFile);
 
 function filePath(relativePath, root) {
   return path.join(root, relativePath);
@@ -351,7 +353,7 @@ describe("service worker invariant", () => {
       await fs.writeFile(path.join(distDir, "wasm", "app.wasm"), "");
       await fs.writeFile(path.join(distDir, "wasm", "std", "mem.wasm"), "");
 
-      execFileSync(
+      await execFileAsync(
         process.execPath,
         [
           "tools/generate-precache-manifest.js",
