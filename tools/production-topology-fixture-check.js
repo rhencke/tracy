@@ -264,7 +264,7 @@ async function checkDurableIndexAcrossHosts() {
     ...workerIndexBytes,
   ];
   const mainIndexReadLen = expectedMainIndexReadBytes.length;
-  const workerIndexId = await fixture.scenario.workerPublication({
+  const workerIndexId = await fixture.scenario.workerIndexGeneration({
     bytes: workerIndexBytes,
     indexName,
     offset: workerIndexWriteOffset,
@@ -353,7 +353,7 @@ async function checkTypedScenarioHelpers() {
   const expectedMainThreadReadBytes = Array.from(workerPublicationBytes);
 
   assert.equal(
-    await fixture.scenario.workerPublication({
+    await fixture.scenario.workerIndexGeneration({
       bytes: workerPublicationBytes,
       indexName: workerPublicationIndexName,
       workerHost,
@@ -378,6 +378,9 @@ async function checkTypedScenarioHelpers() {
   );
   assert.deepEqual(
     fixture.calls.filter((call) => [
+      OP.indexCreate,
+      OP.indexWrite,
+      OP.indexFlush,
       OP.selectedFileIngest,
       OP.workerPublication,
       OP.mainThreadIndexOpen,
@@ -385,6 +388,9 @@ async function checkTypedScenarioHelpers() {
     ].includes(call.op)).map((call) => [call.host, call.op, call.name ?? call.messageType]),
     [
       [MAIN_HOST_ROLE, OP.selectedFileIngest, expectedSelectedFileSourceName],
+      [WORKER_HOST_ROLE, OP.indexCreate, workerPublicationIndexName],
+      [WORKER_HOST_ROLE, OP.indexWrite, workerPublicationIndexName],
+      [WORKER_HOST_ROLE, OP.indexFlush, workerPublicationIndexName],
       [WORKER_HOST_ROLE, OP.workerPublication, workerPublicationIndexName],
       [MAIN_HOST_ROLE, OP.mainThreadIndexOpen, workerPublicationIndexName],
       [MAIN_HOST_ROLE, OP.mainThreadIndexRead, workerPublicationIndexName],
@@ -650,7 +656,7 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
   );
   assert.equal(await firstPicker, firstSelectedFileHandle);
   await Promise.resolve();
-  await fixture.scenario.workerPublication({
+  await fixture.scenario.workerIndexGeneration({
     bytes: firstSelectedFileBytes,
     indexName: firstIndexName,
     workerHost,
@@ -770,7 +776,7 @@ async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
   assert.equal(await picker, selectedFileHandle);
   await Promise.resolve();
 
-  await fixture.scenario.workerPublication({
+  await fixture.scenario.workerIndexGeneration({
     bytes: unrelatedIndexBytes,
     indexName: unrelatedIndexName,
     workerHost,
@@ -1001,7 +1007,7 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
   );
   assert.equal(await picker, selectedFileHandle);
   await Promise.resolve();
-  await fixture.scenario.workerPublication({
+  await fixture.scenario.workerIndexGeneration({
     bytes: unrelatedIndexBytes,
     indexName: unrelatedIndexName,
     workerHost,
@@ -1023,7 +1029,7 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
     expectedUnrelatedIndexError,
     "covered_range delivery should reject an unrelated published index from the helper argument",
   );
-  await fixture.scenario.workerPublication({
+  await fixture.scenario.workerIndexGeneration({
     bytes: selectedFileBytes,
     indexName: activeIndexName,
     workerHost,
@@ -1055,9 +1061,7 @@ async function checkWorkerHandoffGenerationReset() {
   const secondWriteBytes = new Uint8Array([63, 64]);
   const secondWritePointer = 100;
   const indexWriteOffset = 0n;
-  const firstWriteLength = firstWriteBytes.byteLength;
   const secondWriteLength = secondWriteBytes.byteLength;
-  const expectedFirstWriteCount = firstWriteLength;
   const expectedSecondWriteCount = secondWriteLength;
   const expectedFlushResult = 0;
   const expectedFlushBeforeHandoffError = {
@@ -1067,20 +1071,12 @@ async function checkWorkerHandoffGenerationReset() {
     message: `${OP.mainThreadIndexOpen}: worker must publish OPFS index ${indexName} before main-thread handoff`,
   };
   const nameLen = writeString(workerHost.memory, workerIndexNamePointer, indexName);
-  const firstIndexId = workerHost[HOST.OPFS_INDEX_CREATE](workerIndexNamePointer, nameLen);
-
-  new Uint8Array(workerHost.memory.buffer, firstWritePointer, firstWriteLength).set(firstWriteBytes);
-  assert.equal(
-    workerHost[HOST.OPFS_INDEX_WRITE](
-      firstIndexId,
-      indexWriteOffset,
-      firstWritePointer,
-      firstWriteLength,
-    ),
-    expectedFirstWriteCount,
-  );
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](firstIndexId), expectedFlushResult);
-  assert.equal(await fixture.scenario.workerPublication({ indexName }), firstIndexId);
+  const firstIndexId = await fixture.scenario.workerIndexGeneration({
+    bytes: firstWriteBytes,
+    indexName,
+    srcPtr: firstWritePointer,
+    workerHost,
+  });
 
   new Uint8Array(workerHost.memory.buffer, secondWritePointer, secondWriteLength).set(secondWriteBytes);
   assert.equal(
@@ -1164,7 +1160,6 @@ async function checkWorkerPublicationRequiresCurrentGenerationBytes() {
   const firstWritePointer = 96;
   const zeroByteWritePointer = 100;
   const zeroByteWriteLength = 0;
-  const expectedFirstWriteCount = firstWriteBytes.byteLength;
   const expectedZeroByteWriteCount = zeroByteWriteLength;
   const expectedFlushResult = 0;
   const escapedWorkerIndexName = workerIndexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1174,25 +1169,13 @@ async function checkWorkerPublicationRequiresCurrentGenerationBytes() {
   const mainMemory = new WebAssembly.Memory({ initial: workerPublicationMemoryPageCount });
   const fixture = makeProductionTopologyFixture({ mainMemory });
   const workerHost = fixture.createWorkerHost();
-  const nameLen = writeString(workerHost.memory, workerIndexNamePointer, workerIndexName);
-  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](
-    workerIndexNamePointer,
-    nameLen,
-  );
-
-  new Uint8Array(workerHost.memory.buffer, firstWritePointer, firstWriteBytes.byteLength)
-    .set(firstWriteBytes);
-  assert.equal(
-    workerHost[HOST.OPFS_INDEX_WRITE](
-      workerIndexId,
-      indexWriteOffset,
-      firstWritePointer,
-      firstWriteBytes.byteLength,
-    ),
-    expectedFirstWriteCount,
-  );
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
-  assert.equal(await fixture.scenario.workerPublication({ indexName: workerIndexName }), workerIndexId);
+  const workerIndexId = await fixture.scenario.workerIndexGeneration({
+    bytes: firstWriteBytes,
+    indexName: workerIndexName,
+    namePtr: workerIndexNamePointer,
+    srcPtr: firstWritePointer,
+    workerHost,
+  });
 
   assert.equal(
     workerHost[HOST.OPFS_INDEX_WRITE](
@@ -1275,30 +1258,18 @@ async function checkTypedScenarioChronology() {
   );
 
   const readIndexName = "indexes/read-order.idx";
-  const readIndexNamePointer = 48;
   const readWorkerWriteBytes = new Uint8Array([72]);
   const readWorkerWritePointer = 104;
-  const expectedReadWriteCount = readWorkerWriteBytes.byteLength;
   const rawReadOffset = 0n;
   const rawReadLength = readWorkerWriteBytes.byteLength;
   const rawReadDestinationPointer = 120;
   const expectedRawReadCount = rawReadLength;
-  const readWorkerNameLen = writeString(workerHost.memory, readIndexNamePointer, readIndexName);
-  const readWorkerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](readIndexNamePointer, readWorkerNameLen);
-
-  new Uint8Array(workerHost.memory.buffer, readWorkerWritePointer, readWorkerWriteBytes.byteLength)
-    .set(readWorkerWriteBytes);
-  assert.equal(
-    workerHost[HOST.OPFS_INDEX_WRITE](
-      readWorkerIndexId,
-      indexWriteOffset,
-      readWorkerWritePointer,
-      readWorkerWriteBytes.byteLength,
-    ),
-    expectedReadWriteCount,
-  );
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](readWorkerIndexId), expectedFlushSuccess);
-  assert.equal(await fixture.scenario.workerPublication({ indexName: readIndexName }), readWorkerIndexId);
+  await fixture.scenario.workerIndexGeneration({
+    bytes: readWorkerWriteBytes,
+    indexName: readIndexName,
+    srcPtr: readWorkerWritePointer,
+    workerHost,
+  });
   const readMainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName: readIndexName });
 
   assert.equal(
@@ -1315,7 +1286,7 @@ async function checkTypedScenarioChronology() {
   const observeOnlyReadLength = rawReadLength;
   const expectedObserveOnlyReadCount = observeOnlyReadLength;
 
-  await fixture.scenario.workerPublication({
+  await fixture.scenario.workerIndexGeneration({
     bytes: laterMarkerBytes,
     indexName: laterIndexName,
     workerHost,
@@ -1380,10 +1351,6 @@ async function checkObserveOnlyIndexOpenRejectsStaleRawOpen() {
   const indexName = "indexes/reused.idx";
   const indexNamePointer = 16;
   const workerWriteBytes = new Uint8Array([91]);
-  const workerWritePointer = 96;
-  const indexWriteOffset = 0n;
-  const expectedWorkerWriteCount = workerWriteBytes.byteLength;
-  const expectedFlushSuccess = 0;
   const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const expectedObserveOnlyStaleOpenError = new RegExp(
     `${OP.mainThreadIndexOpen}: production must open OPFS index ${escapedIndexName}`,
@@ -1397,27 +1364,18 @@ async function checkObserveOnlyIndexOpenRejectsStaleRawOpen() {
     indexNamePointer,
     mainNameLen,
   );
-  const workerNameLen = writeString(workerHost.memory, indexNamePointer, indexName);
-  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](indexNamePointer, workerNameLen);
 
   assert.notEqual(
     staleOpenIndexId,
     staleMainIndexId,
     "raw main-thread open before worker publication should create a distinct stale id",
   );
-  new Uint8Array(workerHost.memory.buffer, workerWritePointer, workerWriteBytes.byteLength)
-    .set(workerWriteBytes);
-  assert.equal(
-    workerHost[HOST.OPFS_INDEX_WRITE](
-      workerIndexId,
-      indexWriteOffset,
-      workerWritePointer,
-      workerWriteBytes.byteLength,
-    ),
-    expectedWorkerWriteCount,
-  );
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushSuccess);
-  assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
+  await fixture.scenario.workerIndexGeneration({
+    bytes: workerWriteBytes,
+    indexName,
+    namePtr: indexNamePointer,
+    workerHost,
+  });
   assert.throws(
     () => fixture.scenario.mainThreadIndexOpen({ indexName, observeOnly: true }),
     expectedObserveOnlyStaleOpenError,
@@ -1444,13 +1402,9 @@ async function checkRawIndexReadRejectsPreHandoffMainThreadOpen() {
   const indexName = "indexes/pre-handoff-read.idx";
   const indexNamePointer = 16;
   const workerWriteBytes = new Uint8Array([95]);
-  const workerWritePointer = 96;
-  const indexWriteOffset = 0n;
   const mainReadOffset = 0n;
   const mainReadLength = workerWriteBytes.byteLength;
   const mainReadDestinationPointer = 120;
-  const expectedWorkerWriteCount = workerWriteBytes.byteLength;
-  const expectedFlushSuccess = 0;
   const escapedIndexName = indexName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const expectedPreHandoffReadError = new RegExp(
     `${OP.indexRead}: main thread must open OPFS index ${escapedIndexName} after worker publication before read`,
@@ -1464,30 +1418,18 @@ async function checkRawIndexReadRejectsPreHandoffMainThreadOpen() {
     indexNamePointer,
     mainNameLen,
   );
-  const workerNameLen = writeString(workerHost.memory, indexNamePointer, indexName);
-  const workerIndexId = workerHost[HOST.OPFS_INDEX_CREATE](
-    indexNamePointer,
-    workerNameLen,
-  );
 
   assert.notEqual(
     staleOpenIndexId,
     staleMainIndexId,
     "raw main-thread open before worker handoff should create a distinct stale id",
   );
-  new Uint8Array(workerHost.memory.buffer, workerWritePointer, workerWriteBytes.byteLength)
-    .set(workerWriteBytes);
-  assert.equal(
-    workerHost[HOST.OPFS_INDEX_WRITE](
-      workerIndexId,
-      indexWriteOffset,
-      workerWritePointer,
-      workerWriteBytes.byteLength,
-    ),
-    expectedWorkerWriteCount,
-  );
-  assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushSuccess);
-  assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
+  await fixture.scenario.workerIndexGeneration({
+    bytes: workerWriteBytes,
+    indexName,
+    namePtr: indexNamePointer,
+    workerHost,
+  });
   assert.throws(
     () => fixture.mainHost[HOST.OPFS_INDEX_READ](
       staleOpenIndexId,
@@ -1537,7 +1479,7 @@ async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
   const expectedTypedReadFreshnessError = new RegExp(
     `${OP.mainThreadIndexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
   );
-  const workerIndexId = await fixture.scenario.workerPublication({
+  const workerIndexId = await fixture.scenario.workerIndexGeneration({
     bytes: firstGenerationBytes,
     indexName,
     workerHost,
@@ -1594,7 +1536,7 @@ async function checkMainThreadIndexSizeRejectsNewerUnpublishedGeneration() {
   const expectedRawSizeFreshnessError = new RegExp(
     `${OP.indexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
   );
-  const workerIndexId = await fixture.scenario.workerPublication({
+  const workerIndexId = await fixture.scenario.workerIndexGeneration({
     bytes: firstGenerationBytes,
     indexName,
     workerHost,
@@ -1645,13 +1587,13 @@ async function checkMainThreadIndexReadRejectsSupersededPublishedGeneration() {
   const expectedTypedReadFreshnessError = new RegExp(
     `${OP.mainThreadIndexRead}: main-thread OPFS index ${escapedIndexName} open must match current published worker generation`,
   );
-  const firstWorkerIndexId = await fixture.scenario.workerPublication({
+  const firstWorkerIndexId = await fixture.scenario.workerIndexGeneration({
     bytes: firstGenerationBytes,
     indexName,
     workerHost,
   });
   const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
-  const secondWorkerIndexId = await fixture.scenario.workerPublication({
+  const secondWorkerIndexId = await fixture.scenario.workerIndexGeneration({
     bytes: secondGenerationBytes,
     indexName,
     workerHost,
@@ -1694,7 +1636,7 @@ async function checkObservedIndexReadPreservesRawReadCount() {
   const rawReadDestinationPointer = 120;
   const actualBytes = new Uint8Array([81, 82]);
 
-  await fixture.scenario.workerPublication({
+  await fixture.scenario.workerIndexGeneration({
     bytes: actualBytes,
     indexName,
     workerHost,
