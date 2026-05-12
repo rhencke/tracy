@@ -512,10 +512,12 @@ async function checkTypedScenarioOrderGuards() {
   const noSelectionWorkerMessage = {
     type: noSelectionWorkerMessageType,
   };
-  const noSelectionFileHandle = 999;
+  const missingSelectedFileIngestHandle = 999;
+  const missingSelectedFileIngestBytes = new Uint8Array([53, 54]);
+  const missingSelectedFileIngestName = "no-selection.json";
   const noSelectionFile = {
-    bytes: new Uint8Array([53, 54]),
-    name: "no-selection.json",
+    bytes: missingSelectedFileIngestBytes,
+    name: missingSelectedFileIngestName,
   };
   const expectedCreateBeforePublicationError = {
     message: `${OP.mainThreadIndexOpen}: worker must create OPFS index ${indexName} before publication`,
@@ -527,7 +529,7 @@ async function checkTypedScenarioOrderGuards() {
     message: `worker publication requires worker OPFS index ${indexName} to contain bytes`,
   };
   const expectedNoSelectionMessageError = {
-    message: `${OP.workerMessageDelivery} requires selected-file ingest for handle ${noSelectionFileHandle}`,
+    message: `${OP.workerMessageDelivery} requires selected-file ingest for handle ${missingSelectedFileIngestHandle}`,
   };
 
   assert.throws(
@@ -583,7 +585,7 @@ async function checkTypedScenarioOrderGuards() {
   assert.throws(
     () => noSelectionFixture.scenario.selectedFileWorkerMessageDelivery({
       file: noSelectionFile,
-      handle: noSelectionFileHandle,
+      handle: missingSelectedFileIngestHandle,
       message: noSelectionWorkerMessage,
       worker: { emit() {} },
     }),
