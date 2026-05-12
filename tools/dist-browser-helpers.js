@@ -39,6 +39,7 @@ const SHARED_BROWSER_ENV = Object.freeze([
   "PUPPETEER_EXECUTABLE_PATH",
   "CHROME_PATH",
 ]);
+const DEFAULT_BROWSER_READINESS_POLL_INTERVAL_MS = 25;
 
 function contentType(file, mimeTypes = MIME_TYPES) {
   return mimeTypes[path.extname(file)] ?? "application/octet-stream";
@@ -263,6 +264,78 @@ function browserExecutablePath(options = {}) {
   throw new Error(options.errorMessage ?? "Chrome/Chromium not found");
 }
 
+function browserReadinessState() {
+  const frameDurationSampleCount = 16;
+  const workerMessageSampleCount = 8;
+  const ingestState = globalThis.__TRACY_BROWSER_INGEST__ ?? {};
+  const workerMessages = Array.isArray(ingestState.workerMessages)
+    ? ingestState.workerMessages
+    : [];
+  const frameDurations = Array.isArray(ingestState.frameDurations)
+    ? ingestState.frameDurations
+    : [];
+  const traceCanvas = globalThis.document?.querySelector?.("#tracy") ?? null;
+  const traceCanvasState = traceCanvas === null
+    ? null
+    : {
+        height: traceCanvas.height ?? null,
+        width: traceCanvas.width ?? null,
+        clientHeight: traceCanvas.clientHeight ?? null,
+        clientWidth: traceCanvas.clientWidth ?? null,
+      };
+
+  return {
+    appLoadError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
+    alertText: globalThis.document?.querySelector?.('[role="alert"]')?.textContent ?? "",
+    documentReadyState: globalThis.document?.readyState ?? null,
+    frameDurationsSample: frameDurations.slice(0, frameDurationSampleCount),
+    locationHref: globalThis.location?.href ?? "",
+    performanceMarks:
+      globalThis.performance?.getEntriesByType?.("mark")?.map((entry) => entry.name) ?? [],
+    traceCanvas: traceCanvasState,
+    workerMessageCount: workerMessages.length,
+    workerMessagesHead: workerMessages.slice(0, workerMessageSampleCount),
+    workerMessagesTail: workerMessages.slice(-workerMessageSampleCount),
+    ...Object.fromEntries(
+      Object.entries(ingestState).filter(
+        ([key]) => key !== "frameDurations" && key !== "workerMessages",
+      ),
+    ),
+  };
+}
+
+async function collectBrowserReadinessState(evaluate) {
+  return evaluate(browserReadinessState);
+}
+
+function formatBrowserReadinessTimeout(label, state) {
+  return `${label}; browser readiness state=${JSON.stringify(state)}`;
+}
+
+async function waitForBrowserReadiness(options) {
+  const evaluate = options.evaluate;
+  const predicate = options.predicate;
+  const timeoutMs = options.timeoutMs;
+  const pollIntervalMs =
+    options.pollIntervalMs ?? DEFAULT_BROWSER_READINESS_POLL_INTERVAL_MS;
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const value = await evaluate(predicate);
+    if (value) {
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  throw new Error(
+    formatBrowserReadinessTimeout(
+      options.label,
+      await collectBrowserReadinessState(evaluate),
+    ),
+  );
+}
+
 module.exports = {
   CACHE_CONTROL,
   CHROME_COMMANDS,
@@ -271,11 +344,15 @@ module.exports = {
   SHARED_BROWSER_ENV,
   acceptsGzip,
   browserExecutablePath,
+  browserReadinessState,
   cachedPlaywrightChromes,
+  collectBrowserReadinessState,
   commandPath,
   contentType,
   createDistServer,
+  formatBrowserReadinessTimeout,
   isExecutableFile,
   resolveDistPath,
   shouldGzip,
+  waitForBrowserReadiness,
 };

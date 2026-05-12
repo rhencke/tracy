@@ -6,15 +6,20 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const vm = require("node:vm");
 const zlib = require("node:zlib");
 const {
   CACHE_CONTROL,
+  browserReadinessState,
   browserExecutablePath,
   cachedPlaywrightChromes,
+  collectBrowserReadinessState,
   commandPath: safeCommandPath,
   contentType,
   createDistServer,
+  formatBrowserReadinessTimeout,
   resolveDistPath,
+  waitForBrowserReadiness,
 } = require("./dist-browser-helpers.js");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -427,6 +432,114 @@ function assertBrowserDiscovery() {
   );
 }
 
+async function assertBrowserReadinessDiagnostics() {
+  const workerMessages = Array.from({ length: 10 }, (_, index) => ({
+    index,
+    type: `message-${index}`,
+  }));
+  const state = JSON.parse(JSON.stringify(
+    vm.runInNewContext(`(${browserReadinessState.toString()})()`, {
+      __TRACY_APP_LOAD_ERROR__: "app failed during boot",
+      __TRACY_BROWSER_INGEST__: {
+        fileSelectionAt: 12,
+        firstPresentedAt: null,
+        frameDurations: [1, 2, 3],
+        selectedFileName: "trace.json",
+        workerMessages,
+      },
+      document: {
+        readyState: "interactive",
+        querySelector(selector) {
+          if (selector === '[role="alert"]') {
+            return { textContent: "alert text" };
+          }
+          if (selector === "#tracy") {
+            return {
+              height: 150,
+              width: 300,
+              clientHeight: 75,
+              clientWidth: 150,
+            };
+          }
+          return null;
+        },
+      },
+      location: {
+        href: "http://127.0.0.1:1234/",
+      },
+      performance: {
+        getEntriesByType(type) {
+          assert.equal(type, "mark");
+          return [
+            { name: "tracy.core.ready" },
+            { name: "tracy.app.ready" },
+          ];
+        },
+      },
+    }),
+  ));
+
+  assert.equal(state.appLoadError, "app failed during boot");
+  assert.equal(state.alertText, "alert text");
+  assert.equal(state.documentReadyState, "interactive");
+  assert.equal(state.locationHref, "http://127.0.0.1:1234/");
+  assert.deepEqual(state.performanceMarks, [
+    "tracy.core.ready",
+    "tracy.app.ready",
+  ]);
+  assert.deepEqual(state.frameDurationsSample, [1, 2, 3]);
+  assert.deepEqual(state.traceCanvas, {
+    height: 150,
+    width: 300,
+    clientHeight: 75,
+    clientWidth: 150,
+  });
+  assert.equal(state.workerMessageCount, 10);
+  assert.deepEqual(state.workerMessagesHead.map((message) => message.index), [
+    0, 1, 2, 3, 4, 5, 6, 7,
+  ]);
+  assert.deepEqual(state.workerMessagesTail.map((message) => message.index), [
+    2, 3, 4, 5, 6, 7, 8, 9,
+  ]);
+  assert.equal(state.workerMessages, undefined);
+  assert.equal(state.frameDurations, undefined);
+  assert.equal(state.selectedFileName, "trace.json");
+  assert.equal(state.firstPresentedAt, null);
+
+  let predicateChecks = 0;
+  const readyValue = await waitForBrowserReadiness({
+    evaluate: async (fn) => fn(),
+    label: "test readiness",
+    pollIntervalMs: 1,
+    predicate: () => {
+      predicateChecks += 1;
+      return predicateChecks === 2 ? "ready" : "";
+    },
+    timeoutMs: 50,
+  });
+  assert.equal(readyValue, "ready");
+  assert.equal(predicateChecks, 2);
+
+  await assert.rejects(
+    waitForBrowserReadiness({
+      evaluate: async (fn) => fn(),
+      label: "test timeout",
+      predicate: () => false,
+      timeoutMs: 0,
+    }),
+    /test timeout; browser readiness state=/,
+  );
+
+  assert.deepEqual(
+    await collectBrowserReadinessState(async () => ({ appLoadError: "from page" })),
+    { appLoadError: "from page" },
+  );
+  assert.equal(
+    formatBrowserReadinessTimeout("wait failed", { appLoadError: "boom" }),
+    'wait failed; browser readiness state={"appLoadError":"boom"}',
+  );
+}
+
 function assertAppLoadUsesSharedHelpers() {
   const source = readRepoFile("tools/app-load-bench.js");
 
@@ -490,6 +603,7 @@ function assertDelayedWasmImportBoundary() {
 async function main() {
   assertPathAndMimeHelpers();
   assertBrowserDiscovery();
+  await assertBrowserReadinessDiagnostics();
   assertAppLoadUsesSharedHelpers();
   assertInteractiveCheckUsesSharedHelpers();
   assertDelayedWasmImportBoundary();
