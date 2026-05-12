@@ -522,12 +522,13 @@ async function assertBrowserReadinessDiagnostics() {
 
   await assert.rejects(
     waitForBrowserReadiness({
+      collectState: async () => ({ custom: "state" }),
       evaluate: async (fn) => fn(),
       label: "test timeout",
       predicate: () => false,
       timeoutMs: 0,
     }),
-    /test timeout; browser readiness state=/,
+    /test timeout; browser readiness state=\{"custom":"state"\}/,
   );
 
   assert.deepEqual(
@@ -544,8 +545,13 @@ function assertAppLoadUsesSharedHelpers() {
   const source = readRepoFile("tools/app-load-bench.js");
 
   assert.match(source, /require\("\.\/dist-browser-helpers\.js"\)/);
+  assert.match(source, /waitForBrowserReadiness/);
+  assert.match(source, /function waitForCdpBrowserReadiness/);
+  assert.match(source, /"browser core did not become ready"/);
+  assert.match(source, /"browser app did not become ready"/);
   assert.match(source, /browserExecutablePath\(\{\s*errorMessage: "Chrome\/Chromium not found; set TRACY_APP_LOAD_BROWSER",\s*explicitPath,/);
   assert.match(source, /createDistServer\(distDir,\s*\{\s*cacheControl: CACHE_CONTROL\.IMMUTABLE,\s*gzip: true,/);
+  assert.doesNotMatch(source, /page reported app-load failure/);
   assert.doesNotMatch(source, /const http = require\("node:http"\)/);
   assert.doesNotMatch(source, /const zlib = require\("node:zlib"\)/);
   assert.doesNotMatch(source, /\bconst MIME_TYPES\b/);
@@ -565,11 +571,15 @@ function assertInteractiveCheckUsesSharedHelpers() {
   assert.match(source, /require\("\.\/dist-browser-helpers\.js"\)/);
   assert.match(source, /browserExecutablePath: findBrowserExecutablePath/);
   assert.match(source, /cachedPlaywrightChromes/);
+  assert.match(source, /collectBrowserReadinessState/);
+  assert.match(source, /waitForBrowserReadiness/);
   assert.match(source, /findBrowserExecutablePath\(\{\s*envNames: \[/);
   assert.ok(browserEnvOffset >= 0, "interactive browser env override must stay configured");
   assert.ok(puppeteerEnvOffset > browserEnvOffset, "TRACY_INTERACTIVE_INGEST_BROWSER must precede Puppeteer fallback");
   assert.ok(chromeEnvOffset > puppeteerEnvOffset, "PUPPETEER_EXECUTABLE_PATH must precede CHROME_PATH fallback");
   assert.match(source, /createDistServer\(DIST_DIR,\s*\{\s*cacheControl: CACHE_CONTROL\.NO_STORE,\s*gzip: false,/);
+  assert.doesNotMatch(source, /browser ingest state=/);
+  assert.doesNotMatch(source, /Date\.now\(\) - start < timeoutMs/);
   assert.doesNotMatch(source, /const childProcess = require\("node:child_process"\)/);
   assert.doesNotMatch(source, /const http = require\("node:http"\)/);
   assert.doesNotMatch(source, /\bfunction commandPath\b/);

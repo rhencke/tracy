@@ -331,7 +331,9 @@ async function waitForBrowserReadiness(options) {
   throw new Error(
     formatBrowserReadinessTimeout(
       options.label,
-      await collectBrowserReadinessState(evaluate),
+      options.collectState === undefined
+        ? await collectBrowserReadinessState(evaluate)
+        : await options.collectState(),
     ),
   );
 }

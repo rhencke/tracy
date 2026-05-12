@@ -11,6 +11,7 @@ const {
   CACHE_CONTROL,
   browserExecutablePath,
   createDistServer,
+  waitForBrowserReadiness,
 } = require("./dist-browser-helpers.js");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -499,6 +500,34 @@ async function waitUntil(predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
   throw new Error("timed out waiting for page condition");
 }
 
+async function evaluateReadinessPredicate(cdp, page, predicate) {
+  const result = await cdp.send("Runtime.evaluate", {
+    awaitPromise: true,
+    expression: `(${predicate.toString()})()`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  if (result.exceptionDetails !== undefined) {
+    const description =
+      result.exceptionDetails.exception?.description ??
+      result.exceptionDetails.text ??
+      "unknown Runtime.evaluate failure";
+    throw new Error(`failed to evaluate browser readiness predicate: ${description}`);
+  }
+
+  return result.result?.value;
+}
+
+function waitForCdpBrowserReadiness(cdp, page, label, predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  return waitForBrowserReadiness({
+    evaluate: (readinessPredicate) =>
+      evaluateReadinessPredicate(cdp, page, readinessPredicate),
+    label,
+    predicate,
+    timeoutMs,
+  });
+}
+
 function isBenignLoadingFailure(failure) {
   return BENIGN_LOADING_FAILURES.some(
     (benignFailure) =>
@@ -783,27 +812,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const loaded = waitForSessionEvent(cdp, page.sessionId, "Page.loadEventFired");
   const navigation = await cdp.send("Page.navigate", { url }, page.sessionId);
   await loaded;
-  await waitUntil(async () => {
-    const result = await cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
-        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
-        return {
-          coreReady: performance.getEntriesByName("tracy.core.ready").length > 0,
-          detail,
-          error,
-        };
-      })()`,
-      returnByValue: true,
-    }, page.sessionId);
-    const status = result.result?.value ?? {};
-
-    if (status.error) {
-      const detail = status.detail ? ` (${status.detail})` : "";
-      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
-    }
-    return status.coreReady === true;
-  });
+  await waitForCdpBrowserReadiness(
+    cdp,
+    page,
+    "browser core did not become ready",
+    () => performance.getEntriesByName("tracy.core.ready").length > 0,
+  );
   const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
   coreRequestIds = navigationFrameRequestIds(
     coreTransferRequestIds(
@@ -822,28 +836,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     requestUrls,
     ["host/wasm-modules.mjs"],
   );
-  await waitUntil(async () => {
-    const result = await cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
-        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
-        return {
-          detail,
-          error,
-          fullReady: performance.getEntriesByName("tracy.app.ready").length > 0,
-        };
-      })()`,
-      returnByValue: true,
-    }, page.sessionId);
-    const status = result.result?.value ?? {};
-
-    if (status.error) {
-      const detail = status.detail ? ` (${status.detail})` : "";
-      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
-    }
-
-    return status.fullReady === true;
-  });
+  await waitForCdpBrowserReadiness(
+    cdp,
+    page,
+    "browser app did not become ready",
+    () => performance.getEntriesByName("tracy.app.ready").length > 0,
+  );
   await waitUntil(() =>
     unfinishedTransferRequestIds(
       coreRequestIds,
@@ -1470,7 +1468,11 @@ function runSelfTest() {
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
   assert.match(
     navigateAndMeasure.toString(),
-    /coreReady: performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,
+    /waitForCdpBrowserReadiness\([\s\S]+performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /waitForCdpBrowserReadiness\([\s\S]+performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
   );
   assert.match(
     navigateAndMeasure.toString(),
@@ -1544,9 +1546,8 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /fullReady: performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
+    /waitForCdpBrowserReadiness\([\s\S]+"browser app did not become ready"[\s\S]+performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
   );
-  assert.match(navigateAndMeasure.toString(), /return status\.fullReady === true/);
   assert.match(
     indexHtml,
     /<link rel="modulepreload" href="bootstrap\.mjs">/,

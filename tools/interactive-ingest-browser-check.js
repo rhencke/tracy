@@ -11,7 +11,9 @@ const {
   CACHE_CONTROL,
   browserExecutablePath: findBrowserExecutablePath,
   cachedPlaywrightChromes,
+  collectBrowserReadinessState,
   createDistServer,
+  waitForBrowserReadiness,
 } = require("./dist-browser-helpers.js");
 
 const DIST_DIR = repoPath("dist");
@@ -214,68 +216,56 @@ async function installIngestInstrumentation(page) {
 }
 
 async function browserState(page, { diagnoseReader = false } = {}) {
-  return page.evaluate(async (shouldDiagnoseReader) => {
-    const state = globalThis.__TRACY_BROWSER_INGEST__ ?? {};
-    const workerMessages = state.workerMessages ?? [];
-    let readerDiagnostic = null;
+  const state = await collectBrowserReadinessState((readinessState) =>
+    page.evaluate(readinessState),
+  );
 
-    if (shouldDiagnoseReader) {
+  if (!diagnoseReader) {
+    return state;
+  }
+
+  return {
+    ...state,
+    readerDiagnostic: await page.evaluate(async () => {
+      const state = globalThis.__TRACY_BROWSER_INGEST__ ?? {};
+
       const startPost = state.workerPosts?.find((message) => message.indexName !== null);
-      if (startPost?.indexName !== undefined && startPost.indexName !== null) {
-        try {
-          const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
-          const { makeMainThreadHost } = await import("./host/shim.mjs");
-          const { createMainThreadIndexReaderController } =
-            await import("./host/runtime.mjs");
-          const host = makeMainThreadHost(memory);
-          const reader = createMainThreadIndexReaderController(memory, host);
-
-          await reader.open(startPost.indexName);
-          readerDiagnostic = {
-            coveredRange: reader.coveredRange(),
-            queryRange: await reader.queryRange(0, 0, 1000, 12288),
-            status: reader.status(),
-            trackCount: reader.trackCount(),
-          };
-        } catch (error) {
-          readerDiagnostic = {
-            error: error instanceof Error ? error.message : String(error),
-          };
-        }
+      if (startPost?.indexName === undefined || startPost.indexName === null) {
+        return null;
       }
-    }
 
-    return {
-      appError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
-      frameDurationsSample: state.frameDurations?.slice(0, 16),
-      performanceMarks: performance.getEntriesByType("mark").map((entry) => entry.name),
-      workerMessageCount: workerMessages.length,
-      workerMessagesHead: workerMessages.slice(0, 8),
-      workerMessagesTail: workerMessages.slice(-8),
-      readerDiagnostic,
-      ...Object.fromEntries(
-        Object.entries(state).filter(
-          ([key]) => key !== "frameDurations" && key !== "workerMessages",
-        ),
-      ),
-    };
-  }, diagnoseReader);
+      try {
+        const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
+        const { makeMainThreadHost } = await import("./host/shim.mjs");
+        const { createMainThreadIndexReaderController } =
+          await import("./host/runtime.mjs");
+        const host = makeMainThreadHost(memory);
+        const reader = createMainThreadIndexReaderController(memory, host);
+
+        await reader.open(startPost.indexName);
+        return {
+          coveredRange: reader.coveredRange(),
+          queryRange: await reader.queryRange(0, 0, 1000, 12288),
+          status: reader.status(),
+          trackCount: reader.trackCount(),
+        };
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }),
+  };
 }
 
 async function waitForPageCondition(page, predicate, label, timeoutMs = BROWSER_TIMEOUT_MS) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await page.evaluate(predicate)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-
-  throw new Error(
-    `${label}; browser ingest state=${JSON.stringify(
-      await browserState(page, { diagnoseReader: true }),
-    )}`,
-  );
+  return waitForBrowserReadiness({
+    collectState: () => browserState(page, { diagnoseReader: true }),
+    evaluate: (readinessPredicate) => page.evaluate(readinessPredicate),
+    label,
+    predicate,
+    timeoutMs,
+  });
 }
 
 async function checkBrowserInteractiveIngest() {
@@ -302,14 +292,12 @@ async function checkBrowserInteractiveIngest() {
     await page.goto(`${server.origin}/`, { waitUntil: "load" });
     await waitForPageCondition(
       page,
-      () =>
-        performance.getEntriesByName("tracy.app.ready").length > 0 ||
-        globalThis.__TRACY_APP_LOAD_ERROR__ !== undefined,
+      () => performance.getEntriesByName("tracy.app.ready").length > 0,
       "browser app did not become ready",
     );
 
     const readyState = await browserState(page);
-    assert.equal(readyState.appError, "");
+    assert.equal(readyState.appLoadError, "");
     assert.equal(readyState.suspendingType, "function");
     assert.equal(readyState.promisingType, "function");
 
@@ -340,15 +328,13 @@ async function checkBrowserInteractiveIngest() {
     await chooser.accept([tracePath]);
     await waitForPageCondition(
       page,
-      () =>
-        globalThis.__TRACY_APP_LOAD_ERROR__ !== undefined ||
-        globalThis.__TRACY_BROWSER_INGEST__?.firstPresentedAt !== null,
+      () => globalThis.__TRACY_BROWSER_INGEST__?.firstPresentedAt !== null,
       "browser did not present first ingest draw",
       10_000,
     );
 
     const result = await browserState(page);
-    assert.equal(result.appError, "");
+    assert.equal(result.appLoadError, "");
     assert.equal(result.selectedFileName, "throttled-100mb.json");
     assert.equal(result.selectedFileSize, TRACE_SIZE_BYTES);
     assert.notEqual(result.fileSelectionAt, null);
