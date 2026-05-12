@@ -29,7 +29,7 @@
     "test:interactive-ingest-browser": "node tools/interactive-ingest-browser-check.js",
     "test:direct-esm": "node tools/direct-esm-check.js",
     "test:dist-browser-helpers": "node tools/dist-browser-helpers-check.js",
-    "test:generated-file-writer": "vitest run tools/generated-file-writer.test.mjs",
+    "test:generated-file-writer": "vitest run",
     "test:service-worker": "node tools/service-worker-check.js",
     "test:dist-budget": "node tools/dist-budget-check.js --self-test",
     "test:app-load-bench": "node tools/app-load-bench.js --self-test",
