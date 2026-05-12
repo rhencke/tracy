@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -24,8 +26,14 @@ const {
   replaceGeneratedBlock,
 } = require("./generated-file-writer.js");
 
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 function filePath(relativePath, root) {
   return path.join(root, relativePath);
+}
+
+async function readRepoFile(relativePath) {
+  return fs.readFile(path.join(ROOT_DIR, relativePath), "utf8");
 }
 
 async function readFile(relativePath, root) {
@@ -267,5 +275,114 @@ describe("host shim invariant", () => {
       workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, 1n, 2, 32),
     ).resolves.toBe(2);
     expect(Array.from(new Uint8Array(memory.buffer, 32, 2))).toEqual([8, 9]);
+  });
+});
+
+describe("service worker invariant", () => {
+  test("registers after app readiness and page load", async () => {
+    const bootstrap = await readRepoFile("bootstrap.mjs");
+    const startupSpec = await readRepoFile("host/startup-spec.mjs");
+
+    expect(startupSpec).toMatch(/SERVICE_WORKER_URL: "service-worker\.js"/);
+    expect(bootstrap).toMatch(
+      /navigator\.serviceWorker\.register\(RUNTIME_URLS\.SERVICE_WORKER_URL\)/,
+    );
+    expect(bootstrap).toMatch(
+      /Promise\.all\(\[appReady\(\), pageLoaded\(\)\]\)\.then\(registerServiceWorker\)/,
+    );
+    expect(bootstrap).toMatch(
+      /globalThis\.addEventListener\?\.\(PERFORMANCE_MARKS\.appReady, resolve, \{ once: true \}\)/,
+    );
+    expect(bootstrap).not.toMatch(/registerAfterReady/);
+    expect(bootstrap).not.toMatch(/SERVICE_WORKER_READY_/);
+    expect(bootstrap).not.toMatch(/setTimeout/);
+    expect(bootstrap).not.toMatch(/setTimeout\(register/);
+    expect(startupSpec).not.toMatch(/BOOTSTRAP_TIMING/);
+  });
+
+  test("keeps service worker and precache build wiring explicit", async () => {
+    const makefile = await readRepoFile("Makefile");
+    const packageJson = JSON.parse(await readRepoFile("package.json"));
+
+    expect(packageJson.scripts["test:service-worker"]).toBe(
+      "node tools/service-worker-check.js",
+    );
+    expect(makefile).toMatch(
+      /SERVICE_WORKER_FILES := dist\/service-worker\.js dist\/precache-manifest\.js/,
+    );
+    expect(makefile).toMatch(
+      /PRODUCTION_WASM_FILES := \$\(filter-out %\.test\.wasm,\$\(WASM_FILES\)\)/,
+    );
+    expect(makefile).toMatch(/APP_RUNTIME_DIST_FILES :=[\s\S]+\$\(PRODUCTION_WASM_FILES\)/);
+    expect(makefile).toMatch(/PRECACHE_DIST_FILES :=[\s\S]+\$\(APP_RUNTIME_DIST_FILES\)/);
+    expect(makefile).toMatch(/dist\/precache-manifest\.js: \$\(PRECACHE_DIST_FILES\)/);
+    expect(makefile).toMatch(/node tools\/service-worker-check\.js/);
+  });
+
+  test("serves app shell assets from warmed precache responses", async () => {
+    const serviceWorker = await readRepoFile("service-worker.js");
+
+    expect(serviceWorker).toMatch(/importScripts\("precache-manifest\.js"\)/);
+    expect(serviceWorker).toMatch(/\.addAll/);
+    expect(serviceWorker).toMatch(/const precacheCachePromise = caches\.open\(cacheName\)/);
+    expect(serviceWorker).toMatch(/const precacheResponses = new Map\(\)/);
+    expect(serviceWorker).toMatch(/warmPrecacheResponses\(cache\)/);
+    expect(serviceWorker).toMatch(/precacheResponses\.get\(cacheUrl\)\?\.clone\(\)/);
+    expect(serviceWorker).toMatch(/cache\.match\(cacheUrl\)/);
+
+    for (const relativePath of [
+      "service-worker.js",
+      "tools/generate-precache-manifest.js",
+      "tools/service-worker-check.js",
+    ]) {
+      await expect(
+        fileExists(relativePath, ROOT_DIR),
+        `${relativePath} should exist`,
+      ).resolves.toBe(true);
+    }
+  });
+
+  test("generates a scoped precache manifest from explicit dist inputs", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "tracy-precache-"));
+
+    try {
+      const distDir = path.join(root, "dist");
+      const output = path.join(distDir, "precache-manifest.js");
+      await fs.mkdir(path.join(distDir, "host"), { recursive: true });
+      await fs.mkdir(path.join(distDir, "wasm", "std"), { recursive: true });
+      await fs.writeFile(path.join(distDir, "index.html"), "");
+      await fs.writeFile(path.join(distDir, "bootstrap.mjs"), "");
+      await fs.writeFile(path.join(distDir, "host", "runtime.mjs"), "");
+      await fs.writeFile(path.join(distDir, "stale.txt"), "");
+      await fs.writeFile(path.join(distDir, "wasm", "app.wasm"), "");
+      await fs.writeFile(path.join(distDir, "wasm", "std", "mem.wasm"), "");
+
+      execFileSync(
+        process.execPath,
+        [
+          "tools/generate-precache-manifest.js",
+          distDir,
+          output,
+          path.join(distDir, "index.html"),
+          path.join(distDir, "bootstrap.mjs"),
+          path.join(distDir, "host", "runtime.mjs"),
+          path.join(distDir, "wasm", "app.wasm"),
+          path.join(distDir, "wasm", "std", "mem.wasm"),
+        ],
+        { cwd: ROOT_DIR },
+      );
+
+      const manifest = await fs.readFile(output, "utf8");
+      expect(manifest).toMatch(/cacheName: "tracy-app-shell-[0-9a-f]{16}"/);
+      expect(manifest).toMatch(/"index\.html"/);
+      expect(manifest).toMatch(/"bootstrap\.mjs"/);
+      expect(manifest).toMatch(/"host\/runtime\.mjs"/);
+      expect(manifest).toMatch(/"wasm\/app\.wasm"/);
+      expect(manifest).toMatch(/"wasm\/std\/mem\.wasm"/);
+      expect(manifest).not.toMatch(/"stale\.txt"/);
+      expect(manifest).not.toMatch(/"precache-manifest\.js"/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
