@@ -45,16 +45,22 @@ async function makeFreshMainThreadIndexReader({
   bytes,
   fixture,
   indexName,
+  namePtr,
+  observeOnlyOpen = false,
   offset = 0n,
   workerHost,
 }) {
   const workerIndexId = await fixture.scenario.workerIndexGeneration({
     bytes,
     indexName,
+    namePtr,
     offset,
     workerHost,
   });
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({
+    indexName,
+    observeOnly: observeOnlyOpen,
+  });
 
   return Object.freeze({
     mainIndexId,
@@ -67,6 +73,12 @@ async function makeFreshMainThreadIndexReader({
         len,
         observeOnly: true,
         offset: readOffset,
+      });
+    },
+    observeOnlyOpen() {
+      return fixture.scenario.mainThreadIndexOpen({
+        indexName,
+        observeOnly: true,
       });
     },
     rawRead({
@@ -1425,26 +1437,29 @@ async function checkObserveOnlyIndexOpenRejectsStaleRawOpen() {
     staleMainIndexId,
     "raw main-thread open before worker publication should create a distinct stale id",
   );
-  await fixture.scenario.workerIndexGeneration({
+  await assert.rejects(
+    () => makeFreshMainThreadIndexReader({
+      bytes: workerWriteBytes,
+      fixture,
+      indexName,
+      namePtr: indexNamePointer,
+      observeOnlyOpen: true,
+      workerHost,
+    }),
+    expectedObserveOnlyStaleOpenError,
+    "observe-only open should reject raw main-thread opens from before worker publication",
+  );
+  const reader = await makeFreshMainThreadIndexReader({
     bytes: workerWriteBytes,
+    fixture,
     indexName,
     namePtr: indexNamePointer,
     workerHost,
   });
-  assert.throws(
-    () => fixture.scenario.mainThreadIndexOpen({ indexName, observeOnly: true }),
-    expectedObserveOnlyStaleOpenError,
-    "observe-only open should reject raw main-thread opens from before worker publication",
-  );
-
-  const freshOpenIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](
-    indexNamePointer,
-    mainNameLen,
-  );
 
   assert.equal(
-    fixture.scenario.mainThreadIndexOpen({ indexName, observeOnly: true }),
-    freshOpenIndexId,
+    reader.observeOnlyOpen(),
+    reader.mainIndexId,
     "observe-only open should accept raw main-thread opens after worker publication",
   );
 }
@@ -1479,8 +1494,9 @@ async function checkRawIndexReadRejectsPreHandoffMainThreadOpen() {
     staleMainIndexId,
     "raw main-thread open before worker handoff should create a distinct stale id",
   );
-  await fixture.scenario.workerIndexGeneration({
+  const reader = await makeFreshMainThreadIndexReader({
     bytes: workerWriteBytes,
+    fixture,
     indexName,
     namePtr: indexNamePointer,
     workerHost,
@@ -1496,18 +1512,12 @@ async function checkRawIndexReadRejectsPreHandoffMainThreadOpen() {
     "raw main-thread read should reject ids opened before the worker handoff existed",
   );
 
-  const freshOpenIndexId = fixture.mainHost[HOST.OPFS_INDEX_OPEN](
-    indexNamePointer,
-    mainNameLen,
-  );
-
   assert.equal(
-    fixture.mainHost[HOST.OPFS_INDEX_READ](
-      freshOpenIndexId,
-      mainReadOffset,
-      mainReadLength,
-      mainReadDestinationPointer,
-    ),
+    reader.rawRead({
+      destPtr: mainReadDestinationPointer,
+      len: mainReadLength,
+      offset: mainReadOffset,
+    }),
     mainReadLength,
     "raw main-thread read should accept an id opened after worker publication",
   );
@@ -1534,12 +1544,12 @@ async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
   const expectedTypedReadFreshnessError = new RegExp(
     `${OP.mainThreadIndexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
   );
-  const workerIndexId = await fixture.scenario.workerIndexGeneration({
+  const reader = await makeFreshMainThreadIndexReader({
     bytes: firstGenerationBytes,
+    fixture,
     indexName,
     workerHost,
   });
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
   new Uint8Array(
     workerHost.memory.buffer,
@@ -1548,7 +1558,7 @@ async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
   ).set(secondGenerationBytes);
   assert.equal(
     workerHost[HOST.OPFS_INDEX_WRITE](
-      workerIndexId,
+      reader.workerIndexId,
       indexWriteOffset,
       secondGenerationWritePointer,
       secondGenerationBytes.byteLength,
@@ -1556,20 +1566,17 @@ async function checkMainThreadIndexReadRejectsNewerUnpublishedGeneration() {
     expectedSecondGenerationWriteCount,
   );
   assert.throws(
-    () => fixture.mainHost[HOST.OPFS_INDEX_READ](
-      mainIndexId,
-      mainReadOffset,
-      mainReadLength,
-      mainReadDestinationPointer,
-    ),
+    () => reader.rawRead({
+      destPtr: mainReadDestinationPointer,
+      len: mainReadLength,
+      offset: mainReadOffset,
+    }),
     expectedRawReadFreshnessError,
     "raw main-thread read should reject newer unpublished worker generations",
   );
   assert.throws(
-    () => fixture.scenario.mainThreadIndexRead({
-      indexId: mainIndexId,
+    () => reader.observeOnlyRead({
       len: mainReadLength,
-      observeOnly: true,
     }),
     expectedTypedReadFreshnessError,
     "typed main-thread read should reject newer unpublished worker generations",
@@ -1591,15 +1598,15 @@ async function checkMainThreadIndexSizeRejectsNewerUnpublishedGeneration() {
   const expectedRawSizeFreshnessError = new RegExp(
     `${OP.indexRead}: worker must flush OPFS index ${escapedIndexName} before main-thread handoff`,
   );
-  const workerIndexId = await fixture.scenario.workerIndexGeneration({
+  const reader = await makeFreshMainThreadIndexReader({
     bytes: firstGenerationBytes,
+    fixture,
     indexName,
     workerHost,
   });
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
   assert.equal(
-    fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId),
+    reader.size(),
     BigInt(firstGenerationBytes.byteLength),
     "raw main-thread size should report the current published worker generation",
   );
@@ -1610,7 +1617,7 @@ async function checkMainThreadIndexSizeRejectsNewerUnpublishedGeneration() {
   ).set(secondGenerationBytes);
   assert.equal(
     workerHost[HOST.OPFS_INDEX_WRITE](
-      workerIndexId,
+      reader.workerIndexId,
       indexWriteOffset,
       secondGenerationWritePointer,
       secondGenerationBytes.byteLength,
@@ -1618,7 +1625,7 @@ async function checkMainThreadIndexSizeRejectsNewerUnpublishedGeneration() {
     expectedSecondGenerationWriteCount,
   );
   assert.throws(
-    () => fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId),
+    () => reader.size(),
     expectedRawSizeFreshnessError,
     "raw main-thread size should reject newer unpublished worker generations",
   );
@@ -1642,38 +1649,36 @@ async function checkMainThreadIndexReadRejectsSupersededPublishedGeneration() {
   const expectedTypedReadFreshnessError = new RegExp(
     `${OP.mainThreadIndexRead}: main-thread OPFS index ${escapedIndexName} open must match current published worker generation`,
   );
-  const firstWorkerIndexId = await fixture.scenario.workerIndexGeneration({
+  const firstReader = await makeFreshMainThreadIndexReader({
     bytes: firstGenerationBytes,
+    fixture,
     indexName,
     workerHost,
   });
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
-  const secondWorkerIndexId = await fixture.scenario.workerIndexGeneration({
+  const secondReader = await makeFreshMainThreadIndexReader({
     bytes: secondGenerationBytes,
+    fixture,
     indexName,
     workerHost,
   });
 
   assert.notEqual(
-    firstWorkerIndexId,
-    secondWorkerIndexId,
+    firstReader.workerIndexId,
+    secondReader.workerIndexId,
     "second worker publication should model a newer OPFS handoff generation",
   );
   assert.throws(
-    () => fixture.mainHost[HOST.OPFS_INDEX_READ](
-      mainIndexId,
-      mainReadOffset,
-      mainReadLength,
-      mainReadDestinationPointer,
-    ),
+    () => firstReader.rawRead({
+      destPtr: mainReadDestinationPointer,
+      len: mainReadLength,
+      offset: mainReadOffset,
+    }),
     expectedRawReadFreshnessError,
     "raw main-thread read should reject superseded published worker generations",
   );
   assert.throws(
-    () => fixture.scenario.mainThreadIndexRead({
-      indexId: mainIndexId,
+    () => firstReader.observeOnlyRead({
       len: mainReadLength,
-      observeOnly: true,
     }),
     expectedTypedReadFreshnessError,
     "typed main-thread read should reject superseded published worker generations",
@@ -1691,28 +1696,25 @@ async function checkObservedIndexReadPreservesRawReadCount() {
   const rawReadDestinationPointer = 120;
   const actualBytes = new Uint8Array([81, 82]);
 
-  await fixture.scenario.workerIndexGeneration({
+  const reader = await makeFreshMainThreadIndexReader({
     bytes: actualBytes,
+    fixture,
     indexName,
     workerHost,
   });
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
   assert.equal(
-    fixture.mainHost[HOST.OPFS_INDEX_READ](
-      mainIndexId,
-      rawReadOffset,
-      requestedLen,
-      rawReadDestinationPointer,
-    ),
+    reader.rawRead({
+      destPtr: rawReadDestinationPointer,
+      len: requestedLen,
+      offset: rawReadOffset,
+    }),
     actualBytes.byteLength,
     "raw index read should report the bytes actually copied",
   );
   assert.equal(
-    fixture.scenario.mainThreadIndexRead({
-      indexId: mainIndexId,
+    reader.observeOnlyRead({
       len: requestedLen,
-      observeOnly: true,
     }),
     actualBytes.byteLength,
     "observe-only typed read should preserve the raw read count",
@@ -1720,13 +1722,13 @@ async function checkObservedIndexReadPreservesRawReadCount() {
 
   const rawRead = fixture.calls.find(
     (call) => call.host === MAIN_HOST_ROLE &&
-      call.id === mainIndexId &&
+      call.id === reader.mainIndexId &&
       call.op === OP.indexRead &&
       call.name === indexName,
   );
   const typedRead = fixture.calls.find(
     (call) => call.host === MAIN_HOST_ROLE &&
-      call.id === mainIndexId &&
+      call.id === reader.mainIndexId &&
       call.op === OP.mainThreadIndexRead &&
       call.name === indexName,
   );
