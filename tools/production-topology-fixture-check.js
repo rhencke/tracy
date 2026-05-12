@@ -17,6 +17,15 @@ const STALE_SIZE_MARKER = hostAbi.opfsBridge.indexSizeMayBeStaleMarker;
 const WORKER_EVENT = runtimeAbi.runtimeBridge.worker;
 const FILE_SELECTION = runtimeAbi.runtimeBridge.fileSelection;
 const WORKER_MESSAGE = runtimeAbi.runtimeBridge.workerMessages;
+const WORKER_INDEX_GENERATION_HANDOFF_OPERATIONS = Object.freeze(
+  hostAbi.opfsBridge.workerIndexGenerationHandoffOperationKeys.map((key) => {
+    assert.ok(
+      Object.hasOwn(OP, key),
+      `worker index generation handoff operation ${key} must exist in fixture operations`,
+    );
+    return OP[key];
+  }),
+);
 
 function writeString(memory, ptr, value) {
   const bytes = new TextEncoder().encode(value);
@@ -378,11 +387,8 @@ async function checkTypedScenarioHelpers() {
   );
   assert.deepEqual(
     fixture.calls.filter((call) => [
-      OP.indexCreate,
-      OP.indexWrite,
-      OP.indexFlush,
       OP.selectedFileIngest,
-      OP.workerPublication,
+      ...WORKER_INDEX_GENERATION_HANDOFF_OPERATIONS,
       OP.mainThreadIndexOpen,
       OP.mainThreadIndexRead,
     ].includes(call.op)).map((call) => [call.host, call.op, call.name ?? call.messageType]),

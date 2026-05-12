@@ -349,6 +349,12 @@
       "workerMessageDelivery": "worker-message-delivery",
       "workerPublication": "worker-publication"
     },
+    "workerIndexGenerationHandoffOperationKeys": [
+      "indexCreate",
+      "indexWrite",
+      "indexFlush",
+      "workerPublication"
+    ],
     "mainIndexSizeMayBeStale": true,
     "workerPersistsFileSources": false,
     "defaultPersistsFileSources": true
