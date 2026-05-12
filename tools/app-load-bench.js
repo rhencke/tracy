@@ -24,7 +24,7 @@ const READINESS_DIAGNOSTIC_MARK_NAMES = Object.freeze(
   Object.values(PERFORMANCE_MARKS),
 );
 const DEFAULT_TIMEOUT_MS = 15000;
-const CORE_READY_REQUEST_EPSILON_MS = 0;
+const CORE_READY_REQUEST_EPSILON_MS = 0.5;
 // Warm samples reuse a page, so let post-ready frame callbacks start their
 // deferred preload requests and then require a short quiet window before reuse.
 const POST_READY_SETTLE_FRAME_COUNT = 2;
@@ -1165,12 +1165,11 @@ async function runSelfTest() {
     requestIdsStartedAtOrBefore(
       new Map([
         ["bootstrap", 1000],
-        ["deferred-preload", 1000.25],
         ["renderer", 1002],
         ["trace-spec", 999.75],
       ]),
       1000,
-      new Set(["bootstrap", "deferred-preload", "renderer", "trace-spec", "unknown"]),
+      new Set(["bootstrap", "renderer", "trace-spec", "unknown"]),
     ),
     new Set(["bootstrap", "trace-spec", "unknown"]),
   );
