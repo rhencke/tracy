@@ -302,11 +302,7 @@ describe("service worker invariant", () => {
 
   test("keeps service worker and precache build wiring explicit", async () => {
     const makefile = await readRepoFile("Makefile");
-    const packageJson = JSON.parse(await readRepoFile("package.json"));
 
-    expect(packageJson.scripts["test:service-worker"]).toBe(
-      "node tools/service-worker-check.js",
-    );
     expect(makefile).toMatch(
       /SERVICE_WORKER_FILES := dist\/service-worker\.js dist\/precache-manifest\.js/,
     );
@@ -316,7 +312,6 @@ describe("service worker invariant", () => {
     expect(makefile).toMatch(/APP_RUNTIME_DIST_FILES :=[\s\S]+\$\(PRODUCTION_WASM_FILES\)/);
     expect(makefile).toMatch(/PRECACHE_DIST_FILES :=[\s\S]+\$\(APP_RUNTIME_DIST_FILES\)/);
     expect(makefile).toMatch(/dist\/precache-manifest\.js: \$\(PRECACHE_DIST_FILES\)/);
-    expect(makefile).toMatch(/node tools\/service-worker-check\.js/);
   });
 
   test("serves app shell assets from warmed precache responses", async () => {
@@ -333,7 +328,6 @@ describe("service worker invariant", () => {
     for (const relativePath of [
       "service-worker.js",
       "tools/generate-precache-manifest.js",
-      "tools/service-worker-check.js",
     ]) {
       await expect(
         fileExists(relativePath, ROOT_DIR),

@@ -1038,7 +1038,6 @@ function main() {
   const readmeSource = readRepoFile("README.md");
   const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
   const bootstrapLineCheckSource = readRepoFile("tools/check-bootstrap-lines.sh");
-  const serviceWorkerCheckSource = readRepoFile("tools/service-worker-check.js");
 
   assertIngestWorkerProgressPolicyUsesGeneratedSpec();
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
@@ -1074,7 +1073,6 @@ function main() {
   assert.doesNotMatch(readmeSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(appLoadBenchSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(bootstrapLineCheckSource, LEGACY_BOOTSTRAP_PATTERN);
-  assert.doesNotMatch(serviceWorkerCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
