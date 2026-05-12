@@ -2,10 +2,22 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { registerWatwatTests } from "./watwat-vitest.mjs";
+import {
+  registerWatwatExpectedFailureTests,
+  registerWatwatTests,
+} from "./watwat-vitest.mjs";
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WAT_TEST_DIRS = Object.freeze(["dist/wasm", "dist/wasm/std"]);
+const ASSERT_FAILURE_PROBES = Object.freeze([
+  "probe_assert_eq_i32_failure",
+  "probe_assert_eq_i64_failure",
+  "probe_assert_eq_f64_failure",
+  "probe_assert_eq_str_length_failure",
+  "probe_assert_eq_str_value_failure",
+  "probe_assert_true_failure",
+  "probe_assert_false_failure",
+]);
 
 async function watTestFilesIn(dir) {
   const entries = await fs.readdir(path.join(ROOT_DIR, dir), { withFileTypes: true });
@@ -20,5 +32,20 @@ const watTestFiles = (
 ).flat().sort();
 
 await registerWatwatTests(watTestFiles, {
+  harnessPath: "tools/tracy-watwat-harness.js",
+});
+
+await registerWatwatExpectedFailureTests([
+  {
+    exportName: "probe_assert_eq_i32_failure",
+    expectedMessage: "deliberate i32 failure",
+    file: "dist/wasm/watwat.test.wasm",
+  },
+  ...ASSERT_FAILURE_PROBES.map((exportName) => ({
+    exportName,
+    expectedMessage: "assert test failed",
+    file: "dist/wasm/std/assert.test.wasm",
+  })),
+], {
   harnessPath: "tools/tracy-watwat-harness.js",
 });

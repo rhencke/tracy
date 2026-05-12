@@ -9,6 +9,7 @@ const {
   instantiateTestModule,
   loadHarness,
   messageFor,
+  runExpectedFailure,
   testExports,
 } = require("./watwat-core.js");
 
@@ -31,11 +32,21 @@ function watwatTrapError({ error, file, rootDir, testName }) {
   return new Error(`${moduleName} ${testName}: ${message}`);
 }
 
+function watwatExpectedFailureError({ file, result, rootDir }) {
+  const moduleName = relativeModuleName(file, rootDir);
+  return new Error(`${moduleName} ${result.name}: ${result.message}`);
+}
+
+async function watwatOptions(options) {
+  return {
+    rootDir: options.rootDir ?? ROOT_DIR,
+    assertPath: options.assertPath ?? DEFAULT_ASSERT_PATH,
+    harness: options.harness ?? (await loadHarness(options.harnessPath ?? null)),
+  };
+}
+
 export async function registerWatwatTests(files, options = {}) {
-  const rootDir = options.rootDir ?? ROOT_DIR;
-  const assertPath = options.assertPath ?? DEFAULT_ASSERT_PATH;
-  const harness =
-    options.harness ?? (await loadHarness(options.harnessPath ?? null));
+  const { rootDir, assertPath, harness } = await watwatOptions(options);
   const suiteName = options.suiteName ?? "watwat WAT modules";
   const suites = [];
 
@@ -102,4 +113,43 @@ export async function registerWatwatTests(files, options = {}) {
   });
 
   return suites;
+}
+
+export async function registerWatwatExpectedFailureTests(probes, options = {}) {
+  const { rootDir, assertPath, harness } = await watwatOptions(options);
+  const suiteName = options.suiteName ?? "watwat expected failures";
+  const cases = probes.map((probe) => {
+    const wasmPath = path.resolve(rootDir, probe.file);
+    return {
+      ...probe,
+      file: wasmPath,
+      moduleName: relativeModuleName(wasmPath, rootDir),
+      name: probe.name ?? probe.exportName,
+    };
+  });
+
+  describe(suiteName, () => {
+    for (const testCase of cases) {
+      test(`${testCase.moduleName} ${testCase.name}`, async () => {
+        const result = await runExpectedFailure(
+          testCase.exportName,
+          testCase.expectedMessage,
+          testCase.file,
+          assertPath,
+          null,
+          harness,
+        );
+
+        if (!result.ok) {
+          throw watwatExpectedFailureError({
+            file: testCase.file,
+            result,
+            rootDir,
+          });
+        }
+      });
+    }
+  });
+
+  return cases;
 }
