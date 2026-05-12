@@ -4,11 +4,14 @@ const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
-const http = require("node:http");
 const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
-const zlib = require("node:zlib");
+const {
+  CACHE_CONTROL,
+  browserExecutablePath,
+  createDistServer,
+} = require("./dist-browser-helpers.js");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
@@ -55,24 +58,6 @@ const BUDGETS = Object.freeze(
     ]),
   ),
 );
-const MIME_TYPES = Object.freeze({
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".mjs": "text/javascript; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".wasm": "application/wasm",
-  ".webmanifest": "application/manifest+json",
-});
-const GZIP_EXTENSIONS = new Set([
-  ".html",
-  ".js",
-  ".json",
-  ".mjs",
-  ".svg",
-  ".wasm",
-  ".webmanifest",
-]);
 const REQUIRED_DIST_FILES = Object.freeze([
   "bootstrap.mjs",
   "build-info.js",
@@ -188,47 +173,10 @@ function medianMetrics(samples) {
 }
 
 function findBrowser(explicitPath) {
-  const candidates = [
+  return browserExecutablePath({
+    errorMessage: "Chrome/Chromium not found; set TRACY_APP_LOAD_BROWSER",
     explicitPath,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    process.env.CHROME_PATH,
-    "google-chrome",
-    "google-chrome-stable",
-    "chromium",
-    "chromium-browser",
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    const result = childProcess.spawnSync("bash", ["-lc", `command -v ${JSON.stringify(candidate)}`], {
-      encoding: "utf8",
-    });
-
-    if (result.status === 0) {
-      return result.stdout.trim();
-    }
-    if (path.isAbsolute(candidate) && fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error("Chrome/Chromium not found; set TRACY_APP_LOAD_BROWSER");
-}
-
-function contentType(file) {
-  return MIME_TYPES[path.extname(file)] ?? "application/octet-stream";
-}
-
-function acceptsGzip(request) {
-  return /\bgzip\b/.test(request.headers["accept-encoding"] ?? "");
-}
-
-function shouldGzip(file) {
-  return GZIP_EXTENSIONS.has(path.extname(file));
-}
-
-function sendNotFound(response) {
-  response.writeHead(404);
-  response.end("not found");
+  });
 }
 
 function assertDistReady(distDir) {
@@ -263,80 +211,11 @@ function assertDistReady(distDir) {
   }
 }
 
-function resolveDistPath(distDir, requestUrl) {
-  const url = new URL(requestUrl, "http://localhost");
-  const pathname = decodeURIComponent(url.pathname);
-  const relativePath = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
-  const file = path.resolve(distDir, relativePath);
-
-  if (!file.startsWith(`${path.resolve(distDir)}${path.sep}`) && file !== path.resolve(distDir)) {
-    return null;
-  }
-
-  return file;
-}
-
-async function listen(server) {
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  return server.address().port;
-}
-
 async function createServer(distDir) {
-  const server = http.createServer(async (request, response) => {
-    const file = resolveDistPath(distDir, request.url);
-
-    if (file === null) {
-      sendNotFound(response);
-      return;
-    }
-
-    let stat;
-    try {
-      stat = await fs.promises.stat(file);
-    } catch (error) {
-      if (error.code === "ENOENT" || error.code === "ENOTDIR") {
-        sendNotFound(response);
-        return;
-      }
-      response.destroy(error);
-      return;
-    }
-
-    if (!stat.isFile()) {
-      sendNotFound(response);
-      return;
-    }
-
-    const source = await fs.promises.readFile(file);
-    const body =
-      acceptsGzip(request) && shouldGzip(file)
-        ? zlib.gzipSync(source)
-        : source;
-    const headers = {
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "Content-Length": body.byteLength,
-      "Content-Type": contentType(file),
-    };
-
-    if (body !== source) {
-      headers["Content-Encoding"] = "gzip";
-      headers.Vary = "Accept-Encoding";
-    }
-
-    response.writeHead(200, {
-      ...headers,
-    });
-    response.end(body);
+  return createDistServer(distDir, {
+    cacheControl: CACHE_CONTROL.IMMUTABLE,
+    gzip: true,
   });
-  const port = await listen(server);
-
-  return {
-    origin: `http://127.0.0.1:${port}`,
-    close: () => new Promise((resolve) => server.close(resolve)),
-  };
 }
 
 function connectWebSocket(url) {
@@ -1307,11 +1186,9 @@ function runSelfTest() {
     /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
   );
   const staticServerSource = createServer.toString();
-  assert.match(staticServerSource, /fs\.promises\.stat/);
-  assert.match(staticServerSource, /fs\.promises\.readFile/);
-  assert.match(staticServerSource, /Content-Encoding"\] = "gzip"/);
-  assert.match(staticServerSource, /Content-Length": body\.byteLength/);
-  assert.doesNotMatch(staticServerSource, /fs\.(existsSync|statSync|readFileSync)/);
+  assert.match(staticServerSource, /createDistServer\(distDir/);
+  assert.match(staticServerSource, /cacheControl: CACHE_CONTROL\.IMMUTABLE/);
+  assert.match(staticServerSource, /gzip: true/);
 
   const tmpDist = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-app-load-dist-"));
   try {
