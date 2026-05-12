@@ -89,6 +89,10 @@ function extractFunctionSource(source, functionName) {
   assert.fail(`${functionName} should have a balanced function body`);
 }
 
+function removeFunctionSource(source, functionName) {
+  return source.replace(extractFunctionSource(source, functionName), "");
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -362,9 +366,14 @@ function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
 
 function assertRuntimeWorkerCheckUsesSharedHarness() {
   const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+  const sourceOutsideWorkerLifecycleHarness = removeFunctionSource(
+    source,
+    "createIngestWorkerLifecycleHarness",
+  );
 
   for (const [pattern, message] of [
     [/createFakeWorkerClass/, "fake Worker"],
+    [/createIngestWorkerLifecycleHarness/, "fake ingest worker lifecycle harness"],
     [/installRuntimeBrowserGlobals/, "browser globals"],
     [/flushRuntimeMicrotasks/, "runtime microtask flushing"],
     [/importRepoModule/, "repo module imports"],
@@ -389,6 +398,20 @@ function assertRuntimeWorkerCheckUsesSharedHarness() {
       source,
       pattern,
       `runtime worker orchestration check should not own ${message}`,
+    );
+  }
+
+  for (const [pattern, message] of [
+    [/FakeWorker\.instances/, "direct fake Worker instance lookup"],
+    [/FakeWorker\.reset\s*\(/, "direct fake Worker reset"],
+    [/\b\w+\.posted\b/, "raw posted-message access"],
+    [/\b\w+\.emit\s*\(\s*"message"/, "ad hoc worker message emits"],
+    [/\b\w+\.events\.get\s*\(\s*"error"\s*\)/, "ad hoc worker error emits"],
+  ]) {
+    assert.doesNotMatch(
+      sourceOutsideWorkerLifecycleHarness,
+      pattern,
+      `runtime worker orchestration check should keep ${message} behind createIngestWorkerLifecycleHarness`,
     );
   }
 }
