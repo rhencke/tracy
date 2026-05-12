@@ -822,10 +822,50 @@ function makeProductionTopologyFixture(options = {}) {
     return mainHost;
   }
 
+  function writeWorkerIndexGeneration({
+    bytes,
+    indexName,
+    namePtr = DEFAULT_SCENARIO_NAME_PTR,
+    offset = 0n,
+    srcPtr = DEFAULT_SCENARIO_SRC_PTR,
+    workerHost,
+  }) {
+    const name = requireIndexName(indexName, FIXTURE_OPERATION.workerPublication);
+
+    assert.equal(
+      typeof workerHost?.[HOST_IMPORT_NAME.OPFS_INDEX_CREATE],
+      "function",
+      "worker index generation requires a worker OPFS host",
+    );
+
+    const nameLen = writeString(workerHost.memory, namePtr, name);
+    const indexId = workerHost[HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen);
+
+    if (bytes !== undefined) {
+      const payload = bytesFrom(bytes);
+
+      new Uint8Array(workerHost.memory.buffer, srcPtr, payload.byteLength).set(payload);
+      workerHost[HOST_IMPORT_NAME.OPFS_INDEX_WRITE](
+        indexId,
+        offset,
+        srcPtr,
+        payload.byteLength,
+      );
+    }
+
+    return indexId;
+  }
+
   const scenario = Object.freeze({
     selectedFileIngest({ file, handle }) {
       mainHost.selectPickedFile(handle, file);
       return handle;
+    },
+    async workerIndexGeneration(options) {
+      const indexId = writeWorkerIndexGeneration(options);
+
+      await options.workerHost[HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId);
+      return scenario.workerPublication({ indexName: options.indexName });
     },
     async workerPublication({
       bytes,
@@ -839,25 +879,14 @@ function makeProductionTopologyFixture(options = {}) {
       let indexId = null;
 
       if (workerHost !== undefined) {
-        assert.equal(
-          typeof workerHost[HOST_IMPORT_NAME.OPFS_INDEX_CREATE],
-          "function",
-          "worker publication requires a worker OPFS host",
-        );
-        const nameLen = writeString(workerHost.memory, namePtr, name);
-
-        indexId = workerHost[HOST_IMPORT_NAME.OPFS_INDEX_CREATE](namePtr, nameLen);
-        if (bytes !== undefined) {
-          const payload = bytesFrom(bytes);
-
-          new Uint8Array(workerHost.memory.buffer, srcPtr, payload.byteLength).set(payload);
-          workerHost[HOST_IMPORT_NAME.OPFS_INDEX_WRITE](
-            indexId,
-            offset,
-            srcPtr,
-            payload.byteLength,
-          );
-        }
+        indexId = writeWorkerIndexGeneration({
+          bytes,
+          indexName,
+          namePtr,
+          offset,
+          srcPtr,
+          workerHost,
+        });
         await workerHost[HOST_IMPORT_NAME.OPFS_INDEX_FLUSH](indexId);
       }
 
