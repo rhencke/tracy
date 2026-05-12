@@ -20,7 +20,17 @@ const ASSERT_FAILURE_PROBES = Object.freeze([
 ]);
 
 async function watTestFilesIn(dir) {
-  const entries = await fs.readdir(path.join(ROOT_DIR, dir), { withFileTypes: true });
+  let entries;
+
+  try {
+    entries = await fs.readdir(path.join(ROOT_DIR, dir), { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return [];
+    }
+
+    throw error;
+  }
 
   return entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".test.wasm"))
@@ -30,12 +40,15 @@ async function watTestFilesIn(dir) {
 const watTestFiles = (
   await Promise.all(WAT_TEST_DIRS.map((dir) => watTestFilesIn(dir)))
 ).flat().sort();
+const watTestFileSet = new Set(watTestFiles);
 
-await registerWatwatTests(watTestFiles, {
-  harnessPath: "tools/tracy-watwat-harness.js",
-});
+if (watTestFiles.length > 0) {
+  await registerWatwatTests(watTestFiles, {
+    harnessPath: "tools/tracy-watwat-harness.js",
+  });
+}
 
-await registerWatwatExpectedFailureTests([
+const expectedFailureProbes = [
   {
     exportName: "probe_assert_eq_i32_failure",
     expectedMessage: "deliberate i32 failure",
@@ -46,6 +59,10 @@ await registerWatwatExpectedFailureTests([
     expectedMessage: "assert test failed",
     file: "dist/wasm/std/assert.test.wasm",
   })),
-], {
-  harnessPath: "tools/tracy-watwat-harness.js",
-});
+].filter((probe) => watTestFileSet.has(probe.file));
+
+if (expectedFailureProbes.length > 0) {
+  await registerWatwatExpectedFailureTests(expectedFailureProbes, {
+    harnessPath: "tools/tracy-watwat-harness.js",
+  });
+}
