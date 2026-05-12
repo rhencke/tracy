@@ -10,6 +10,10 @@ const {
   importRepoModule,
   installRuntimeBrowserGlobals,
 } = require("./browser-harness.js");
+const {
+  createProgressiveRendererHarness,
+  loadProgressiveRendererHarnessSpec,
+} = require("./progressive-renderer-test-harness.js");
 
 let OPFS_PAGE_SIZE;
 let INDEX_DECODE_HINT_COMPACT_SLICES;
@@ -39,6 +43,7 @@ async function loadGeneratedIndexFormatSpec() {
 }
 
 async function loadGeneratedTraceRendererSpec() {
+  await loadProgressiveRendererHarnessSpec();
   ({
     INDEX_QUERY_RESULT_LAYOUT,
     TRACE_RENDERER_CANVAS_OPS,
@@ -665,6 +670,49 @@ function makeAppExports(extra = {}) {
     tracy_tick() {},
     ...extra,
   };
+}
+
+async function checkProgressiveRendererHarnessCapturesCanvasReaderAndStatus() {
+  const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
+  const traceBlue = 0x2d74da;
+  const harness = createProgressiveRendererHarness({
+    coveredRange: { end: 200, start: 100, type: "covered_range", valid: true },
+    queryRows: [{ color: traceBlue, depth: 0, dur: 8, partial: false, start: 110 }],
+    trackCount: 1,
+  });
+  const renderer = rendererModule.createProgressiveTraceRenderer(
+    harness.memory,
+    harness.ingestWorker,
+    {
+      canvas: harness.canvas,
+      queryOutPtr: 2048,
+      queryWindow: 100,
+      renderPlannerExports: harness.renderPlannerExports(),
+    },
+  );
+
+  assert.equal(renderer.draw(123), 1);
+  harness.assertQueryCalls([
+    { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 200, tsMin: 100 },
+  ]);
+  harness.assertOperation(
+    {
+      fillStyle: "#2d74da",
+      height: 10,
+      op: "fillRect",
+      width: 19,
+      x: 24,
+      y: 18,
+    },
+    "renderer harness should expose concrete draw operations",
+  );
+  assert.deepEqual(harness.status(), {
+    coveredRange: { end: 200, start: 100, type: "covered_range", valid: true },
+    readerState: "ready",
+    sliceCoveredRange: undefined,
+    trackCount: 1,
+    workerState: "running",
+  });
 }
 
 async function checkRuntimeOrchestratesWorker() {
@@ -3543,6 +3591,7 @@ async function main() {
   await checkWorkerStatusReportsReaderCatalogOverflow();
   await checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid();
   checkWatWriterPropagatesCatalogOverflow();
+  await checkProgressiveRendererHarnessCapturesCanvasReaderAndStatus();
   await checkProgressiveTraceRendererDrawsCoveredPartialRows();
   await checkProgressiveTraceRendererClipsLeftEdgeSlices();
   await checkProgressiveTraceRendererClampsToSliceCatalogCoverage();
