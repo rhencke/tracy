@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
 const assert = require("node:assert/strict");
-const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
-const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 const puppeteer = require("puppeteer-core");
 const { repoPath } = require("./acceptance-wasm-helpers.js");
+const {
+  CACHE_CONTROL,
+  browserExecutablePath: findBrowserExecutablePath,
+  cachedPlaywrightChromes,
+  createDistServer,
+} = require("./dist-browser-helpers.js");
 
 const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
@@ -22,116 +26,23 @@ const FILE_CHOOSER_TIMEOUT = FILE_CHOOSER_TIMEOUT_MS.value;
 const FIRST_EVENTS_BUDGET_MS = 100;
 const BROWSER_TIMEOUT_MS = 15_000;
 
-function contentType(file) {
-  switch (path.extname(file)) {
-    case ".html":
-      return "text/html; charset=utf-8";
-    case ".js":
-    case ".mjs":
-      return "text/javascript; charset=utf-8";
-    case ".json":
-      return "application/json; charset=utf-8";
-    case ".wasm":
-      return "application/wasm";
-    case ".webmanifest":
-      return "application/manifest+json";
-    default:
-      return "application/octet-stream";
-  }
-}
-
-function commandPath(command) {
-  const result = childProcess.spawnSync(
-    "bash",
-    ["-lc", `command -v ${JSON.stringify(command)}`],
-    { encoding: "utf8" },
-  );
-
-  return result.status === 0 ? result.stdout.trim() : "";
-}
-
-function cachedPlaywrightChromes() {
-  const cacheRoot = path.join(os.homedir(), ".cache", "ms-playwright");
-  if (!fs.existsSync(cacheRoot)) {
-    return [];
-  }
-
-  return fs.readdirSync(cacheRoot)
-    .filter((entry) => /^chromium-\d+$/.test(entry))
-    .sort((left, right) => right.localeCompare(left, undefined, { numeric: true }))
-    .flatMap((entry) => [
-      path.join(cacheRoot, entry, "chrome-linux64", "chrome"),
-      path.join(cacheRoot, entry, "chrome-linux", "chrome"),
-    ]);
-}
-
 function browserExecutablePath() {
-  const candidates = [
-    process.env.TRACY_INTERACTIVE_INGEST_BROWSER,
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    process.env.CHROME_PATH,
-    commandPath("google-chrome"),
-    commandPath("google-chrome-stable"),
-    commandPath("chromium"),
-    commandPath("chromium-browser"),
-    ...cachedPlaywrightChromes(),
-  ].filter(Boolean);
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new Error("Chrome/Chromium not found for interactive ingest browser check");
-}
-
-function resolveDistPath(requestUrl) {
-  const url = new URL(requestUrl, "http://127.0.0.1");
-  const relativePath =
-    url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.replace(/^\//, ""));
-  const file = path.resolve(DIST_DIR, relativePath);
-  const root = path.resolve(DIST_DIR);
-
-  return file === root || file.startsWith(`${root}${path.sep}`) ? file : null;
+  return findBrowserExecutablePath({
+    envNames: [
+      "TRACY_INTERACTIVE_INGEST_BROWSER",
+      "PUPPETEER_EXECUTABLE_PATH",
+      "CHROME_PATH",
+    ],
+    errorMessage: "Chrome/Chromium not found for interactive ingest browser check",
+    playwrightChromes: cachedPlaywrightChromes(),
+  });
 }
 
 async function serveDist() {
-  const server = http.createServer(async (request, response) => {
-    const file = resolveDistPath(request.url);
-    if (file === null) {
-      response.writeHead(404);
-      response.end("not found");
-      return;
-    }
-
-    try {
-      const body = await fsp.readFile(file);
-      response.writeHead(200, {
-        "Cache-Control": "no-store",
-        "Content-Length": body.byteLength,
-        "Content-Type": contentType(file),
-      });
-      response.end(body);
-    } catch (error) {
-      if (error.code === "ENOENT" || error.code === "ENOTDIR") {
-        response.writeHead(404);
-        response.end("not found");
-        return;
-      }
-      response.destroy(error);
-    }
+  return createDistServer(DIST_DIR, {
+    cacheControl: CACHE_CONTROL.NO_STORE,
+    gzip: false,
   });
-
-  await new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-
-  return {
-    close: () => new Promise((resolve) => server.close(resolve)),
-    origin: `http://127.0.0.1:${server.address().port}`,
-  };
 }
 
 async function writeTraceFile(file) {
