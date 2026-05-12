@@ -26,6 +26,9 @@ const WORKER_INDEX_GENERATION_HANDOFF_OPERATIONS = Object.freeze(
     return OP[key];
   }),
 );
+// The fresh-reader helper models the main thread after it has observed the
+// currently published worker handoff generation.
+const FRESH_MAIN_THREAD_INDEX_READER_DEST_PTR = 120;
 
 function writeString(memory, ptr, value) {
   const bytes = new TextEncoder().encode(value);
@@ -36,6 +39,53 @@ function writeString(memory, ptr, value) {
 
 function readBytes(memory, ptr, len) {
   return Array.from(new Uint8Array(memory.buffer, ptr, len));
+}
+
+async function makeFreshMainThreadIndexReader({
+  bytes,
+  fixture,
+  indexName,
+  offset = 0n,
+  workerHost,
+}) {
+  const workerIndexId = await fixture.scenario.workerIndexGeneration({
+    bytes,
+    indexName,
+    offset,
+    workerHost,
+  });
+  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
+
+  return Object.freeze({
+    mainIndexId,
+    observeOnlyRead({
+      len = bytes.byteLength,
+      offset: readOffset = 0n,
+    } = {}) {
+      return fixture.scenario.mainThreadIndexRead({
+        indexId: mainIndexId,
+        len,
+        observeOnly: true,
+        offset: readOffset,
+      });
+    },
+    rawRead({
+      destPtr = FRESH_MAIN_THREAD_INDEX_READER_DEST_PTR,
+      len = bytes.byteLength,
+      offset: readOffset = 0n,
+    } = {}) {
+      return fixture.mainHost[HOST.OPFS_INDEX_READ](
+        mainIndexId,
+        readOffset,
+        len,
+        destPtr,
+      );
+    },
+    size() {
+      return fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId);
+    },
+    workerIndexId,
+  });
 }
 
 function indexPathForTraceName(traceName) {
@@ -273,20 +323,19 @@ async function checkDurableIndexAcrossHosts() {
     ...workerIndexBytes,
   ];
   const mainIndexReadLen = expectedMainIndexReadBytes.length;
-  const workerIndexId = await fixture.scenario.workerIndexGeneration({
+  const reader = await makeFreshMainThreadIndexReader({
     bytes: workerIndexBytes,
+    fixture,
     indexName,
     offset: workerIndexWriteOffset,
     workerHost,
   });
-  const mainIndexId = fixture.scenario.mainThreadIndexOpen({ indexName });
 
-  assert.equal(workerIndexId, expectedWorkerIndexId);
-  assert.equal(fixture.mainHost[HOST.OPFS_INDEX_SIZE](mainIndexId), expectedMainIndexSize);
+  assert.equal(reader.workerIndexId, expectedWorkerIndexId);
+  assert.equal(reader.size(), expectedMainIndexSize);
   assert.equal(
-    fixture.scenario.mainThreadIndexRead({
+    reader.rawRead({
       destPtr: mainIndexReadDest,
-      indexId: mainIndexId,
       len: mainIndexReadLen,
     }),
     mainIndexReadLen,
