@@ -69,6 +69,69 @@ async function loadGeneratedTraceRendererSpec() {
 
 const FakeWorker = createFakeWorkerClass();
 
+function createIngestWorkerLifecycleHarness(Worker = FakeWorker) {
+  return {
+    Worker,
+    reset() {
+      Worker.reset();
+    },
+    expectWorkerCount(expected, message) {
+      assert.equal(Worker.instances.length, expected, message);
+    },
+    workerAt(index, message) {
+      const worker = Worker.instances.at(index);
+
+      assert.notEqual(worker, undefined, message ?? `expected worker at index ${index}`);
+      return worker;
+    },
+    latestWorker(message) {
+      return this.workerAt(-1, message ?? "expected a latest ingest worker");
+    },
+    postedMessages(worker, type) {
+      if (type === undefined) {
+        return worker.posted;
+      }
+
+      return worker.posted.filter((message) => message.type === type);
+    },
+    latestPostedMessage(worker, type) {
+      const messages = this.postedMessages(worker, type);
+
+      return messages.at(-1);
+    },
+    latestIngestId(worker) {
+      const message = this.latestPostedMessage(worker, "start");
+
+      assert.notEqual(message, undefined, "expected worker to have a start message");
+      return message.ingestId;
+    },
+    assertPosted(worker, expected, message) {
+      assert.deepEqual(worker.posted, expected, message);
+    },
+    assertPostedTypes(worker, expected, message) {
+      assert.deepEqual(
+        worker.posted.map((postedMessage) => postedMessage.type),
+        expected,
+        message,
+      );
+    },
+    emitMessage(worker, message) {
+      worker.emit("message", message);
+    },
+    emitError(worker, message) {
+      worker.events.get("error")({ message });
+    },
+    assertWorkerIgnored(worker, readObservedState, exerciseWorker, message) {
+      const before = readObservedState();
+
+      exerciseWorker(worker);
+      assert.deepEqual(readObservedState(), before, message);
+    },
+  };
+}
+
+const ingestWorkers = createIngestWorkerLifecycleHarness();
+
 function readTraceRenderRow(memory, ptr, index) {
   const view = new DataView(memory.buffer);
   const base = ptr + index * TEST_TRACE_RENDER_ROW_BYTES;
@@ -665,7 +728,7 @@ async function checkRuntimeOrchestratesWorker() {
       }),
       performance,
       worker: {
-        Worker: FakeWorker,
+        Worker: ingestWorkers.Worker,
         onWorkerStatus(status, message) {
           workerStatus.push({ status, message });
         },
@@ -677,25 +740,25 @@ async function checkRuntimeOrchestratesWorker() {
   const controller = await harness.boot();
   const { memory } = harness;
 
-  assert.equal(FakeWorker.instances.length, 0);
+  ingestWorkers.expectWorkerCount(0);
   assert.ok(
     harness.frames.length >= 1,
     "draw loop should be scheduled before ingest preload",
   );
   await harness.runFrame(0);
-  assert.equal(FakeWorker.instances.length, 0);
+  ingestWorkers.expectWorkerCount(0);
   assert.ok(
     harness.frames.length >= 2,
     "app-ready follow-up frame should be scheduled before ingest preload",
   );
   await harness.advanceAppReadyFrame();
 
-  assert.equal(FakeWorker.instances.length, 1);
-  const worker = FakeWorker.instances[0];
+  ingestWorkers.expectWorkerCount(1);
+  const worker = ingestWorkers.workerAt(0);
   assert.equal(worker.url, "worker.js");
   assert.deepEqual(worker.options, { type: "module" });
-  assert.deepEqual(worker.posted, [{ type: "preload" }]);
-  worker.emit("message", { type: "preloaded" });
+  ingestWorkers.assertPosted(worker, [{ type: "preload" }]);
+  ingestWorkers.emitMessage(worker, { type: "preloaded" });
   await harness.flushRuntimeWork();
   assert.deepEqual(instantiateCalls, [
     { hostImport: host.opfs_index_create, id: "app", memory, thread: "main" },
@@ -732,7 +795,7 @@ async function checkRuntimeOrchestratesWorker() {
     1,
     "draw loop should continue after ingest preload",
   );
-  assert.deepEqual(worker.posted, [
+  ingestWorkers.assertPosted(worker, [
     {
       type: "preload",
     },
@@ -745,7 +808,7 @@ async function checkRuntimeOrchestratesWorker() {
   ]);
   assert.equal(controller.status().state, "running");
 
-  worker.emit("message", {
+  ingestWorkers.emitMessage(worker, {
     ingestId: 1,
     type: "progress",
     committedPages: 2,
@@ -757,14 +820,14 @@ async function checkRuntimeOrchestratesWorker() {
     throughputBytesPerSecond: 8000,
     totalBytes: 64,
   });
-  worker.emit("message", {
+  ingestWorkers.emitMessage(worker, {
     ingestId: 1,
     type: "covered_range",
     valid: true,
     start: 100,
     end: 132,
   });
-  worker.emit("message", {
+  ingestWorkers.emitMessage(worker, {
     ingestId: 1,
     type: "complete",
     committedEvents: 7,
@@ -795,16 +858,16 @@ async function checkRuntimeOrchestratesWorker() {
 
   const runtime = await importRepoModule("host/runtime.mjs");
   const controllerWithError = runtime.createIngestWorkerController({
-    Worker: FakeWorker,
+    Worker: ingestWorkers.Worker,
     onWorkerStatus(status, message) {
       workerMessages.push({ status, message });
     },
   });
   assert.equal(controllerWithError.worker, null);
   controllerWithError.start();
-  const errorWorker = FakeWorker.instances.at(-1);
+  const errorWorker = ingestWorkers.latestWorker();
 
-  errorWorker.events.get("error")({ message: "worker crashed" });
+  ingestWorkers.emitError(errorWorker, "worker crashed");
   assert.equal(controllerWithError.status().state, "error");
   assert.equal(controllerWithError.status().error, "worker crashed");
   assert.equal(workerMessages.at(-1).status.state, "error");
@@ -843,7 +906,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
         exports: makeAppExports(),
       }),
       worker: {
-        Worker: FakeWorker,
+        Worker: ingestWorkers.Worker,
         onWorkerStatus(status, message) {
           workerStatus.push({ status, message });
         },
@@ -861,8 +924,8 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   await harness.advanceAppReadyFrame();
 
   const preloadWorker = controller.worker;
-  assert.deepEqual(preloadWorker.posted, [{ type: "preload" }]);
-  preloadWorker.emit("message", { type: "preloaded" });
+  ingestWorkers.assertPosted(preloadWorker, [{ type: "preload" }]);
+  ingestWorkers.emitMessage(preloadWorker, { type: "preloaded" });
   await harness.flushRuntimeWork();
 
   assert.equal(callbacks.length, 1);
@@ -877,7 +940,7 @@ async function checkRuntimeStartsIngestFromFileSelection() {
     false,
     "file selection should post worker ingest before any full OPFS copy",
   );
-  assert.deepEqual(worker.posted, [
+  ingestWorkers.assertPosted(worker, [
     {
       type: "preload",
     },
@@ -896,7 +959,11 @@ async function checkRuntimeStartsIngestFromFileSelection() {
 
   callbacks[0]({ handle: -1 });
   await harness.flushRuntimeWork();
-  assert.equal(worker.posted.length, 2, "cancelled picker should not start ingest");
+  assert.equal(
+    ingestWorkers.postedMessages(worker).length,
+    2,
+    "cancelled picker should not start ingest",
+  );
 }
 
 async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
@@ -948,7 +1015,7 @@ async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
 }
 
 async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
-  FakeWorker.reset();
+  ingestWorkers.reset();
 
   const abi = await importRepoModule("host/abi.mjs");
   const runtimeMemoryPages = 1;
@@ -993,7 +1060,7 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
       }),
       progressiveTraceRenderer: false,
       worker: {
-        Worker: FakeWorker,
+        Worker: ingestWorkers.Worker,
         workerUrl,
       },
     },
@@ -1015,7 +1082,7 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   await harness.flushRuntimeWork();
 
   const worker = controller.worker;
-  assert.deepEqual(worker.posted, [
+  ingestWorkers.assertPosted(worker, [
     {
       ingestId: 1,
       indexName: expectedIndexName,
@@ -1030,8 +1097,8 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   resolveIndexPreload(true);
   await harness.flushRuntimeWork();
 
-  assert.deepEqual(
-    worker.posted.map((message) => message.type),
+  ingestWorkers.assertPostedTypes(
+    worker,
     ["start"],
     "late worker preload should not post after selected-file ingest has started",
   );
@@ -1044,7 +1111,7 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   const indexReaderOpenCalls = [];
   const workerStatus = [];
   const controller = runtime.createIngestWorkerController({
-    Worker: FakeWorker,
+    Worker: ingestWorkers.Worker,
     indexReader: {
       open(indexName) {
         indexReaderOpenCalls.push(indexName);
@@ -1066,7 +1133,7 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   );
   const firstWorker = controller.worker;
 
-  assert.deepEqual(firstWorker.posted, [
+  ingestWorkers.assertPosted(firstWorker, [
     {
       ingestId: 1,
       indexName: "indexes/first.idx",
@@ -1086,7 +1153,7 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
 
   assert.notEqual(secondWorker, firstWorker);
   assert.equal(firstWorker.terminated, true);
-  assert.deepEqual(secondWorker.posted, [
+  ingestWorkers.assertPosted(secondWorker, [
     {
       ingestId: 2,
       indexName: "indexes/second.idx",
@@ -1095,49 +1162,54 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
     },
   ]);
 
-  firstWorker.emit("message", {
-    committedPages: 99,
-    fileOffset: 999,
-    ingestId: 1,
-    type: "progress",
-  });
-  firstWorker.emit("message", {
-    end: 999,
-    ingestId: 1,
-    start: 900,
-    type: "covered_range",
-    valid: true,
-  });
-  firstWorker.emit("message", {
-    committedEvents: 999,
-    ingestId: 1,
-    type: "complete",
-  });
+  ingestWorkers.assertWorkerIgnored(
+    firstWorker,
+    () => ({
+      coveredRange: controller.status().coveredRange,
+      error: controller.status().error,
+      indexReaderOpenCalls: [...indexReaderOpenCalls],
+      progress: controller.status().progress,
+      result: controller.status().result,
+      state: controller.status().state,
+    }),
+    (staleWorker) => {
+      ingestWorkers.emitMessage(staleWorker, {
+        committedPages: 99,
+        fileOffset: 999,
+        ingestId: 1,
+        type: "progress",
+      });
+      ingestWorkers.emitMessage(staleWorker, {
+        end: 999,
+        ingestId: 1,
+        start: 900,
+        type: "covered_range",
+        valid: true,
+      });
+      ingestWorkers.emitMessage(staleWorker, {
+        committedEvents: 999,
+        ingestId: 1,
+        type: "complete",
+      });
+      ingestWorkers.emitError(staleWorker, "old worker crashed");
+    },
+    "stale worker messages and errors should not update the active ingest",
+  );
 
-  assert.equal(controller.status().state, "running");
-  assert.equal(controller.status().progress, null);
-  assert.equal(controller.status().coveredRange, null);
-  assert.equal(controller.status().result, null);
-  assert.deepEqual(indexReaderOpenCalls, []);
-
-  firstWorker.events.get("error")({ message: "old worker crashed" });
-  assert.equal(controller.status().state, "running");
-  assert.equal(controller.status().error, null);
-
-  secondWorker.emit("message", {
+  ingestWorkers.emitMessage(secondWorker, {
     committedPages: 2,
     fileOffset: 64,
     ingestId: 2,
     type: "progress",
   });
-  secondWorker.emit("message", {
+  ingestWorkers.emitMessage(secondWorker, {
     end: 132,
     ingestId: 2,
     start: 100,
     type: "covered_range",
     valid: true,
   });
-  secondWorker.emit("message", {
+  ingestWorkers.emitMessage(secondWorker, {
     committedEvents: 7,
     ingestId: 2,
     type: "complete",
@@ -1150,35 +1222,39 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
   assert.equal(workerStatus.at(-1).message.ingestId, 2);
 
-  secondWorker.emit("message", {
-    committedPages: 99,
-    fileOffset: 999,
-    ingestId: 2,
-    type: "progress",
-  });
-  secondWorker.emit("message", {
-    end: 999,
-    ingestId: 2,
-    start: 900,
-    type: "covered_range",
-    valid: true,
-  });
-  assert.equal(
-    controller.status().state,
-    "complete",
+  ingestWorkers.assertWorkerIgnored(
+    secondWorker,
+    () => ({
+      coveredRangeEnd: controller.status().coveredRange.end,
+      indexReaderOpenCalls: [...indexReaderOpenCalls],
+      progressFileOffset: controller.status().progress.fileOffset,
+      state: controller.status().state,
+    }),
+    (completedWorker) => {
+      ingestWorkers.emitMessage(completedWorker, {
+        committedPages: 99,
+        fileOffset: 999,
+        ingestId: 2,
+        type: "progress",
+      });
+      ingestWorkers.emitMessage(completedWorker, {
+        end: 999,
+        ingestId: 2,
+        start: 900,
+        type: "covered_range",
+        valid: true,
+      });
+    },
     "late same-ingest messages should not revive a completed ingest",
   );
-  assert.equal(controller.status().progress.fileOffset, 64);
-  assert.equal(controller.status().coveredRange.end, 132);
-  assert.deepEqual(indexReaderOpenCalls, ["indexes/second.idx"]);
 
   assert.equal(controller.preload() instanceof Promise, true);
-  assert.equal(secondWorker.posted.at(-1).type, "preload");
-  secondWorker.emit("message", { type: "preloaded" });
+  assert.equal(ingestWorkers.latestPostedMessage(secondWorker).type, "preload");
+  ingestWorkers.emitMessage(secondWorker, { type: "preloaded" });
   assert.equal(await controller.preload(), true);
 
   const errorController = runtime.createIngestWorkerController({
-    Worker: FakeWorker,
+    Worker: ingestWorkers.Worker,
     indexReader: {
       open(indexName) {
         indexReaderOpenCalls.push(indexName);
@@ -1195,18 +1271,18 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
     true,
   );
   const errorWorker = errorController.worker;
-  errorWorker.emit("message", {
+  ingestWorkers.emitMessage(errorWorker, {
     ingestId: 1,
     message: "ingest failed",
     type: "error",
   });
-  errorWorker.emit("message", {
+  ingestWorkers.emitMessage(errorWorker, {
     committedPages: 42,
     fileOffset: 4242,
     ingestId: 1,
     type: "progress",
   });
-  errorWorker.emit("message", {
+  ingestWorkers.emitMessage(errorWorker, {
     end: 4242,
     ingestId: 1,
     start: 4200,
@@ -1218,7 +1294,7 @@ async function checkRuntimeIgnoresStaleIngestWorkerMessages() {
   assert.equal(errorController.status().progress, null);
   assert.equal(errorController.status().coveredRange, null);
   assert.equal(errorController.preload() instanceof Promise, true);
-  assert.equal(errorWorker.posted.at(-1).type, "preload");
+  assert.equal(ingestWorkers.latestPostedMessage(errorWorker).type, "preload");
 }
 
 async function checkFileSelectionSetupErrorsReportStatus() {
@@ -2133,7 +2209,7 @@ async function checkWorkerStatusReportsReaderCatalogOverflow() {
     },
   };
   const controller = runtime.createIngestWorkerController({
-    Worker: FakeWorker,
+    Worker: ingestWorkers.Worker,
     indexReader,
     onWorkerStatus(status, message) {
       workerStatus.push({ message, status });
@@ -2141,10 +2217,10 @@ async function checkWorkerStatusReportsReaderCatalogOverflow() {
   });
 
   controller.start({ indexName: "indexes/trace.idx" });
-  const worker = FakeWorker.instances.at(-1);
-  const ingestId = worker.posted.at(-1).ingestId;
+  const worker = ingestWorkers.latestWorker();
+  const ingestId = ingestWorkers.latestIngestId(worker);
 
-  worker.emit("message", {
+  ingestWorkers.emitMessage(worker, {
     end: 140,
     ingestId,
     start: 100,
@@ -2162,7 +2238,7 @@ async function checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid() {
   const runtime = await importRepoModule("host/runtime.mjs");
   const indexReaderOpenCalls = [];
   const controller = runtime.createIngestWorkerController({
-    Worker: FakeWorker,
+    Worker: ingestWorkers.Worker,
     indexReader: {
       open(indexName) {
         indexReaderOpenCalls.push(indexName);
@@ -2178,10 +2254,10 @@ async function checkWorkerCoveredRangeOpensReaderBeforeRangeIsValid() {
     }),
     true,
   );
-  const worker = FakeWorker.instances.at(-1);
-  const ingestId = worker.posted.at(-1).ingestId;
+  const worker = ingestWorkers.latestWorker();
+  const ingestId = ingestWorkers.latestIngestId(worker);
 
-  worker.emit("message", {
+  ingestWorkers.emitMessage(worker, {
     end: 0,
     ingestId,
     start: 0,
