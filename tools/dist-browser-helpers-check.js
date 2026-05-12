@@ -217,13 +217,14 @@ function assertBrowserDiscovery() {
     "/pw/chromium-120/chrome-linux64/chrome",
   ]);
   const existsSync = (file) => exists.has(file);
+  const isExecutableFile = existsSync;
 
   assert.equal(
     browserExecutablePath({
       commandPath: commandPathStub,
       env: { PUPPETEER_EXECUTABLE_PATH: "/env/chrome" },
-      existsSync,
       explicitPath: "/custom/chrome",
+      isExecutableFile,
     }),
     "/custom/chrome",
   );
@@ -232,7 +233,7 @@ function assertBrowserDiscovery() {
       commandPath: commandPathStub,
       env: { TRACY_INTERACTIVE_INGEST_BROWSER: "/env/chrome" },
       envNames: ["TRACY_INTERACTIVE_INGEST_BROWSER"],
-      existsSync,
+      isExecutableFile,
     }),
     "/env/chrome",
   );
@@ -240,7 +241,7 @@ function assertBrowserDiscovery() {
     browserExecutablePath({
       commandPath: commandPathStub,
       env: {},
-      existsSync,
+      isExecutableFile,
     }),
     "/usr/bin/chromium",
   );
@@ -254,7 +255,7 @@ function assertBrowserDiscovery() {
       commandNames: [],
       commandPath: commandPathStub,
       env: {},
-      existsSync,
+      isExecutableFile,
       playwrightChromes: ["/pw/chromium-120/chrome-linux64/chrome"],
     }),
     "/pw/chromium-120/chrome-linux64/chrome",
@@ -307,7 +308,6 @@ function assertBrowserDiscovery() {
           TRACY_INTERACTIVE_INGEST_BROWSER: `$(touch ${markerPath})`,
         },
         envNames: ["TRACY_INTERACTIVE_INGEST_BROWSER"],
-        existsSync: fs.existsSync,
       }),
       browserPath,
     );
@@ -348,7 +348,6 @@ function assertBrowserDiscovery() {
             pathDelimiter: ":",
           }),
         env: {},
-        existsSync: fs.existsSync,
       }),
       browserPath,
     );
@@ -361,12 +360,44 @@ function assertBrowserDiscovery() {
     });
   }
 
+  const relativeLookupRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-browser-relative-"));
+  try {
+    const browserPath = path.join(relativeLookupRoot, "chromium");
+    const relativeBrowserPath = path.relative(process.cwd(), browserPath);
+    fs.writeFileSync(browserPath, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(browserPath, 0o755);
+
+    assert.equal(
+      browserExecutablePath({
+        commandNames: ["chromium"],
+        env: {},
+        explicitPath: relativeBrowserPath,
+      }),
+      path.resolve(relativeBrowserPath),
+    );
+    assert.equal(
+      browserExecutablePath({
+        commandNames: ["chromium"],
+        env: { TRACY_INTERACTIVE_INGEST_BROWSER: relativeBrowserPath },
+        envNames: ["TRACY_INTERACTIVE_INGEST_BROWSER"],
+      }),
+      path.resolve(relativeBrowserPath),
+    );
+  } finally {
+    fs.rmSync(relativeLookupRoot, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    });
+  }
+
   assert.equal(
     browserExecutablePath({
       commandNames: ["chromium"],
       commandPath: () => "chromium",
       env: {},
-      existsSync,
+      isExecutableFile,
       playwrightChromes: ["/pw/chromium-120/chrome-linux64/chrome"],
     }),
     "/pw/chromium-120/chrome-linux64/chrome",
@@ -389,7 +420,7 @@ function assertBrowserDiscovery() {
       browserExecutablePath({
         commandNames: [],
         env: {},
-        existsSync,
+        isExecutableFile,
         playwrightChromes: [],
       }),
     /Chrome\/Chromium not found/,

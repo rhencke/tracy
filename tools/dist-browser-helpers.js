@@ -185,28 +185,37 @@ async function createDistServer(distDir, options = {}) {
   };
 }
 
+function isExecutableFile(file, options = {}) {
+  const accessSync = options.accessSync ?? fs.accessSync;
+  const statSync = options.statSync ?? fs.statSync;
+
+  try {
+    if (!statSync(file).isFile()) {
+      return false;
+    }
+    accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function commandPath(command, options = {}) {
   if (path.isAbsolute(command) || command.includes(path.sep)) {
     return "";
   }
 
   const env = options.env ?? process.env;
-  const accessSync = options.accessSync ?? fs.accessSync;
-  const statSync = options.statSync ?? fs.statSync;
+  const isExecutableFileFn =
+    options.isExecutableFile ?? ((file) => isExecutableFile(file, options));
   const pathEnv = options.pathEnv ?? env.PATH ?? "";
   const pathDelimiter = options.pathDelimiter ?? path.delimiter;
 
   for (const entry of String(pathEnv).split(pathDelimiter)) {
     const dir = entry === "" ? "." : entry;
     const file = path.resolve(dir, command);
-    try {
-      if (!statSync(file).isFile()) {
-        continue;
-      }
-      accessSync(file, fs.constants.X_OK);
+    if (isExecutableFileFn(file)) {
       return file;
-    } catch {
-      // Keep searching PATH entries until an executable regular file exists.
     }
   }
 
@@ -233,8 +242,9 @@ function cachedPlaywrightChromes(options = {}) {
 
 function browserExecutablePath(options = {}) {
   const env = options.env ?? process.env;
-  const existsSync = options.existsSync ?? fs.existsSync;
   const commandPathFn = options.commandPath ?? commandPath;
+  const isExecutableFileFn =
+    options.isExecutableFile ?? ((file) => isExecutableFile(file, options));
   const candidates = [
     options.explicitPath,
     ...(options.envNames ?? SHARED_BROWSER_ENV).map((name) => env[name]),
@@ -243,12 +253,10 @@ function browserExecutablePath(options = {}) {
   ].filter(Boolean);
 
   for (const candidate of candidates) {
-    const resolved = path.isAbsolute(candidate) ? "" : commandPathFn(candidate);
-    if (path.isAbsolute(resolved) && existsSync(resolved)) {
+    const isPathCandidate = path.isAbsolute(candidate) || candidate.includes(path.sep);
+    const resolved = isPathCandidate ? path.resolve(candidate) : commandPathFn(candidate);
+    if (path.isAbsolute(resolved) && isExecutableFileFn(resolved)) {
       return resolved;
-    }
-    if (path.isAbsolute(candidate) && existsSync(candidate)) {
-      return candidate;
     }
   }
 
@@ -267,6 +275,7 @@ module.exports = {
   commandPath,
   contentType,
   createDistServer,
+  isExecutableFile,
   resolveDistPath,
   shouldGzip,
 };
