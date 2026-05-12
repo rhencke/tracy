@@ -18,6 +18,11 @@ const DIST_DIR = path.join(ROOT_DIR, "dist");
 const RUNTIME_SPEC = JSON.parse(
   fs.readFileSync(path.join(ROOT_DIR, "abi", "runtime.json"), "utf8"),
 );
+const PERFORMANCE_MARKS = Object.freeze({ ...RUNTIME_SPEC.performanceMarks });
+const PERFORMANCE_MEASURES = Object.freeze({ ...RUNTIME_SPEC.performanceMeasures });
+const READINESS_DIAGNOSTIC_MARK_NAMES = Object.freeze(
+  Object.values(PERFORMANCE_MARKS),
+);
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
 // Warm samples reuse a page, so let post-ready frame callbacks start their
@@ -499,6 +504,82 @@ async function waitUntil(predicate, timeoutMs = DEFAULT_TIMEOUT_MS) {
   throw new Error("timed out waiting for page condition");
 }
 
+async function readinessPageState(cdp, page, markName) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const markName = ${JSON.stringify(markName)};
+      const diagnosticMarkNames = new Set(${JSON.stringify(READINESS_DIAGNOSTIC_MARK_NAMES)});
+      const marks = performance.getEntriesByType("mark")
+        .filter((entry) => diagnosticMarkNames.has(entry.name))
+        .map((entry) => ({
+          name: entry.name,
+          startTime: entry.startTime,
+        }));
+      return {
+        appLoadError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
+        alertText: document.querySelector('[role="alert"]')?.textContent ?? "",
+        markName,
+        marks,
+        page: {
+          readyState: document.readyState,
+          title: document.title,
+          url: location.href,
+          visibilityState: document.visibilityState,
+        },
+        ready: performance.getEntriesByName(markName, "mark").length > 0,
+      };
+    })()`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  if (result.exceptionDetails !== undefined) {
+    const description =
+      result.exceptionDetails.exception?.description ??
+      result.exceptionDetails.text ??
+      "unknown Runtime.evaluate failure";
+    throw new Error(`failed to collect readiness diagnostics: ${description}`);
+  }
+
+  return result.result?.value ?? {};
+}
+
+function readinessFailureMessage(label, reason, state) {
+  return `${label} ${reason}; readiness diagnostics=${JSON.stringify(state)}`;
+}
+
+function readinessHasAppLoadFailure(state) {
+  return Boolean(state.alertText || state.appLoadError);
+}
+
+async function waitForReadinessMark(cdp, page, label, markName, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const start = Date.now();
+  let state = {};
+
+  while (Date.now() - start < timeoutMs) {
+    state = await readinessPageState(cdp, page, markName);
+
+    if (readinessHasAppLoadFailure(state)) {
+      throw new Error(
+        readinessFailureMessage(label, "reported app-load failure", state),
+      );
+    }
+
+    if (state.ready === true) {
+      return state;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
+  state = await readinessPageState(cdp, page, markName);
+  if (readinessHasAppLoadFailure(state)) {
+    throw new Error(
+      readinessFailureMessage(label, "reported app-load failure", state),
+    );
+  }
+  throw new Error(readinessFailureMessage(label, "timed out", state));
+}
+
 function isBenignLoadingFailure(failure) {
   return BENIGN_LOADING_FAILURES.some(
     (benignFailure) =>
@@ -783,28 +864,17 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const loaded = waitForSessionEvent(cdp, page.sessionId, "Page.loadEventFired");
   const navigation = await cdp.send("Page.navigate", { url }, page.sessionId);
   await loaded;
-  await waitUntil(async () => {
-    const result = await cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
-        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
-        return {
-          coreReady: performance.getEntriesByName("tracy.core.ready").length > 0,
-          detail,
-          error,
-        };
-      })()`,
-      returnByValue: true,
-    }, page.sessionId);
-    const status = result.result?.value ?? {};
-
-    if (status.error) {
-      const detail = status.detail ? ` (${status.detail})` : "";
-      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
-    }
-    return status.coreReady === true;
-  });
-  const coreReadyWallMs = await performanceMarkWallMs(cdp, page, "tracy.core.ready");
+  await waitForReadinessMark(
+    cdp,
+    page,
+    "core readiness",
+    PERFORMANCE_MARKS.coreReady,
+  );
+  const coreReadyWallMs = await performanceMarkWallMs(
+    cdp,
+    page,
+    PERFORMANCE_MARKS.coreReady,
+  );
   coreRequestIds = navigationFrameRequestIds(
     coreTransferRequestIds(
       requestIdsStartedAtOrBefore(
@@ -822,28 +892,12 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     requestUrls,
     ["host/wasm-modules.mjs"],
   );
-  await waitUntil(async () => {
-    const result = await cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const error = document.querySelector('[role="alert"]')?.textContent ?? "";
-        const detail = globalThis.__TRACY_APP_LOAD_ERROR__ ?? "";
-        return {
-          detail,
-          error,
-          fullReady: performance.getEntriesByName("tracy.app.ready").length > 0,
-        };
-      })()`,
-      returnByValue: true,
-    }, page.sessionId);
-    const status = result.result?.value ?? {};
-
-    if (status.error) {
-      const detail = status.detail ? ` (${status.detail})` : "";
-      throw new Error(`page reported app-load failure: ${status.error}${detail}`);
-    }
-
-    return status.fullReady === true;
-  });
+  await waitForReadinessMark(
+    cdp,
+    page,
+    "app readiness",
+    PERFORMANCE_MARKS.appReady,
+  );
   await waitUntil(() =>
     unfinishedTransferRequestIds(
       coreRequestIds,
@@ -861,15 +915,15 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
 
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
-      const shellPaintEntries = performance.getEntriesByName("tracy.app.shell.paint");
+      const shellPaintEntries = performance.getEntriesByName(${JSON.stringify(PERFORMANCE_MARKS.appShellPaint)});
       const shellPaint = shellPaintEntries.at(-1)?.startTime;
       if (shellPaint === undefined) {
         throw new Error("missing shell paint performance entry");
       }
-      const coreStart = performance.getEntriesByName("tracy.core.start")[0]?.startTime;
-      const coreReady = performance.getEntriesByName("tracy.core.ready")[0]?.startTime;
-      const appLoad = performance.getEntriesByName("tracy.app.load")[0]?.duration;
-      const wasm = performance.getEntriesByName("tracy.wasm.instantiate")[0]?.duration;
+      const coreStart = performance.getEntriesByName(${JSON.stringify(PERFORMANCE_MARKS.coreStart)})[0]?.startTime;
+      const coreReady = performance.getEntriesByName(${JSON.stringify(PERFORMANCE_MARKS.coreReady)})[0]?.startTime;
+      const appLoad = performance.getEntriesByName(${JSON.stringify(PERFORMANCE_MEASURES.appLoad)})[0]?.duration;
+      const wasm = performance.getEntriesByName(${JSON.stringify(PERFORMANCE_MEASURES.wasmInstantiate)})[0]?.duration;
       return {
         coreTtiMs: coreReady - coreStart,
         fullLoadMs: appLoad,
@@ -966,7 +1020,7 @@ async function runBench(options) {
   }
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   assert.deepEqual(FAST_3G, {
     downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
     latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -1184,6 +1238,81 @@ function runSelfTest() {
         ["host/wasm-modules.mjs"],
       ),
     /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
+  );
+  const readinessPage = { sessionId: "readiness-session" };
+  const readyState = {
+    alertText: "",
+    appLoadError: "",
+    markName: PERFORMANCE_MARKS.coreReady,
+    marks: [{ name: PERFORMANCE_MARKS.coreStart, startTime: 1 }],
+    page: {
+      readyState: "complete",
+      title: "tracy",
+      url: "http://127.0.0.1/",
+      visibilityState: "visible",
+    },
+    ready: true,
+  };
+  const readyCdp = {
+    async send(method, params, sessionId) {
+      assert.equal(method, "Runtime.evaluate");
+      assert.equal(params.returnByValue, true);
+      assert.equal(sessionId, readinessPage.sessionId);
+      return { result: { value: readyState } };
+    },
+  };
+  assert.equal(
+    await waitForReadinessMark(
+      readyCdp,
+      readinessPage,
+      "core readiness",
+      PERFORMANCE_MARKS.coreReady,
+      1,
+    ),
+    readyState,
+  );
+  const appLoadFailureState = {
+    ...readyState,
+    appLoadError: "deferred renderer unavailable",
+    page: { ...readyState.page, readyState: "interactive" },
+    ready: false,
+  };
+  const failedCdp = {
+    async send() {
+      return { result: { value: appLoadFailureState } };
+    },
+  };
+  await assert.rejects(
+    () =>
+      waitForReadinessMark(
+        failedCdp,
+        readinessPage,
+        "core readiness",
+        PERFORMANCE_MARKS.coreReady,
+        1,
+      ),
+    /core readiness reported app-load failure; readiness diagnostics=.*"appLoadError":"deferred renderer unavailable".*"marks":.*"tracy\.core\.start".*"page":.*"readyState":"interactive"/,
+  );
+  const timedOutState = {
+    ...readyState,
+    markName: PERFORMANCE_MARKS.appReady,
+    ready: false,
+  };
+  const timedOutCdp = {
+    async send() {
+      return { result: { value: timedOutState } };
+    },
+  };
+  await assert.rejects(
+    () =>
+      waitForReadinessMark(
+        timedOutCdp,
+        readinessPage,
+        "app readiness",
+        PERFORMANCE_MARKS.appReady,
+        0,
+      ),
+    /app readiness timed out; readiness diagnostics=.*"markName":"tracy\.app\.ready".*"page":/,
   );
   const staticServerSource = createServer.toString();
   assert.match(staticServerSource, /createDistServer\(distDir/);
@@ -1470,11 +1599,36 @@ function runSelfTest() {
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
   assert.match(
     navigateAndMeasure.toString(),
-    /coreReady: performance\.getEntriesByName\("tracy\.core\.ready"\)\.length > 0/,
+    /waitForReadinessMark\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /performanceMarkWallMs\(cdp, page, "tracy\.core\.ready"\)/,
+    /waitForReadinessMark\([\s\S]+PERFORMANCE_MARKS\.appReady/,
+  );
+  assert.match(
+    waitForReadinessMark.toString(),
+    /readinessPageState\(cdp, page, markName\)/,
+  );
+  assert.match(
+    waitForReadinessMark.toString(),
+    /readinessFailureMessage\(label, "timed out", state\)/,
+  );
+  assert.match(
+    readinessPageState.toString(),
+    /__TRACY_APP_LOAD_ERROR__/,
+  );
+  assert.match(
+    readinessPageState.toString(),
+    /performance\.getEntriesByType\("mark"\)/,
+  );
+  assert.match(
+    readinessPageState.toString(),
+    /readyState: document\.readyState/,
+  );
+  assert.doesNotMatch(readinessPageState.toString(), /workerMessages|__TRACY_BROWSER_INGEST__/);
+  assert.match(
+    navigateAndMeasure.toString(),
+    /performanceMarkWallMs\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
   );
   assert.match(
     navigateAndMeasure.toString(),
@@ -1526,7 +1680,7 @@ function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /performance\.getEntriesByName\("tracy\.app\.shell\.paint"\)/,
+    /performance\.getEntriesByName\(\$\{JSON\.stringify\(PERFORMANCE_MARKS\.appShellPaint\)\}\)/,
   );
   assert.match(
     navigateAndMeasure.toString(),
@@ -1542,11 +1696,7 @@ function runSelfTest() {
     navigateAndMeasure.toString(),
     /fcpMs: fcp\?\.startTime \?\? shellPaint/,
   );
-  assert.match(
-    navigateAndMeasure.toString(),
-    /fullReady: performance\.getEntriesByName\("tracy\.app\.ready"\)\.length > 0/,
-  );
-  assert.match(navigateAndMeasure.toString(), /return status\.fullReady === true/);
+  assert.doesNotMatch(navigateAndMeasure.toString(), /fullReady:/);
   assert.match(
     indexHtml,
     /<link rel="modulepreload" href="bootstrap\.mjs">/,
@@ -1595,7 +1745,7 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
 
   if (options.selfTest) {
-    runSelfTest();
+    await runSelfTest();
   } else {
     await runBench(options);
   }
