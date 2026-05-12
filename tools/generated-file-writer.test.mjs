@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -10,13 +10,29 @@ const {
   replaceGeneratedBlock,
 } = require("./generated-file-writer.js");
 
-function readFile(relativePath, root) {
-  return fs.readFileSync(path.join(root, relativePath), "utf8");
+function filePath(relativePath, root) {
+  return path.join(root, relativePath);
+}
+
+async function readFile(relativePath, root) {
+  return fs.readFile(filePath(relativePath, root), "utf8");
+}
+
+async function fileExists(relativePath, root) {
+  try {
+    await fs.access(filePath(relativePath, root));
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 describe("generated-file writer invariant", () => {
   test("preserves writes, marked blocks, and async stale-file reporting", async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-generated-writer-"));
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "tracy-generated-writer-"));
 
     try {
       const writer = createGeneratedFileWriter({
@@ -26,11 +42,11 @@ describe("generated-file writer invariant", () => {
       });
 
       expect(writer.writeIfChanged("generated.txt", "fresh\n")).toBe(true);
-      expect(readFile("generated.txt", root)).toBe("fresh\n");
+      await expect(readFile("generated.txt", root)).resolves.toBe("fresh\n");
       expect(writer.writeIfChanged("generated.txt", "fresh\n")).toBe(true);
 
-      fs.writeFileSync(
-        path.join(root, "marked.txt"),
+      await fs.writeFile(
+        filePath("marked.txt", root),
         ["header", "<!-- start -->", "old body", "<!-- end -->", "footer"].join("\n"),
       );
       expect(
@@ -42,7 +58,7 @@ describe("generated-file writer invariant", () => {
           },
         ]),
       ).toBe(true);
-      expect(readFile("marked.txt", root)).toBe(
+      await expect(readFile("marked.txt", root)).resolves.toBe(
         ["header", "<!-- start -->", "new body", "<!-- end -->", "footer"].join("\n"),
       );
 
@@ -62,7 +78,7 @@ describe("generated-file writer invariant", () => {
       });
 
       expect(checkWriter.writeIfChanged("generated.txt", "stale\n")).toBe(false);
-      expect(readFile("generated.txt", root)).toBe("fresh\n");
+      await expect(readFile("generated.txt", root)).resolves.toBe("fresh\n");
       expect(staleMessages).toEqual([
         "generated.txt is out of date; run node tools/example-generator.js",
       ]);
@@ -70,13 +86,13 @@ describe("generated-file writer invariant", () => {
       await expect(checkWriter.writeIfChangedAsync("missing.txt", "created\n")).resolves.toBe(
         false,
       );
-      expect(fs.existsSync(path.join(root, "missing.txt"))).toBe(false);
+      await expect(fileExists("missing.txt", root)).resolves.toBe(false);
       expect(staleMessages.at(-1)).toBe(
         "missing.txt is out of date; run node tools/example-generator.js",
       );
 
-      fs.writeFileSync(
-        path.join(root, "marked.txt"),
+      await fs.writeFile(
+        filePath("marked.txt", root),
         ["header", "<!-- start -->", "old body", "<!-- end -->", "footer"].join("\n"),
       );
       expect(
@@ -88,11 +104,11 @@ describe("generated-file writer invariant", () => {
           },
         ]),
       ).toBe(false);
-      expect(readFile("marked.txt", root)).toBe(
+      await expect(readFile("marked.txt", root)).resolves.toBe(
         ["header", "<!-- start -->", "old body", "<!-- end -->", "footer"].join("\n"),
       );
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+      await fs.rm(root, { recursive: true, force: true });
     }
   });
 });
