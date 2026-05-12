@@ -1488,14 +1488,20 @@ async function runSelfTest() {
   assert.match(bootstrap, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
   assert.match(
     bootstrap,
-    /const preloadedProgressiveTraceRendererPromise = import/,
+    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
   );
   assert.match(
     bootstrap,
-    /const importProgressiveTraceRenderer = \(\) => preloadedProgressiveTraceRendererPromise/,
+    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
   );
-  assert.doesNotMatch(bootstrap, /serviceWorkerController/);
-  assert.doesNotMatch(bootstrap, /warmProgressiveTraceRendererPromise/);
+  assert.match(
+    bootstrap,
+    /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/,
+  );
+  assert.match(
+    bootstrap,
+    /const importProgressiveTraceRenderer = \(\) =>\s+warmProgressiveTraceRendererPromise \?\?\s+import/,
+  );
   assert.doesNotMatch(bootstrap, /afterProtectedStartupBoundary/);
   assert.doesNotMatch(bootstrap, /new MessageChannel\(\)/);
   assert.doesNotMatch(bootstrap, /setTimeout\(resolve/);

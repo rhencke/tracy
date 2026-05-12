@@ -1130,13 +1130,19 @@ async function main() {
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
-  assert.match(bootstrapSource, /const preloadedProgressiveTraceRendererPromise = import/);
   assert.match(
     bootstrapSource,
-    /const importProgressiveTraceRenderer = \(\) => preloadedProgressiveTraceRendererPromise/,
+    /const serviceWorkerController =[\s\S]+navigator\?\.serviceWorker\?\.controller \?\? null/,
   );
-  assert.doesNotMatch(bootstrapSource, /serviceWorkerController/);
-  assert.doesNotMatch(bootstrapSource, /warmProgressiveTraceRendererPromise/);
+  assert.match(
+    bootstrapSource,
+    /const warmProgressiveTraceRendererPromise =[\s\S]+serviceWorkerController === null[\s\S]+\? null[\s\S]+import/,
+  );
+  assert.match(bootstrapSource, /warmProgressiveTraceRendererPromise \?\?[\s\S]+import/);
+  assert.match(
+    bootstrapSource,
+    /const importProgressiveTraceRenderer = \(\) =>\s+warmProgressiveTraceRendererPromise \?\?\s+import/,
+  );
   assert.doesNotMatch(bootstrapSource, /afterProtectedStartupBoundary/);
   assert.doesNotMatch(bootstrapSource, /new MessageChannel\(\)/);
   assert.doesNotMatch(bootstrapSource, /setTimeout\(resolve/);
