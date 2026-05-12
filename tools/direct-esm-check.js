@@ -2,7 +2,6 @@
 
 const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");
-const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 
@@ -1120,7 +1119,7 @@ async function main() {
   );
   assert.match(indexHtml, /<script type="module" src="bootstrap\.mjs"><\/script>/);
   assert(
-    !fs.existsSync(path.join(ROOT_DIR, LEGACY_BOOTSTRAP_ENTRYPOINT)),
+    !(await pathExists(path.join(ROOT_DIR, LEGACY_BOOTSTRAP_ENTRYPOINT))),
     `${LEGACY_BOOTSTRAP_ENTRYPOINT} should stay renamed to bootstrap.mjs`,
   );
   assert.doesNotMatch(makefile, LEGACY_BOOTSTRAP_PATTERN);
@@ -1258,7 +1257,7 @@ async function main() {
   assert.doesNotMatch(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);
   assert.match(rendererSource, /const TRACE_RENDERER_COLORS = Object\.freeze/);
   assert.doesNotMatch(rendererSource, /from "\.\/runtime-spec\.mjs"/);
-  assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
+  assert(!(await pathExists(path.join(ROOT_DIR, "host", "runtime-spec.mjs"))));
   assert.match(startupSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer\.mjs"/);
   assert.match(startupSpecSource, /APP_SHELL_COLORS/);
   assert.doesNotMatch(startupSpecSource, /TRACE_RENDERER_COLORS/);
@@ -1294,7 +1293,7 @@ async function main() {
   assert.match(makefile, /node tools\/direct-esm-check\.js/);
   assert.match(makefile, /node tools\/generate-palette-spec\.js --check/);
 
-  assert(fs.existsSync(path.join(ROOT_DIR, "tools/direct-esm-check.js")));
+  assert(await pathExists(path.join(ROOT_DIR, "tools/direct-esm-check.js")));
 
   for (const relativePath of [
     "tools/ingest-worker-runtime-check.js",
@@ -1307,7 +1306,7 @@ async function main() {
     "tools/production-topology-fixture.js",
     "tools/production-topology-fixture-check.js",
   ]) {
-    assert(fs.existsSync(path.join(ROOT_DIR, relativePath)));
+    assert(await pathExists(path.join(ROOT_DIR, relativePath)));
   }
 
   await Promise.all([
