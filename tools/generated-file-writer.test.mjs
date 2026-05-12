@@ -41,9 +41,9 @@ describe("generated-file writer invariant", () => {
         command: "node tools/example-generator.js",
       });
 
-      expect(writer.writeIfChanged("generated.txt", "fresh\n")).toBe(true);
+      await expect(writer.writeIfChangedAsync("generated.txt", "fresh\n")).resolves.toBe(true);
       await expect(readFile("generated.txt", root)).resolves.toBe("fresh\n");
-      expect(writer.writeIfChanged("generated.txt", "fresh\n")).toBe(true);
+      await expect(writer.writeIfChangedAsync("generated.txt", "fresh\n")).resolves.toBe(true);
 
       await fs.writeFile(
         filePath("marked.txt", root),
@@ -77,7 +77,9 @@ describe("generated-file writer invariant", () => {
         reportStale: (message) => staleMessages.push(message),
       });
 
-      expect(checkWriter.writeIfChanged("generated.txt", "stale\n")).toBe(false);
+      await expect(checkWriter.writeIfChangedAsync("generated.txt", "stale\n")).resolves.toBe(
+        false,
+      );
       await expect(readFile("generated.txt", root)).resolves.toBe("fresh\n");
       expect(staleMessages).toEqual([
         "generated.txt is out of date; run node tools/example-generator.js",
