@@ -11,6 +11,7 @@
     "playwright:install": "playwright install --with-deps",
     "playwright:test": "playwright test",
     "test": "make test",
+    "test:node": "vitest run",
     "test:layout": "node tools/generate-layout.js --check",
     "test:host-abi": "node tools/generate-host-abi.js --check",
     "test:palette-spec": "node tools/generate-palette-spec.js --check",
@@ -48,6 +49,7 @@
   "devDependencies": {
     "@lhci/cli": "0.15.1",
     "@playwright/test": "1.59.1",
-    "puppeteer-core": "24.43.0"
+    "puppeteer-core": "24.43.0",
+    "vitest": "^4.1.6"
   }
 }
