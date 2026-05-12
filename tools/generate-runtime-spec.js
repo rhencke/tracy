@@ -354,6 +354,8 @@ function renderStartupSpecModule() {
     "",
     renderNumberConstants("INTERACTIVE_INGEST_CHECK", spec.interactiveIngestCheck),
     "",
+    renderObjectConstant("RUNTIME_WORKER_ORCHESTRATION_CHECK", spec.runtimeWorkerOrchestrationCheck),
+    "",
     renderObjectConstant("RUNTIME_BRIDGE", spec.runtimeBridge),
     "",
     renderNamedStrings("PERFORMANCE_MARKS", spec.performanceMarks),

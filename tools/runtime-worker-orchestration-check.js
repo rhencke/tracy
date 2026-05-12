@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   createFakeWorkerClass,
+  createRuntimeAppHarness,
   flushRuntimeMicrotasks,
   importRepoModule,
   installRuntimeBrowserGlobals,
@@ -604,13 +605,10 @@ function makeAppExports(extra = {}) {
 }
 
 async function checkRuntimeOrchestratesWorker() {
-  const { frames } = installRuntimeBrowserGlobals();
-  const runtime = await importRepoModule("host/runtime.mjs");
   const workerMessages = [];
   const instantiateCalls = [];
   const performanceEntries = [];
   const ticks = [];
-  const memory = new WebAssembly.Memory({ initial: 512 });
   const indexReaderOpenCalls = [];
   const host = {
     opfs_index_create() {
@@ -626,70 +624,71 @@ async function checkRuntimeOrchestratesWorker() {
       performanceEntries.push({ kind: "measure", name, start, end });
     },
   };
-
-  const controller = runtime.runApp(memory, host, {
-    ingest: {
-      indexName: "indexes/trace.idx",
-      sourceName: "sources/trace.json",
-    },
-    indexReader: {
-      open(indexName) {
-        indexReaderOpenCalls.push(indexName);
-        return Promise.resolve(true);
+  const harness = createRuntimeAppHarness({
+    host,
+    memoryOptions: { initial: 512 },
+    runAppOptions: {
+      ingest: {
+        indexName: "indexes/trace.idx",
+        sourceName: "sources/trace.json",
       },
-    },
-    instantiateWasmModuleForThread: async (id, thread, imports) => {
-      instantiateCalls.push({
-        hostImport: imports.host.opfs_index_create,
-        id,
-        memory: imports.env.memory,
-        thread,
-      });
-      return {
-        exports: makeAppExports({
-          tracy_main() {
-            ticks.push("main");
-          },
-          tracy_tick(ts) {
-            ticks.push(ts);
-          },
-        }),
-      };
-    },
-    importProgressiveTraceRenderer: async () => ({
-      createProgressiveTraceRenderer() {
+      indexReader: {
+        open(indexName) {
+          indexReaderOpenCalls.push(indexName);
+          return Promise.resolve(true);
+        },
+      },
+      instantiateWasmModuleForThread: async (id, thread, imports) => {
+        instantiateCalls.push({
+          hostImport: imports.host.opfs_index_create,
+          id,
+          memory: imports.env.memory,
+          thread,
+        });
         return {
-          draw() {},
+          exports: makeAppExports({
+            tracy_main() {
+              ticks.push("main");
+            },
+            tracy_tick(ts) {
+              ticks.push(ts);
+            },
+          }),
         };
       },
-    }),
-    performance,
-    worker: {
-      Worker: FakeWorker,
-      onWorkerStatus(status, message) {
-        workerStatus.push({ status, message });
+      importProgressiveTraceRenderer: async () => ({
+        createProgressiveTraceRenderer() {
+          return {
+            draw() {},
+          };
+        },
+      }),
+      performance,
+      worker: {
+        Worker: FakeWorker,
+        onWorkerStatus(status, message) {
+          workerStatus.push({ status, message });
+        },
+        workerUrl: "worker.js",
       },
-      workerUrl: "worker.js",
     },
   });
 
-  await Promise.resolve();
-  await Promise.resolve();
+  const controller = await harness.boot();
+  const { memory } = harness;
 
   assert.equal(FakeWorker.instances.length, 0);
-  assert.ok(frames.length >= 1, "draw loop should be scheduled before ingest preload");
-  frames[0](0);
-  await flushRuntimeMicrotasks();
+  assert.ok(
+    harness.frames.length >= 1,
+    "draw loop should be scheduled before ingest preload",
+  );
+  await harness.runFrame(0);
   assert.equal(FakeWorker.instances.length, 0);
   assert.ok(
-    frames.length >= 2,
+    harness.frames.length >= 2,
     "app-ready follow-up frame should be scheduled before ingest preload",
   );
-  const appReadyFrameCallbacks = frames.splice(0);
-  for (const frame of appReadyFrameCallbacks) {
-    frame(16);
-  }
-  await flushRuntimeMicrotasks();
+  await harness.advanceAppReadyFrame();
 
   assert.equal(FakeWorker.instances.length, 1);
   const worker = FakeWorker.instances[0];
@@ -697,9 +696,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.deepEqual(worker.options, { type: "module" });
   assert.deepEqual(worker.posted, [{ type: "preload" }]);
   worker.emit("message", { type: "preloaded" });
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await harness.flushRuntimeWork();
   assert.deepEqual(instantiateCalls, [
     { hostImport: host.opfs_index_create, id: "app", memory, thread: "main" },
   ]);
@@ -730,7 +727,11 @@ async function checkRuntimeOrchestratesWorker() {
       end: "tracy.app.ready",
     },
   ]);
-  assert.equal(frames.length, 1, "draw loop should continue after ingest preload");
+  assert.equal(
+    harness.frames.length,
+    1,
+    "draw loop should continue after ingest preload",
+  );
   assert.deepEqual(worker.posted, [
     {
       type: "preload",
@@ -769,10 +770,10 @@ async function checkRuntimeOrchestratesWorker() {
     committedEvents: 7,
   });
 
-  frames[0](122);
-  frames[1](123);
+  await harness.runFrame(122);
+  await harness.runFrame(123);
   await importRepoModule("host/trace-renderer-spec.mjs");
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
     {
@@ -792,6 +793,7 @@ async function checkRuntimeOrchestratesWorker() {
   assert.equal(controller.status().result.committedEvents, 7);
   assert.equal(workerStatus.at(-1).status.state, "complete");
 
+  const runtime = await importRepoModule("host/runtime.mjs");
   const controllerWithError = runtime.createIngestWorkerController({
     Worker: FakeWorker,
     onWorkerStatus(status, message) {
@@ -809,11 +811,7 @@ async function checkRuntimeOrchestratesWorker() {
 }
 
 async function checkRuntimeStartsIngestFromFileSelection() {
-  const { frames } = installRuntimeBrowserGlobals();
-
-  const runtime = await importRepoModule("host/runtime.mjs");
   const abi = await importRepoModule("host/abi.mjs");
-  const memory = new WebAssembly.Memory({ initial: 512 });
   const sourceName = "sources/selected trace.json";
   const callbacks = [];
   const workerStatus = [];
@@ -831,52 +829,47 @@ async function checkRuntimeStartsIngestFromFileSelection() {
       callbacks.push(callback);
     },
   };
-
-  const controller = runtime.runApp(memory, host, {
-    indexReader: false,
-    importProgressiveTraceRenderer: async () => ({
-      createProgressiveTraceRenderer() {
-        return { draw() {} };
+  const harness = createRuntimeAppHarness({
+    host,
+    memoryOptions: { initial: 512 },
+    runAppOptions: {
+      indexReader: false,
+      importProgressiveTraceRenderer: async () => ({
+        createProgressiveTraceRenderer() {
+          return { draw() {} };
+        },
+      }),
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      worker: {
+        Worker: FakeWorker,
+        onWorkerStatus(status, message) {
+          workerStatus.push({ status, message });
+        },
+        workerUrl: "worker.js",
       },
-    }),
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    worker: {
-      Worker: FakeWorker,
-      onWorkerStatus(status, message) {
-        workerStatus.push({ status, message });
-      },
-      workerUrl: "worker.js",
     },
   });
 
-  await Promise.resolve();
-  await Promise.resolve();
+  const controller = await harness.boot();
 
   assert.equal(controller.worker, null);
-  frames[0](0);
-  await flushRuntimeMicrotasks();
+  await harness.runFrame(0);
   assert.equal(controller.worker, null);
-  assert.ok(frames.length >= 2);
-  const appReadyFrameCallbacks = frames.splice(0);
-  for (const frame of appReadyFrameCallbacks) {
-    frame(16);
-  }
-  await flushRuntimeMicrotasks();
+  assert.ok(harness.frames.length >= 2);
+  await harness.advanceAppReadyFrame();
 
   const preloadWorker = controller.worker;
   assert.deepEqual(preloadWorker.posted, [{ type: "preload" }]);
   preloadWorker.emit("message", { type: "preloaded" });
-  await Promise.resolve();
-  await Promise.resolve();
+  await harness.flushRuntimeWork();
 
   assert.equal(callbacks.length, 1);
   assert.equal(controller.worker, preloadWorker);
 
   callbacks[0]({ file: selectedFile, handle: 9 });
-  await Promise.resolve();
-  await Promise.resolve();
+  await harness.flushRuntimeWork();
 
   const worker = controller.worker;
   assert.equal(
@@ -902,14 +895,11 @@ async function checkRuntimeStartsIngestFromFileSelection() {
   assert.equal(workerStatus.at(-1).status.state, "running");
 
   callbacks[0]({ handle: -1 });
-  await Promise.resolve();
+  await harness.flushRuntimeWork();
   assert.equal(worker.posted.length, 2, "cancelled picker should not start ingest");
 }
 
 async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
-  const { frames } = installRuntimeBrowserGlobals();
-  const runtime = await importRepoModule("host/runtime.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
   const preloadCalls = [];
   let resolveIndexPreload;
   const indexPreload = new Promise((resolve) => {
@@ -927,23 +917,19 @@ async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
       return Promise.resolve(true);
     },
   };
-
-  runtime.runApp(memory, {}, {
-    ingestWorker,
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    progressiveTraceRenderer: false,
+  const harness = createRuntimeAppHarness({
+    runAppOptions: {
+      ingestWorker,
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      progressiveTraceRenderer: false,
+    },
   });
 
-  await flushRuntimeMicrotasks();
-  frames[0](0);
-  await flushRuntimeMicrotasks();
-  const appReadyFrameCallbacks = frames.splice(0);
-  for (const frame of appReadyFrameCallbacks) {
-    frame(16);
-  }
-  await flushRuntimeMicrotasks();
+  await harness.boot();
+  await harness.runFrame(0);
+  await harness.advanceAppReadyFrame();
 
   assert.deepEqual(
     preloadCalls,
@@ -952,7 +938,7 @@ async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
   );
 
   resolveIndexPreload(true);
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
 
   assert.deepEqual(
     preloadCalls,
@@ -962,13 +948,10 @@ async function checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal() {
 }
 
 async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
-  const { frames } = installRuntimeBrowserGlobals();
   FakeWorker.reset();
 
-  const runtime = await importRepoModule("host/runtime.mjs");
   const abi = await importRepoModule("host/abi.mjs");
   const runtimeMemoryPages = 1;
-  const memory = new WebAssembly.Memory({ initial: runtimeMemoryPages });
   const selectedFileSizeBytes = 1234;
   const selectedFile = Object.freeze({
     name: "pending preload trace.json",
@@ -978,8 +961,6 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   const expectedSourceName = `sources/${selectedFile.name}`;
   const expectedIndexName = "indexes/pending_preload_trace.json.idx";
   const workerUrl = "worker.js";
-  const firstFrameTimestampMs = 0;
-  const appReadyFrameTimestampMs = 16;
   const preloadCalls = [];
   const callbacks = [];
   let resolveIndexPreload;
@@ -997,32 +978,30 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
       callbacks.push(callback);
     },
   };
-
-  const controller = runtime.runApp(memory, host, {
-    indexReader: {
-      preload() {
-        preloadCalls.push("index-reader");
-        return indexPreload;
+  const harness = createRuntimeAppHarness({
+    host,
+    memoryOptions: { initial: runtimeMemoryPages },
+    runAppOptions: {
+      indexReader: {
+        preload() {
+          preloadCalls.push("index-reader");
+          return indexPreload;
+        },
       },
-    },
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    progressiveTraceRenderer: false,
-    worker: {
-      Worker: FakeWorker,
-      workerUrl,
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      progressiveTraceRenderer: false,
+      worker: {
+        Worker: FakeWorker,
+        workerUrl,
+      },
     },
   });
 
-  await flushRuntimeMicrotasks();
-  frames[0](firstFrameTimestampMs);
-  await flushRuntimeMicrotasks();
-  const appReadyFrameCallbacks = frames.splice(0);
-  for (const frame of appReadyFrameCallbacks) {
-    frame(appReadyFrameTimestampMs);
-  }
-  await flushRuntimeMicrotasks();
+  const controller = await harness.boot();
+  await harness.runFrame(0);
+  await harness.advanceAppReadyFrame();
 
   assert.deepEqual(
     preloadCalls,
@@ -1033,7 +1012,7 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   assert.equal(callbacks.length, 1);
 
   callbacks[0]({ file: selectedFile, handle: selectedFileHandle });
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
 
   const worker = controller.worker;
   assert.deepEqual(worker.posted, [
@@ -1049,7 +1028,7 @@ async function checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart() {
   ]);
 
   resolveIndexPreload(true);
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
 
   assert.deepEqual(
     worker.posted.map((message) => message.type),
@@ -3201,9 +3180,6 @@ async function checkProgressiveTraceRendererClampsPanZoomAndDrawsUnknownRange() 
 }
 
 async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
-  const { frames } = installRuntimeBrowserGlobals();
-  const runtime = await importRepoModule("host/runtime.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
   let coveredRange = null;
   let readerCoveredRange = null;
   let readerState = "idle";
@@ -3223,58 +3199,56 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
       return { coveredRange, state: "running" };
     },
   };
-
-  runtime.runApp(memory, {}, {
-    importProgressiveTraceRenderer: async () => {
-      importCalls += 1;
-      return {
-        createProgressiveTraceRenderer(nextMemory, nextIngestWorker, options) {
-          assert.equal(nextMemory, memory);
-          assert.equal(nextIngestWorker, ingestWorker);
-          rendererOptions = options;
-          return {
-            draw() {
-              drawCalls += 1;
-            },
-          };
-        },
-      };
-    },
-    ingestWorker,
-    preloadIngestDependencies: false,
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    worker: {
-      Worker: FakeWorker,
+  const harness = createRuntimeAppHarness({
+    runAppOptions: {
+      importProgressiveTraceRenderer: async () => {
+        importCalls += 1;
+        return {
+          createProgressiveTraceRenderer(nextMemory, nextIngestWorker, options) {
+            assert.equal(nextMemory, harness.memory);
+            assert.equal(nextIngestWorker, ingestWorker);
+            rendererOptions = options;
+            return {
+              draw() {
+                drawCalls += 1;
+              },
+            };
+          },
+        };
+      },
+      ingestWorker,
+      preloadIngestDependencies: false,
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      worker: {
+        Worker: FakeWorker,
+      },
     },
   });
 
-  await flushRuntimeMicrotasks();
+  await harness.boot();
 
   assert.equal(
     importCalls,
     1,
     "renderer implementation module import should start before the first animation frame",
   );
-  frames[0](1);
-  await flushRuntimeMicrotasks();
+  await harness.runFrame(1);
   assert.equal(importCalls, 1, "renderer implementation module should be imported once");
   assert.equal(drawCalls, 0, "renderer should not draw before covered pages are queryable");
 
   coveredRange = { end: 0, start: 0, type: "covered_range", valid: false };
   readerState = "ready";
-  frames[1](2);
-  await flushRuntimeMicrotasks();
+  await harness.runFrame(2);
   assert.equal(
     drawCalls,
     0,
     "renderer should wait a frame for creation after the reader becomes queryable",
   );
 
-  frames[2](3);
-  await flushRuntimeMicrotasks();
-  frames[3](4);
+  await harness.runFrame(3);
+  await harness.runFrame(4);
   assert.equal(
     drawCalls,
     1,
@@ -3293,23 +3267,19 @@ async function checkRuntimePreloadsProgressiveTraceRendererImplementation() {
 
   readerCoveredRange = { end: 120, start: 100, valid: true };
   coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
-  frames[4](5);
+  await harness.runFrame(5);
   assert.equal(
     importCalls,
     1,
     "first queryable ingest frame should reuse the preloaded renderer implementation module",
   );
 
-  await flushRuntimeMicrotasks();
-  frames[5](6);
+  await harness.runFrame(6);
   assert.equal(importCalls, 1);
   assert.equal(drawCalls, 3);
 }
 
 async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
-  const { frames } = installRuntimeBrowserGlobals();
-  const runtime = await importRepoModule("host/runtime.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
   let drawCalls = 0;
   const coveredRange = { end: 120, start: 100, type: "covered_range", valid: true };
   const ingestWorker = {
@@ -3325,30 +3295,30 @@ async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
       return { coveredRange, state: "running" };
     },
   };
-
-  runtime.runApp(memory, {}, {
-    importProgressiveTraceRenderer: async () => ({
-      createProgressiveTraceRenderer() {
-        return {
-          draw() {
-            drawCalls += 1;
-          },
-        };
+  const harness = createRuntimeAppHarness({
+    runAppOptions: {
+      importProgressiveTraceRenderer: async () => ({
+        createProgressiveTraceRenderer() {
+          return {
+            draw() {
+              drawCalls += 1;
+            },
+          };
+        },
+      }),
+      ingestWorker,
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      worker: {
+        Worker: FakeWorker,
       },
-    }),
-    ingestWorker,
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    worker: {
-      Worker: FakeWorker,
     },
   });
 
-  await flushRuntimeMicrotasks();
-  frames[0](1);
-  frames[1](2);
-  await flushRuntimeMicrotasks();
+  await harness.boot();
+  await harness.runFrame(1);
+  await harness.runFrame(2);
 
   assert.equal(
     drawCalls,
@@ -3358,9 +3328,6 @@ async function checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable() {
 }
 
 async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
-  const { frames } = installRuntimeBrowserGlobals();
-  const runtime = await importRepoModule("host/runtime.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
   const performanceEntries = [];
   const performance = {
     mark(name) {
@@ -3375,24 +3342,25 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
   const rendererImport = new Promise((resolve) => {
     resolveRendererImport = resolve;
   });
-
-  runtime.runApp(memory, {}, {
-    indexReader: false,
-    preloadIngestDependencies: false,
-    importProgressiveTraceRenderer: () => {
-      rendererImportStarted = true;
-      return rendererImport;
-    },
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    performance,
-    worker: {
-      Worker: FakeWorker,
+  const harness = createRuntimeAppHarness({
+    runAppOptions: {
+      indexReader: false,
+      preloadIngestDependencies: false,
+      importProgressiveTraceRenderer: () => {
+        rendererImportStarted = true;
+        return rendererImport;
+      },
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      performance,
+      worker: {
+        Worker: FakeWorker,
+      },
     },
   });
 
-  await flushRuntimeMicrotasks();
+  await harness.boot();
 
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.core.ready"),
@@ -3410,8 +3378,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
     "deferred renderer import should start before the first frame",
   );
 
-  frames[0](1);
-  await flushRuntimeMicrotasks();
+  await harness.runFrame(1);
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.app.ready"),
     false,
@@ -3424,7 +3391,7 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
     },
   });
   await importRepoModule("host/trace-renderer-spec.mjs");
-  await flushRuntimeMicrotasks();
+  await harness.flushRuntimeWork();
   assert.deepEqual(performanceEntries.slice(-2), [
     { kind: "mark", name: "tracy.app.ready" },
     {
@@ -3437,9 +3404,6 @@ async function checkAppReadyWaitsForFirstFrameAndDeferredRenderer() {
 }
 
 async function checkAppReadyFailsWhenDeferredRendererFails() {
-  const { frames } = installRuntimeBrowserGlobals();
-  const runtime = await importRepoModule("host/runtime.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
   const performanceEntries = [];
   const previousError = globalThis.__TRACY_APP_LOAD_ERROR__;
   const previousConsoleError = console.error;
@@ -3454,24 +3418,25 @@ async function checkAppReadyFailsWhenDeferredRendererFails() {
 
   globalThis.__TRACY_APP_LOAD_ERROR__ = "";
   console.error = () => {};
-  runtime.runApp(memory, {}, {
-    indexReader: false,
-    preloadIngestDependencies: false,
-    importProgressiveTraceRenderer: async () => {
-      throw new Error("deferred renderer unavailable");
-    },
-    instantiateWasmModuleForThread: async () => ({
-      exports: makeAppExports(),
-    }),
-    performance,
-    worker: {
-      Worker: FakeWorker,
+  const harness = createRuntimeAppHarness({
+    runAppOptions: {
+      indexReader: false,
+      preloadIngestDependencies: false,
+      importProgressiveTraceRenderer: async () => {
+        throw new Error("deferred renderer unavailable");
+      },
+      instantiateWasmModuleForThread: async () => ({
+        exports: makeAppExports(),
+      }),
+      performance,
+      worker: {
+        Worker: FakeWorker,
+      },
     },
   });
 
-  await flushRuntimeMicrotasks();
-  frames[0](1);
-  await flushRuntimeMicrotasks();
+  await harness.boot();
+  await harness.runFrame(1);
 
   assert.equal(
     performanceEntries.some((entry) => entry.name === "tracy.app.ready"),

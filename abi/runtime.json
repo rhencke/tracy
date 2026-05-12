@@ -262,6 +262,18 @@
       "description": "Polling cadence for async production handoff checks in the interactive ingest verification gate."
     }
   },
+  "runtimeWorkerOrchestrationCheck": {
+    "bootSensitiveChecks": [
+      "checkRuntimeOrchestratesWorker",
+      "checkRuntimeStartsIngestFromFileSelection",
+      "checkRuntimePreloadsIndexReaderBeforeWorkerPreloadSignal",
+      "checkRuntimeSkipsLateWorkerPreloadAfterFileSelectionStart",
+      "checkRuntimePreloadsProgressiveTraceRendererImplementation",
+      "checkRuntimeDrawsProgressiveRendererWhenCreatedQueryable",
+      "checkAppReadyWaitsForFirstFrameAndDeferredRenderer",
+      "checkAppReadyFailsWhenDeferredRendererFails"
+    ]
+  },
   "runtimeBridge": {
     "threads": {
       "MAIN": "main"

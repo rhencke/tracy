@@ -20,9 +20,73 @@ const FORBIDDEN_BUNDLE_PATTERNS = [
 ];
 const LEGACY_BOOTSTRAP_ENTRYPOINT = "bootstrap" + ".js";
 const LEGACY_BOOTSTRAP_PATTERN = new RegExp(`${"bootstrap"}\\.js`);
+const FORBIDDEN_RUNTIME_APP_BOOT_PATTERNS = Object.freeze([
+  {
+    pattern: /\bruntime\.runApp\s*\(/,
+    message: "direct runtime app startup",
+  },
+  {
+    pattern: /\binstallRuntimeBrowserGlobals\s*\(/,
+    message: "local runtime browser-global installation",
+  },
+  {
+    pattern: /new\s+WebAssembly\.Memory\s*\(/,
+    message: "local runtime Wasm memory setup",
+  },
+  {
+    pattern: /\bawait\s+Promise\.resolve\s*\(\s*\)/,
+    message: "local microtask flushing",
+  },
+  {
+    pattern: /\bflushRuntimeMicrotasks\s*\(/,
+    message: "direct runtime microtask flushing",
+  },
+  {
+    pattern: /\bframes\s*\[/,
+    message: "direct frame-array callback execution",
+  },
+  {
+    pattern: /\bframes\.splice\s*\(/,
+    message: "direct frame-array mutation",
+  },
+  {
+    pattern: /\bappReadyFrameCallbacks\b/,
+    message: "local app-ready frame orchestration",
+  },
+]);
 
 function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
+}
+
+function readJsonRepoFile(relativePath) {
+  return JSON.parse(readRepoFile(relativePath));
+}
+
+function extractFunctionSource(source, functionName) {
+  const functionPattern = new RegExp(`\\b(?:async\\s+)?function\\s+${functionName}\\s*\\(`);
+  const match = functionPattern.exec(source);
+
+  assert(match, `runtime worker orchestration check should define ${functionName}`);
+
+  const functionStart = match.index;
+  const bodyStart = source.indexOf("{", functionStart);
+
+  assert.notEqual(bodyStart, -1, `${functionName} should have a function body`);
+
+  let depth = 0;
+  for (let index = bodyStart; index < source.length; index += 1) {
+    if (source[index] === "{") {
+      depth += 1;
+    } else if (source[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(functionStart, index + 1);
+      }
+    }
+  }
+
+  assert.fail(`${functionName} should have a balanced function body`);
 }
 
 function escapeRegExp(value) {
@@ -326,6 +390,62 @@ function assertRuntimeWorkerCheckUsesSharedHarness() {
       pattern,
       `runtime worker orchestration check should not own ${message}`,
     );
+  }
+}
+
+function assertRuntimeAppBootChecksUseHarnessOperations() {
+  const runtimeSpec = readJsonRepoFile("abi/runtime.json");
+  const bootSensitiveChecks =
+    runtimeSpec.runtimeWorkerOrchestrationCheck?.bootSensitiveChecks;
+  const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
+
+  assert.match(
+    source,
+    /createRuntimeAppHarness/,
+    "runtime worker orchestration check should import the runtime app boot harness",
+  );
+  assertStringArray(
+    bootSensitiveChecks,
+    "runtime worker orchestration check boot-sensitive check names should live in abi/runtime.json",
+  );
+  assert.match(
+    startupSpecSource,
+    /export const RUNTIME_WORKER_ORCHESTRATION_CHECK = Object\.freeze/,
+    "generated startup spec should expose the runtime worker orchestration check contract",
+  );
+  assert.match(
+    startupSpecSource,
+    /bootSensitiveChecks/,
+    "generated startup spec should include boot-sensitive runtime worker check names",
+  );
+
+  for (const functionName of bootSensitiveChecks) {
+    const functionSource = extractFunctionSource(source, functionName);
+
+    assert.match(
+      functionSource,
+      /\bcreateRuntimeAppHarness\s*\(/,
+      `${functionName} should create the shared runtime app boot harness`,
+    );
+    assert.match(
+      functionSource,
+      /\bharness\.(?:boot|bootToAppReady)\s*\(/,
+      `${functionName} should boot the runtime app through the harness`,
+    );
+    assert.match(
+      functionSource,
+      /\bharness\.(?:runFrame|bootToAppReady)\s*\(/,
+      `${functionName} should advance runtime frames through the harness`,
+    );
+
+    for (const { pattern, message } of FORBIDDEN_RUNTIME_APP_BOOT_PATTERNS) {
+      assert.doesNotMatch(
+        functionSource,
+        pattern,
+        `${functionName} should not reintroduce ${message}; use createRuntimeAppHarness operations instead`,
+      );
+    }
   }
 }
 
@@ -1160,6 +1280,7 @@ function main() {
   assertIndexCatalogUsesGeneratedFormatSpec();
   assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec();
   assertRuntimeWorkerCheckUsesSharedHarness();
+  assertRuntimeAppBootChecksUseHarnessOperations();
   assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
   assertInteractiveIngestCheckUsesSharedHarness();
   assertProductionTopologyFixtureUsesHostAbiSpec();
