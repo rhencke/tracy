@@ -1133,7 +1133,11 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /return import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+    /const wasmModulesUrl = `\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+  );
+  assert.match(
+    bootstrapSource,
+    /return import\(wasmModulesUrl\)/,
   );
   assert.match(
     bootstrapSource,

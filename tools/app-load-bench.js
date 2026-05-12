@@ -1533,7 +1533,11 @@ function runSelfTest() {
   );
   assert.match(
     bootstrap,
-    /return import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+    /const wasmModulesUrl = `\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+  );
+  assert.match(
+    bootstrap,
+    /return import\(wasmModulesUrl\)/,
   );
   assert.match(
     bootstrap,
