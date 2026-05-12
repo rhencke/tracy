@@ -107,6 +107,88 @@ async function assertServerResponseModes() {
   });
 }
 
+async function withoutUnhandledRejection(run) {
+  let unhandled = null;
+  const onUnhandledRejection = (error) => {
+    unhandled = error;
+  };
+
+  process.on("unhandledRejection", onUnhandledRejection);
+  try {
+    await run();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(unhandled, null);
+  } finally {
+    process.off("unhandledRejection", onUnhandledRejection);
+  }
+}
+
+async function assertServerFailureModes() {
+  await withTempDist(async (distDir) => {
+    const disappearingFile = await createDistServer(distDir, {
+      fsPromises: {
+        readFile: async () => {
+          const error = new Error("missing after stat");
+          error.code = "ENOENT";
+          throw error;
+        },
+        stat: async () => ({ isFile: () => true }),
+      },
+    });
+    try {
+      const response = await request(`${disappearingFile.origin}/index.html`);
+      assert.equal(response.statusCode, 404);
+      assert.equal(response.body.toString("utf8"), "not found");
+    } finally {
+      await disappearingFile.close();
+    }
+
+    const unreadableFile = await createDistServer(distDir, {
+      fsPromises: {
+        readFile: async () => {
+          const error = new Error("permission denied");
+          error.code = "EACCES";
+          throw error;
+        },
+        stat: async () => ({ isFile: () => true }),
+      },
+    });
+    try {
+      await withoutUnhandledRejection(async () => {
+        await assert.rejects(
+          request(`${unreadableFile.origin}/index.html`),
+          /socket hang up|aborted/,
+        );
+      });
+    } finally {
+      await unreadableFile.close();
+    }
+
+    const brokenGzip = await createDistServer(distDir, {
+      fsPromises: {
+        readFile: async () => Buffer.from("<!doctype html>\n"),
+        stat: async () => ({ isFile: () => true }),
+      },
+      gzip: true,
+      gzipSync: () => {
+        throw new Error("gzip failed");
+      },
+    });
+    try {
+      await withoutUnhandledRejection(async () => {
+        await assert.rejects(
+          request(`${brokenGzip.origin}/index.html`, {
+            headers: { "Accept-Encoding": "gzip" },
+          }),
+          /socket hang up|aborted/,
+        );
+      });
+    } finally {
+      await brokenGzip.close();
+    }
+  });
+}
+
 function assertPathAndMimeHelpers() {
   const distDir = path.resolve("/repo/dist");
 
@@ -267,6 +349,7 @@ async function main() {
   assertInteractiveCheckUsesSharedHelpers();
   assertDelayedWasmImportBoundary();
   await assertServerResponseModes();
+  await assertServerFailureModes();
 }
 
 main().catch((error) => {

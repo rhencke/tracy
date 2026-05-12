@@ -100,6 +100,10 @@ function sendNotFound(response) {
   response.end("not found");
 }
 
+function destroyResponse(response, error) {
+  response.destroy(error);
+}
+
 async function listen(server) {
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -126,26 +130,34 @@ async function serveFile(request, response, file, options) {
     return;
   }
 
-  const source = await options.fsPromises.readFile(file);
-  const body =
-    options.gzip && acceptsGzip(request) && shouldGzip(file, options.gzipExtensions)
-      ? options.gzipSync(source)
-      : source;
-  const headers = {
-    "Content-Length": body.byteLength,
-    "Content-Type": contentType(file, options.mimeTypes),
-  };
+  try {
+    const source = await options.fsPromises.readFile(file);
+    const body =
+      options.gzip && acceptsGzip(request) && shouldGzip(file, options.gzipExtensions)
+        ? options.gzipSync(source)
+        : source;
+    const headers = {
+      "Content-Length": body.byteLength,
+      "Content-Type": contentType(file, options.mimeTypes),
+    };
 
-  if (options.cacheControl !== null) {
-    headers["Cache-Control"] = options.cacheControl;
-  }
-  if (body !== source) {
-    headers["Content-Encoding"] = "gzip";
-    headers.Vary = "Accept-Encoding";
-  }
+    if (options.cacheControl !== null) {
+      headers["Cache-Control"] = options.cacheControl;
+    }
+    if (body !== source) {
+      headers["Content-Encoding"] = "gzip";
+      headers.Vary = "Accept-Encoding";
+    }
 
-  response.writeHead(200, headers);
-  response.end(body);
+    response.writeHead(200, headers);
+    response.end(body);
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") {
+      sendNotFound(response);
+      return;
+    }
+    destroyResponse(response, error);
+  }
 }
 
 async function createDistServer(distDir, options = {}) {
