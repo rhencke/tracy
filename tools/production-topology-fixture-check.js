@@ -467,12 +467,18 @@ async function checkTypedScenarioHelpers() {
   let delivered = null;
   const workerMessageIngestId = 1;
   const workerMessageType = "progress";
-  const workerMessage = { ingestId: workerMessageIngestId, type: workerMessageType };
+  const workerMessage = { type: workerMessageType };
+  const expectedWorkerMessage = {
+    ingestId: workerMessageIngestId,
+    type: workerMessageType,
+  };
   const expectedWorkerMessageDeliveryResult = true;
   const expectedWorkerMessageEmitType = WORKER_EVENT.EVENT_MESSAGE;
 
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: workerMessage,
       worker: {
         emit(type, message) {
@@ -483,7 +489,7 @@ async function checkTypedScenarioHelpers() {
     expectedWorkerMessageDeliveryResult,
   );
   assert.deepEqual(delivered, {
-    message: workerMessage,
+    message: expectedWorkerMessage,
     type: expectedWorkerMessageEmitType,
   });
 }
@@ -502,11 +508,16 @@ async function checkTypedScenarioOrderGuards() {
   const expectedWorkerWriteCount = workerWriteLength;
   const expectedFlushResult = 0;
   const mainThreadReadLengthBeforeOpen = workerWriteLength;
-  const noSelectionWorkerMessageIngestId = 1;
   const noSelectionWorkerMessageType = "progress";
   const noSelectionWorkerMessage = {
-    ingestId: noSelectionWorkerMessageIngestId,
     type: noSelectionWorkerMessageType,
+  };
+  const missingSelectedFileIngestHandle = 999;
+  const missingSelectedFileIngestBytes = new Uint8Array([53, 54]);
+  const missingSelectedFileIngestName = "no-selection.json";
+  const noSelectionFile = {
+    bytes: missingSelectedFileIngestBytes,
+    name: missingSelectedFileIngestName,
   };
   const expectedCreateBeforePublicationError = {
     message: `${OP.mainThreadIndexOpen}: worker must create OPFS index ${indexName} before publication`,
@@ -518,7 +529,7 @@ async function checkTypedScenarioOrderGuards() {
     message: `worker publication requires worker OPFS index ${indexName} to contain bytes`,
   };
   const expectedNoSelectionMessageError = {
-    message: `${OP.workerMessageDelivery} requires selected-file ingest first`,
+    message: `${OP.workerMessageDelivery} requires selected-file ingest for handle ${missingSelectedFileIngestHandle}`,
   };
 
   assert.throws(
@@ -572,7 +583,9 @@ async function checkTypedScenarioOrderGuards() {
   const noSelectionFixture = makeProductionTopologyFixture();
 
   assert.throws(
-    () => noSelectionFixture.scenario.workerMessageDelivery({
+    () => noSelectionFixture.scenario.selectedFileWorkerMessageDelivery({
+      file: noSelectionFile,
+      handle: missingSelectedFileIngestHandle,
       message: noSelectionWorkerMessage,
       worker: { emit() {} },
     }),
@@ -593,6 +606,9 @@ async function checkWorkerMessageDeliveryRequiresActiveIngest() {
   const firstSelectedFileIngestId = 1;
   const workerMessageType = "progress";
   const workerMessage = {
+    type: workerMessageType,
+  };
+  const expectedWorkerMessage = {
     ingestId: firstSelectedFileIngestId,
     type: workerMessageType,
   };
@@ -630,7 +646,9 @@ async function checkWorkerMessageDeliveryRequiresActiveIngest() {
   );
   assert.equal(callbackRan, false);
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: workerMessage,
       worker,
     }),
@@ -641,14 +659,16 @@ async function checkWorkerMessageDeliveryRequiresActiveIngest() {
   await Promise.resolve();
   assert.equal(callbackRan, true);
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: workerMessage,
       worker,
     }),
     true,
   );
   assert.deepEqual(delivered, {
-    message: workerMessage,
+    message: expectedWorkerMessage,
     type: WORKER_EVENT.EVENT_MESSAGE,
   });
 }
@@ -670,18 +690,22 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
   const firstSelectedFileIngestId = 1;
   const secondSelectedFileIngestId = 2;
   const completeMessage = {
+    type: WORKER_MESSAGE.COMPLETE,
+  };
+  const expectedCompleteMessage = {
     ingestId: firstSelectedFileIngestId,
     type: WORKER_MESSAGE.COMPLETE,
   };
   const staleProgressAfterCompleteMessage = {
-    ingestId: firstSelectedFileIngestId,
     type: WORKER_MESSAGE.PROGRESS,
   };
   const staleProgressAfterNewSelectionMessage = {
-    ingestId: firstSelectedFileIngestId,
     type: WORKER_MESSAGE.PROGRESS,
   };
   const activeProgressMessage = {
+    type: WORKER_MESSAGE.PROGRESS,
+  };
+  const expectedActiveProgressMessage = {
     ingestId: secondSelectedFileIngestId,
     type: WORKER_MESSAGE.PROGRESS,
   };
@@ -729,7 +753,9 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
     workerHost,
   });
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: firstSelectedFile,
+      handle: firstSelectedFileHandle,
       message: completeMessage,
       worker,
     }),
@@ -737,7 +763,9 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
     "terminal complete should deliver for the current active ingest",
   );
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: firstSelectedFile,
+      handle: firstSelectedFileHandle,
       message: staleProgressAfterCompleteMessage,
       worker,
     }),
@@ -760,7 +788,9 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
   assert.equal(await secondPicker, secondSelectedFileHandle);
   await Promise.resolve();
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: firstSelectedFile,
+      handle: firstSelectedFileHandle,
       message: staleProgressAfterNewSelectionMessage,
       worker,
     }),
@@ -768,7 +798,9 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
     "worker message delivery should reject messages for an ingest superseded by a newer selection",
   );
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: secondSelectedFile,
+      handle: secondSelectedFileHandle,
       message: activeProgressMessage,
       worker,
     }),
@@ -777,11 +809,11 @@ async function checkWorkerMessageDeliveryRejectsRetiredIngests() {
   );
   assert.deepEqual(delivered, [
     {
-      message: completeMessage,
+      message: expectedCompleteMessage,
       type: WORKER_EVENT.EVENT_MESSAGE,
     },
     {
-      message: activeProgressMessage,
+      message: expectedActiveProgressMessage,
       type: WORKER_EVENT.EVENT_MESSAGE,
     },
   ]);
@@ -806,6 +838,9 @@ async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
   const expectedFlushResult = 0;
   const firstSelectedFileIngestId = 1;
   const completeMessage = {
+    type: WORKER_MESSAGE.COMPLETE,
+  };
+  const expectedCompleteMessage = {
     ingestId: firstSelectedFileIngestId,
     type: WORKER_MESSAGE.COMPLETE,
   };
@@ -849,7 +884,9 @@ async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
     workerHost,
   });
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       indexName: unrelatedIndexName,
       message: completeMessage,
       worker,
@@ -880,7 +917,9 @@ async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
   );
   assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: completeMessage,
       worker,
     }),
@@ -894,7 +933,9 @@ async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
     workerIndexId,
   );
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: completeMessage,
       worker,
     }),
@@ -902,7 +943,7 @@ async function checkWorkerMessageDeliveryRequiresPublishedCompleteIndex() {
     "complete delivery should accept the active ingest index after publication",
   );
   assert.deepEqual(delivered, {
-    message: completeMessage,
+    message: expectedCompleteMessage,
     type: WORKER_EVENT.EVENT_MESSAGE,
   });
 }
@@ -923,6 +964,11 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   const expectedFlushResult = 0;
   const firstSelectedFileIngestId = 1;
   const coveredRangeMessage = {
+    end: selectedFileBytes.byteLength,
+    start: 0,
+    type: WORKER_MESSAGE.COVERED_RANGE,
+  };
+  const expectedCoveredRangeMessage = {
     end: selectedFileBytes.byteLength,
     ingestId: firstSelectedFileIngestId,
     start: 0,
@@ -964,8 +1010,9 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   assert.equal(await picker, selectedFileHandle);
   await Promise.resolve();
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
-      indexName,
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: coveredRangeMessage,
       worker,
     }),
@@ -996,8 +1043,9 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
   );
   assert.equal(await workerHost[HOST.OPFS_INDEX_FLUSH](workerIndexId), expectedFlushResult);
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
-      indexName,
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: coveredRangeMessage,
       worker,
     }),
@@ -1007,15 +1055,16 @@ async function checkWorkerMessageDeliveryRequiresPublishedCoveredRangeIndex() {
 
   assert.equal(await fixture.scenario.workerPublication({ indexName }), workerIndexId);
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
-      indexName,
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: coveredRangeMessage,
       worker,
     }),
     true,
   );
   assert.deepEqual(delivered, {
-    message: coveredRangeMessage,
+    message: expectedCoveredRangeMessage,
     type: expectedWorkerMessageEmitType,
   });
 }
@@ -1035,6 +1084,11 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
   const unrelatedIndexBytes = new Uint8Array([83, 84]);
   const firstSelectedFileIngestId = 1;
   const coveredRangeMessage = {
+    end: selectedFileBytes.byteLength,
+    start: 0,
+    type: WORKER_MESSAGE.COVERED_RANGE,
+  };
+  const expectedCoveredRangeMessage = {
     end: selectedFileBytes.byteLength,
     ingestId: firstSelectedFileIngestId,
     start: 0,
@@ -1080,7 +1134,9 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
     workerHost,
   });
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: coveredRangeMessageWithUnrelatedIndex,
       worker,
     }),
@@ -1088,7 +1144,9 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
     "covered_range delivery should reject an unrelated published index from the message payload",
   );
   assert.throws(
-    () => fixture.scenario.workerMessageDelivery({
+    () => fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       indexName: unrelatedIndexName,
       message: coveredRangeMessage,
       worker,
@@ -1102,8 +1160,9 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
     workerHost,
   });
   assert.equal(
-    fixture.scenario.workerMessageDelivery({
-      indexName: activeIndexName,
+    fixture.scenario.selectedFileWorkerMessageDelivery({
+      file: selectedFile,
+      handle: selectedFileHandle,
       message: coveredRangeMessage,
       worker,
     }),
@@ -1111,7 +1170,7 @@ async function checkWorkerMessageDeliveryRejectsUnrelatedCoveredRangeIndex() {
     "covered_range delivery should accept the active ingest index after publication",
   );
   assert.deepEqual(delivered, {
-    message: coveredRangeMessage,
+    message: expectedCoveredRangeMessage,
     type: WORKER_EVENT.EVENT_MESSAGE,
   });
 }
