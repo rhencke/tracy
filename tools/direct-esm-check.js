@@ -64,6 +64,18 @@ async function readJsonRepoFile(relativePath) {
   return JSON.parse(await readRepoFile(relativePath));
 }
 
+async function pathExists(filePath) {
+  try {
+    await fsp.access(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function extractFunctionSource(source, functionName) {
   const functionPattern = new RegExp(`\\b(?:async\\s+)?function\\s+${functionName}\\s*\\(`);
   const match = functionPattern.exec(source);
@@ -138,10 +150,16 @@ async function assertDistCopy(relativePath) {
   const source = path.join(ROOT_DIR, relativePath);
   const dist = path.join(ROOT_DIR, "dist", relativePath);
 
-  assert(fs.existsSync(dist), `dist/${relativePath} should be emitted by build`);
+  assert(await pathExists(dist), `dist/${relativePath} should be emitted by build`);
+
+  const [distSource, sourceSource] = await Promise.all([
+    fsp.readFile(dist, "utf8"),
+    fsp.readFile(source, "utf8"),
+  ]);
+
   assert.equal(
-    await fsp.readFile(dist, "utf8"),
-    await fsp.readFile(source, "utf8"),
+    distSource,
+    sourceSource,
     `dist/${relativePath} should be an unminified copy of ${relativePath}`,
   );
 }
@@ -1330,7 +1348,7 @@ async function main() {
     "host/trace-renderer-spec.mjs",
     "host/ingest-worker-runtime.mjs",
   ]) {
-    if (fs.existsSync(path.join(ROOT_DIR, "dist", relativePath))) {
+    if (await pathExists(path.join(ROOT_DIR, "dist", relativePath))) {
       await assertDistCopy(relativePath);
       await assertNoIsolationRequirement(path.join("dist", relativePath));
     }
