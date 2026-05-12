@@ -16,6 +16,12 @@ const {
   resolveDistPath,
 } = require("./dist-browser-helpers.js");
 
+const ROOT_DIR = path.resolve(__dirname, "..");
+
+function readRepoFile(relativePath) {
+  return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
+}
+
 function request(url, options = {}) {
   return new Promise((resolve, reject) => {
     const req = http.get(url, { headers: options.headers ?? {} }, (response) => {
@@ -194,9 +200,72 @@ function assertBrowserDiscovery() {
   );
 }
 
+function assertAppLoadUsesSharedHelpers() {
+  const source = readRepoFile("tools/app-load-bench.js");
+
+  assert.match(source, /require\("\.\/dist-browser-helpers\.js"\)/);
+  assert.match(source, /browserExecutablePath\(\{\s*errorMessage: "Chrome\/Chromium not found; set TRACY_APP_LOAD_BROWSER",\s*explicitPath,/);
+  assert.match(source, /createDistServer\(distDir,\s*\{\s*cacheControl: CACHE_CONTROL\.IMMUTABLE,\s*gzip: true,/);
+  assert.doesNotMatch(source, /const http = require\("node:http"\)/);
+  assert.doesNotMatch(source, /const zlib = require\("node:zlib"\)/);
+  assert.doesNotMatch(source, /\bconst MIME_TYPES\b/);
+  assert.doesNotMatch(source, /\bconst GZIP_EXTENSIONS\b/);
+  assert.doesNotMatch(source, /\bfunction acceptsGzip\b/);
+  assert.doesNotMatch(source, /\bfunction contentType\b/);
+  assert.doesNotMatch(source, /\bfunction resolveDistPath\b/);
+  assert.doesNotMatch(source, /\bfunction shouldGzip\b/);
+}
+
+function assertInteractiveCheckUsesSharedHelpers() {
+  const source = readRepoFile("tools/interactive-ingest-browser-check.js");
+  const browserEnvOffset = source.indexOf('"TRACY_INTERACTIVE_INGEST_BROWSER"');
+  const puppeteerEnvOffset = source.indexOf('"PUPPETEER_EXECUTABLE_PATH"');
+  const chromeEnvOffset = source.indexOf('"CHROME_PATH"');
+
+  assert.match(source, /require\("\.\/dist-browser-helpers\.js"\)/);
+  assert.match(source, /browserExecutablePath: findBrowserExecutablePath/);
+  assert.match(source, /cachedPlaywrightChromes/);
+  assert.match(source, /findBrowserExecutablePath\(\{\s*envNames: \[/);
+  assert.ok(browserEnvOffset >= 0, "interactive browser env override must stay configured");
+  assert.ok(puppeteerEnvOffset > browserEnvOffset, "TRACY_INTERACTIVE_INGEST_BROWSER must precede Puppeteer fallback");
+  assert.ok(chromeEnvOffset > puppeteerEnvOffset, "PUPPETEER_EXECUTABLE_PATH must precede CHROME_PATH fallback");
+  assert.match(source, /createDistServer\(DIST_DIR,\s*\{\s*cacheControl: CACHE_CONTROL\.NO_STORE,\s*gzip: false,/);
+  assert.doesNotMatch(source, /const childProcess = require\("node:child_process"\)/);
+  assert.doesNotMatch(source, /const http = require\("node:http"\)/);
+  assert.doesNotMatch(source, /\bfunction commandPath\b/);
+  assert.doesNotMatch(source, /\bfunction contentType\b/);
+  assert.doesNotMatch(source, /\bfunction resolveDistPath\b/);
+  assert.doesNotMatch(source, /\bfunction cachedPlaywrightChromes\b/);
+}
+
+function assertDelayedWasmImportBoundary() {
+  const bootstrap = readRepoFile("bootstrap.mjs");
+  const coreReadyOffset = bootstrap.indexOf("await coreReadyPromise");
+  const wasmModulesUrlOffset = bootstrap.indexOf("const wasmModulesUrl");
+  const dynamicImportOffset = bootstrap.indexOf("return import(wasmModulesUrl)");
+
+  assert.match(bootstrap, /const coreReadyPromise = new Promise/);
+  assert.ok(coreReadyOffset >= 0, "Wasm module graph import must await core readiness");
+  assert.ok(
+    wasmModulesUrlOffset > coreReadyOffset,
+    "Wasm module graph URL must be discovered after core readiness",
+  );
+  assert.ok(
+    dynamicImportOffset > wasmModulesUrlOffset,
+    "Wasm module graph import must use the post-ready URL variable",
+  );
+  assert.doesNotMatch(
+    bootstrap,
+    /import\(`\.\/host\/\$\{RUNTIME_URLS\.WASM_MODULES_URL\.replace/,
+  );
+}
+
 async function main() {
   assertPathAndMimeHelpers();
   assertBrowserDiscovery();
+  assertAppLoadUsesSharedHelpers();
+  assertInteractiveCheckUsesSharedHelpers();
+  assertDelayedWasmImportBoundary();
   await assertServerResponseModes();
 }
 
