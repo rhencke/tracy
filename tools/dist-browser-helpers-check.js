@@ -11,6 +11,7 @@ const {
   CACHE_CONTROL,
   browserExecutablePath,
   cachedPlaywrightChromes,
+  commandPath: safeCommandPath,
   contentType,
   createDistServer,
   resolveDistPath,
@@ -205,7 +206,7 @@ function assertPathAndMimeHelpers() {
 
 function assertBrowserDiscovery() {
   const commands = [];
-  const commandPath = (command) => {
+  const commandPathStub = (command) => {
     commands.push(command);
     return command === "chromium" ? "/usr/bin/chromium" : "";
   };
@@ -219,7 +220,7 @@ function assertBrowserDiscovery() {
 
   assert.equal(
     browserExecutablePath({
-      commandPath,
+      commandPath: commandPathStub,
       env: { PUPPETEER_EXECUTABLE_PATH: "/env/chrome" },
       existsSync,
       explicitPath: "/custom/chrome",
@@ -228,7 +229,7 @@ function assertBrowserDiscovery() {
   );
   assert.equal(
     browserExecutablePath({
-      commandPath,
+      commandPath: commandPathStub,
       env: { TRACY_INTERACTIVE_INGEST_BROWSER: "/env/chrome" },
       envNames: ["TRACY_INTERACTIVE_INGEST_BROWSER"],
       existsSync,
@@ -237,7 +238,7 @@ function assertBrowserDiscovery() {
   );
   assert.equal(
     browserExecutablePath({
-      commandPath,
+      commandPath: commandPathStub,
       env: {},
       existsSync,
     }),
@@ -251,13 +252,67 @@ function assertBrowserDiscovery() {
   assert.equal(
     browserExecutablePath({
       commandNames: [],
-      commandPath,
+      commandPath: commandPathStub,
       env: {},
       existsSync,
       playwrightChromes: ["/pw/chromium-120/chrome-linux64/chrome"],
     }),
     "/pw/chromium-120/chrome-linux64/chrome",
   );
+
+  const commandLookupAttempts = [];
+  assert.equal(
+    safeCommandPath("chromium", {
+      accessSync: (file) => {
+        commandLookupAttempts.push(file);
+        if (file !== "/tools/chromium") {
+          const error = new Error("missing");
+          error.code = "ENOENT";
+          throw error;
+        }
+      },
+      env: { PATH: "/missing:/tools" },
+      pathDelimiter: ":",
+    }),
+    "/tools/chromium",
+  );
+  assert.deepEqual(commandLookupAttempts, [
+    "/missing/chromium",
+    "/tools/chromium",
+  ]);
+
+  const safeLookupDir = fs.mkdtempSync(path.join(os.tmpdir(), "tracy-browser-path-"));
+  try {
+    const browserPath = path.join(safeLookupDir, "chromium");
+    const markerPath = path.join(safeLookupDir, "shell-candidate-ran");
+    fs.writeFileSync(browserPath, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(browserPath, 0o755);
+
+    assert.equal(
+      browserExecutablePath({
+        commandNames: ["chromium"],
+        commandPath: (command) =>
+          safeCommandPath(command, {
+            env: { PATH: safeLookupDir },
+          }),
+        env: {
+          TRACY_INTERACTIVE_INGEST_BROWSER: `$(touch ${markerPath})`,
+        },
+        envNames: ["TRACY_INTERACTIVE_INGEST_BROWSER"],
+        existsSync: fs.existsSync,
+      }),
+      browserPath,
+    );
+    assert.equal(fs.existsSync(markerPath), false);
+  } finally {
+    fs.rmSync(safeLookupDir, {
+      force: true,
+      maxRetries: 5,
+      recursive: true,
+      retryDelay: 100,
+    });
+  }
+
   assert.equal(
     browserExecutablePath({
       commandNames: ["chromium"],

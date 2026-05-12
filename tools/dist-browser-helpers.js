@@ -1,6 +1,5 @@
 "use strict";
 
-const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const http = require("node:http");
@@ -187,14 +186,27 @@ async function createDistServer(distDir, options = {}) {
 }
 
 function commandPath(command, options = {}) {
-  const spawnSync = options.spawnSync ?? childProcess.spawnSync;
-  const result = spawnSync(
-    "bash",
-    ["-lc", `command -v ${JSON.stringify(command)}`],
-    { encoding: "utf8" },
-  );
+  if (path.isAbsolute(command) || command.includes(path.sep)) {
+    return "";
+  }
 
-  return result.status === 0 ? result.stdout.trim() : "";
+  const env = options.env ?? process.env;
+  const accessSync = options.accessSync ?? fs.accessSync;
+  const pathEnv = options.pathEnv ?? env.PATH ?? "";
+  const pathDelimiter = options.pathDelimiter ?? path.delimiter;
+
+  for (const entry of String(pathEnv).split(pathDelimiter)) {
+    const dir = entry === "" ? "." : entry;
+    const file = path.resolve(dir, command);
+    try {
+      accessSync(file, fs.constants.X_OK);
+      return file;
+    } catch {
+      // Keep searching PATH entries until an executable filesystem path exists.
+    }
+  }
+
+  return "";
 }
 
 function cachedPlaywrightChromes(options = {}) {
