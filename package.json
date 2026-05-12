@@ -27,6 +27,7 @@
     "test:production-topology-fixture": "node tools/production-topology-fixture-check.js",
     "test:interactive-ingest-browser": "node tools/interactive-ingest-browser-check.js",
     "test:direct-esm": "node tools/direct-esm-check.js",
+    "test:dist-browser-helpers": "node tools/dist-browser-helpers-check.js",
     "test:generated-file-writer": "node tools/generated-file-writer-check.js",
     "test:service-worker": "node tools/service-worker-check.js",
     "test:dist-budget": "node tools/dist-budget-check.js --self-test",
