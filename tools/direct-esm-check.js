@@ -1109,6 +1109,10 @@ function main() {
     bootstrapSource,
     /globalThis\.addEventListener\(PERFORMANCE_MARKS\.coreReady, resolve, \{ once: true \}\)/,
   );
+  assert.match(
+    bootstrapSource,
+    /const postCoreReadyFramePromise = coreReadyPromise\.then\(\(\) => new Promise\(\(resolve\) => requestAnimationFrame\(resolve\)\)\)/,
+  );
   assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.coreReady\)\)/);
   assert.match(runtimeSource, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(
@@ -1129,7 +1133,7 @@ function main() {
   );
   assert.match(
     bootstrapSource,
-    /await coreReadyPromise/,
+    /await postCoreReadyFramePromise/,
   );
   assert.match(
     bootstrapSource,
