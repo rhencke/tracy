@@ -69,6 +69,69 @@ async function loadGeneratedTraceRendererSpec() {
 
 const FakeWorker = createFakeWorkerClass();
 
+function createIngestWorkerLifecycleHarness(Worker = FakeWorker) {
+  return {
+    Worker,
+    reset() {
+      Worker.reset();
+    },
+    expectWorkerCount(expected, message) {
+      assert.equal(Worker.instances.length, expected, message);
+    },
+    workerAt(index, message) {
+      const worker = Worker.instances.at(index);
+
+      assert.notEqual(worker, undefined, message ?? `expected worker at index ${index}`);
+      return worker;
+    },
+    latestWorker(message) {
+      return this.workerAt(-1, message ?? "expected a latest ingest worker");
+    },
+    postedMessages(worker, type) {
+      if (type === undefined) {
+        return worker.posted;
+      }
+
+      return worker.posted.filter((message) => message.type === type);
+    },
+    latestPostedMessage(worker, type) {
+      const messages = this.postedMessages(worker, type);
+
+      return messages.at(-1);
+    },
+    latestIngestId(worker) {
+      const message = this.latestPostedMessage(worker, "start");
+
+      assert.notEqual(message, undefined, "expected worker to have a start message");
+      return message.ingestId;
+    },
+    assertPosted(worker, expected, message) {
+      assert.deepEqual(worker.posted, expected, message);
+    },
+    assertPostedTypes(worker, expected, message) {
+      assert.deepEqual(
+        worker.posted.map((postedMessage) => postedMessage.type),
+        expected,
+        message,
+      );
+    },
+    emitMessage(worker, message) {
+      worker.emit("message", message);
+    },
+    emitError(worker, message) {
+      worker.events.get("error")({ message });
+    },
+    assertWorkerIgnored(worker, readObservedState, exerciseWorker, message) {
+      const before = readObservedState();
+
+      exerciseWorker(worker);
+      assert.deepEqual(readObservedState(), before, message);
+    },
+  };
+}
+
+const ingestWorkers = createIngestWorkerLifecycleHarness();
+
 function readTraceRenderRow(memory, ptr, index) {
   const view = new DataView(memory.buffer);
   const base = ptr + index * TEST_TRACE_RENDER_ROW_BYTES;
