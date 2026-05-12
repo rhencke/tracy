@@ -170,7 +170,10 @@ async function assertNoInlinePaletteColor(relativePath) {
 }
 
 async function assertIndexCatalogUsesGeneratedFormatSpec() {
-  const source = await readRepoFile("host/index-reader-catalog.mjs");
+  const [source, watSource] = await Promise.all([
+    readRepoFile("host/index-reader-catalog.mjs"),
+    readRepoFile("wat/index/catalog-and-tracks.wat.inc"),
+  ]);
 
   assert.match(
     source,
@@ -223,7 +226,6 @@ async function assertIndexCatalogUsesGeneratedFormatSpec() {
     "host JavaScript should not own slice page catalog insertion policy",
   );
 
-  const watSource = await readRepoFile("wat/index/catalog-and-tracks.wat.inc");
   assert.match(
     watSource,
     /\(func \$index_page_catalog_add_page \(export "index_page_catalog_add_page"\)/,
@@ -278,8 +280,10 @@ async function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource,
     "shared Wasm boundary helper contract should list helper consumers",
   );
 
-  const ownerSource = await readRepoFile(helperContract.ownerModule);
-  const startupImporterSource = await readRepoFile(helperContract.startupImporter);
+  const [ownerSource, startupImporterSource] = await Promise.all([
+    readRepoFile(helperContract.ownerModule),
+    readRepoFile(helperContract.startupImporter),
+  ]);
   const startupImportSpecifier = importSpecifier(
     helperContract.startupImporter,
     helperContract.ownerModule,
@@ -304,7 +308,7 @@ async function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource,
     );
   }
 
-  for (const relativePath of helperContract.consumers) {
+  await Promise.all(helperContract.consumers.map(async (relativePath) => {
     const source = await readRepoFile(relativePath);
     const ownerImportSpecifier = importSpecifier(
       relativePath,
@@ -323,7 +327,7 @@ async function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource,
         `${relativePath} should not duplicate shared Wasm boundary helper ${name}`,
       );
     }
-  }
+  }));
 }
 
 async function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
@@ -418,11 +422,13 @@ async function assertRuntimeWorkerCheckUsesSharedHarness() {
 }
 
 async function assertRuntimeAppBootChecksUseHarnessOperations() {
-  const runtimeSpec = await readJsonRepoFile("abi/runtime.json");
+  const [runtimeSpec, source, startupSpecSource] = await Promise.all([
+    readJsonRepoFile("abi/runtime.json"),
+    readRepoFile("tools/runtime-worker-orchestration-check.js"),
+    readRepoFile("host/startup-spec.mjs"),
+  ]);
   const bootSensitiveChecks =
     runtimeSpec.runtimeWorkerOrchestrationCheck?.bootSensitiveChecks;
-  const source = await readRepoFile("tools/runtime-worker-orchestration-check.js");
-  const startupSpecSource = await readRepoFile("host/startup-spec.mjs");
 
   assert.match(
     source,
@@ -474,10 +480,12 @@ async function assertRuntimeAppBootChecksUseHarnessOperations() {
 }
 
 async function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
-  const source = await readRepoFile("tools/interactive-ingest-check.js");
-  const startupSpecSource = await readRepoFile("host/startup-spec.mjs");
-  const appSource = await readRepoFile("wat/app.wat");
-  const contractSource = await readRepoFile("wat/interactive_ingest_contract.test.wat");
+  const [source, startupSpecSource, appSource, contractSource] = await Promise.all([
+    readRepoFile("tools/interactive-ingest-check.js"),
+    readRepoFile("host/startup-spec.mjs"),
+    readRepoFile("wat/app.wat"),
+    readRepoFile("wat/interactive_ingest_contract.test.wat"),
+  ]);
 
   assert.match(
     startupSpecSource,
@@ -719,9 +727,11 @@ async function assertProductionTopologyFixtureUsesHostAbiSpec() {
 }
 
 async function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
-  const source = await readRepoFile("host/ingest-worker-runtime.mjs");
-  const startupSpecSource = await readRepoFile("host/startup-spec.mjs");
-  const parserStateAbiSource = await readRepoFile("abi/parser-state.json");
+  const [source, startupSpecSource, parserStateAbiSource] = await Promise.all([
+    readRepoFile("host/ingest-worker-runtime.mjs"),
+    readRepoFile("host/startup-spec.mjs"),
+    readRepoFile("abi/parser-state.json"),
+  ]);
 
   assert.match(
     source,
@@ -1020,36 +1030,62 @@ function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSour
 }
 
 async function main() {
-  const buildScript = await readRepoFile("tools/build.sh");
-  const makefile = await readRepoFile("Makefile");
-  const bootstrapSource = await readRepoFile("bootstrap.mjs");
-  const indexHtml = await readRepoFile("index.html");
-  const rendererLoaderSource = await readRepoFile("host/progressive-trace-renderer-loader.mjs");
-  const rendererSource = await readRepoFile("host/progressive-trace-renderer.mjs");
-  const runtimeSource = await readRepoFile("host/runtime.mjs");
-  const indexFormatSpecSource = await readRepoFile("host/index-format-spec.mjs");
-  const hostAbiSource = await readRepoFile("host/abi.mjs");
-  const opfsSourceSource = await readRepoFile("host/opfs-source.mjs");
-  const startupSpecSource = await readRepoFile("host/startup-spec.mjs");
-  const traceRendererSpecSource = await readRepoFile("host/trace-renderer-spec.mjs");
-  const workerSource = await readRepoFile("worker.js");
-  const packageJson = await readJsonRepoFile("package.json");
-  const runtimeSpec = await readJsonRepoFile("abi/runtime.json");
-  const paletteSpec = await readJsonRepoFile("abi/palette.json");
-  const readmeSource = await readRepoFile("README.md");
-  const appLoadBenchSource = await readRepoFile("tools/app-load-bench.js");
-  const bootstrapLineCheckSource = await readRepoFile("tools/check-bootstrap-lines.sh");
+  const [
+    buildScript,
+    makefile,
+    bootstrapSource,
+    indexHtml,
+    rendererLoaderSource,
+    rendererSource,
+    runtimeSource,
+    indexFormatSpecSource,
+    hostAbiSource,
+    opfsSourceSource,
+    startupSpecSource,
+    traceRendererSpecSource,
+    workerSource,
+    packageJson,
+    runtimeSpec,
+    paletteSpec,
+    readmeSource,
+    appLoadBenchSource,
+    bootstrapLineCheckSource,
+    generateLayoutSource,
+  ] = await Promise.all([
+    readRepoFile("tools/build.sh"),
+    readRepoFile("Makefile"),
+    readRepoFile("bootstrap.mjs"),
+    readRepoFile("index.html"),
+    readRepoFile("host/progressive-trace-renderer-loader.mjs"),
+    readRepoFile("host/progressive-trace-renderer.mjs"),
+    readRepoFile("host/runtime.mjs"),
+    readRepoFile("host/index-format-spec.mjs"),
+    readRepoFile("host/abi.mjs"),
+    readRepoFile("host/opfs-source.mjs"),
+    readRepoFile("host/startup-spec.mjs"),
+    readRepoFile("host/trace-renderer-spec.mjs"),
+    readRepoFile("worker.js"),
+    readJsonRepoFile("package.json"),
+    readJsonRepoFile("abi/runtime.json"),
+    readJsonRepoFile("abi/palette.json"),
+    readRepoFile("README.md"),
+    readRepoFile("tools/app-load-bench.js"),
+    readRepoFile("tools/check-bootstrap-lines.sh"),
+    readRepoFile("tools/generate-layout.js"),
+  ]);
 
-  await assertIngestWorkerProgressPolicyUsesGeneratedSpec();
+  await Promise.all([
+    assertIngestWorkerProgressPolicyUsesGeneratedSpec(),
+    assertSharedWasmBoundaryHelpersStayOnStartupPath(
+      bootstrapSource,
+      runtimeSpec.runtimeBridge,
+    ),
+  ]);
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
   assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
   assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
   assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
-  await assertSharedWasmBoundaryHelpersStayOnStartupPath(
-    bootstrapSource,
-    runtimeSpec.runtimeBridge,
-  );
 
   assert.match(
     buildScript,
@@ -1195,7 +1231,7 @@ async function main() {
   assert.match(indexFormatSpecSource, /START: 0/);
   assert.match(indexFormatSpecSource, /PARTIAL: 24/);
   assert.match(
-    await readRepoFile("tools/generate-layout.js"),
+    generateLayoutSource,
     /spec\.index\.queryResult\.fields\.map/,
     "index format bridge should be generated from the shared index contract",
   );
@@ -1256,7 +1292,7 @@ async function main() {
     assert(fs.existsSync(path.join(ROOT_DIR, relativePath)));
   }
 
-  for (const relativePath of [
+  await Promise.all([
     "Makefile",
     "README.md",
     "host/runtime.mjs",
@@ -1267,11 +1303,9 @@ async function main() {
     "host/trace-renderer-spec.mjs",
     "index.html",
     "package.json",
-  ]) {
-    await assertNoBundleReferences(relativePath);
-  }
+  ].map(assertNoBundleReferences));
 
-  for (const relativePath of [
+  await Promise.all([
     "bootstrap.mjs",
     "host/ingest-worker-runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
@@ -1283,9 +1317,7 @@ async function main() {
     "index.html",
     "manifest.webmanifest",
     "worker.js",
-  ]) {
-    await assertNoIsolationRequirement(relativePath);
-  }
+  ].map(assertNoIsolationRequirement));
 
   for (const relativePath of [
     "bootstrap.mjs",
@@ -1304,16 +1336,18 @@ async function main() {
     }
   }
 
-  await assertNoInlinePaletteColor("bootstrap.mjs");
-  await assertNoInlinePaletteColor("host/canvas.mjs");
-  await assertNoInlinePaletteColor("host/runtime.mjs");
-  await assertIndexCatalogUsesGeneratedFormatSpec();
-  await assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec();
-  await assertRuntimeWorkerCheckUsesSharedHarness();
-  await assertRuntimeAppBootChecksUseHarnessOperations();
-  await assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
-  await assertInteractiveIngestCheckUsesSharedHarness();
-  await assertProductionTopologyFixtureUsesHostAbiSpec();
+  await Promise.all([
+    assertNoInlinePaletteColor("bootstrap.mjs"),
+    assertNoInlinePaletteColor("host/canvas.mjs"),
+    assertNoInlinePaletteColor("host/runtime.mjs"),
+    assertIndexCatalogUsesGeneratedFormatSpec(),
+    assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec(),
+    assertRuntimeWorkerCheckUsesSharedHarness(),
+    assertRuntimeAppBootChecksUseHarnessOperations(),
+    assertInteractiveIngestCheckUsesGeneratedVerificationSpec(),
+    assertInteractiveIngestCheckUsesSharedHarness(),
+    assertProductionTopologyFixtureUsesHostAbiSpec(),
+  ]);
 }
 
 main().catch((error) => {
