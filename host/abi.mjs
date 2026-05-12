@@ -194,6 +194,7 @@ export const OPFS_BRIDGE_CONTRACT = Object.freeze({
     workerMessageDelivery: "worker-message-delivery",
     workerPublication: "worker-publication",
   }),
+  workerIndexGenerationHandoffOperationKeys: Object.freeze(["indexCreate", "indexWrite", "indexFlush", "workerPublication"]),
   mainIndexSizeMayBeStale: true,
   workerPersistsFileSources: false,
   defaultPersistsFileSources: true,
