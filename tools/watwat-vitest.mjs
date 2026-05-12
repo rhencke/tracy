@@ -99,6 +99,10 @@ export async function registerWatwatTests(files, options = {}) {
       },
     }));
 
+    if (tests.length === 0) {
+      continue;
+    }
+
     suites.push({ name: moduleName, tests });
   }
 
