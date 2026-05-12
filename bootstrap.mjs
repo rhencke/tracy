@@ -1,9 +1,8 @@
 import { APP_SHELL_COLORS, BOOTSTRAP_WASM_MEMORY, PERFORMANCE_MARKS, RUNTIME_URLS } from "./host/startup-spec.mjs";
 globalThis.performance?.mark?.(PERFORMANCE_MARKS.bootstrapStart);
 const firstFramePromise = new Promise((resolve) => requestAnimationFrame(resolve));
-const serviceWorkerController = globalThis.navigator?.serviceWorker?.controller ?? null;
-const warmProgressiveTraceRendererPromise = serviceWorkerController === null ? null : import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
-const importProgressiveTraceRenderer = () => warmProgressiveTraceRendererPromise ?? import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+const preloadedProgressiveTraceRendererPromise = import(`./host/${RUNTIME_URLS.PROGRESSIVE_TRACE_RENDERER_URL.replace(/^\.\//, "")}`);
+const importProgressiveTraceRenderer = () => preloadedProgressiveTraceRendererPromise;
 const coreReadyPromise = new Promise((resolve) => {
   if (performance.getEntriesByName(PERFORMANCE_MARKS.coreReady).length > 0 || typeof globalThis.addEventListener !== "function") resolve();
   else globalThis.addEventListener(PERFORMANCE_MARKS.coreReady, resolve, { once: true });
