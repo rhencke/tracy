@@ -4,7 +4,21 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { describe, expect, test } from "vitest";
 
+import {
+  HOST_IMPORT_NAME,
+  OPFS_BRIDGE_CONTRACT,
+} from "../host/abi.mjs";
+import {
+  makeMainThreadHost,
+  makeShim,
+  makeWorkerThreadHost,
+} from "../host/shim.mjs";
+
 const require = createRequire(import.meta.url);
+const {
+  installBrowserGlobals,
+  installRuntimeBrowserGlobals,
+} = require("./browser-harness.js");
 const {
   createGeneratedFileWriter,
   replaceGeneratedBlock,
@@ -28,6 +42,10 @@ async function fileExists(relativePath, root) {
     }
     throw error;
   }
+}
+
+function hostKeys(host) {
+  return new Set(Object.keys(host));
 }
 
 describe("generated-file writer invariant", () => {
@@ -112,5 +130,142 @@ describe("generated-file writer invariant", () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe("host shim invariant", () => {
+  test("installs runtime canvas globals with Tracy defaults", () => {
+    const runtimeGlobals = installRuntimeBrowserGlobals({ raf: false, jspi: false });
+
+    expect(runtimeGlobals.canvas.id).toBe("tracy");
+    expect(runtimeGlobals.canvas.hidden).toBe(false);
+    expect(typeof runtimeGlobals.canvas.getContext).toBe("function");
+    expect(typeof runtimeGlobals.canvas.getBoundingClientRect).toBe("function");
+    expect(typeof runtimeGlobals.canvas.addEventListener).toBe("function");
+    expect(runtimeGlobals.canvas.clientWidth).toBe(320);
+    expect(runtimeGlobals.canvas.clientHeight).toBe(240);
+  });
+
+  test("preserves provided runtime canvas dimensions", () => {
+    const partialRuntimeGlobals = installRuntimeBrowserGlobals({
+      canvas: { height: 180, width: 360 },
+      raf: false,
+      jspi: false,
+    });
+
+    expect(partialRuntimeGlobals.canvas.id).toBe("tracy");
+    expect(typeof partialRuntimeGlobals.canvas.getContext).toBe("function");
+    expect(partialRuntimeGlobals.canvas.clientWidth).toBe(360);
+    expect(partialRuntimeGlobals.canvas.clientHeight).toBe(180);
+  });
+
+  test("separates browser-only and worker-only host imports", () => {
+    installBrowserGlobals({ raf: false, jspi: false });
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const mainKeys = hostKeys(makeMainThreadHost(memory));
+    const workerKeys = hostKeys(makeWorkerThreadHost(memory));
+    const legacyHost = makeShim(memory);
+
+    for (const name of [
+      HOST_IMPORT_NAME.CANVAS_GET_SIZE,
+      HOST_IMPORT_NAME.CANVAS_LISTEN_RESIZE,
+      HOST_IMPORT_NAME.FILE_PICKER_OPEN,
+      HOST_IMPORT_NAME.POINTER_LISTEN,
+    ]) {
+      expect(mainKeys.has(name), `main host missing ${name}`).toBe(true);
+      expect(workerKeys.has(name), `worker host should not expose ${name}`).toBe(false);
+    }
+
+    for (const name of [
+      HOST_IMPORT_NAME.OPFS_SOURCE_OPEN,
+      HOST_IMPORT_NAME.OPFS_SOURCE_READ,
+      HOST_IMPORT_NAME.OPFS_INDEX_CREATE,
+      HOST_IMPORT_NAME.OPFS_INDEX_OPEN,
+      HOST_IMPORT_NAME.OPFS_INDEX_READ,
+      HOST_IMPORT_NAME.OPFS_INDEX_WRITE,
+      HOST_IMPORT_NAME.OPFS_INDEX_FLUSH,
+      HOST_IMPORT_NAME.OPFS_INDEX_SIZE,
+    ]) {
+      expect(workerKeys.has(name), `worker host missing ${name}`).toBe(true);
+      expect(Object.hasOwn(legacyHost, name), `legacy host missing ${name}`).toBe(true);
+    }
+
+    expect(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_OPEN), "main host missing index open").toBe(
+      true,
+    );
+    expect(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_READ), "main host missing index read").toBe(
+      true,
+    );
+    expect(
+      mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_CREATE),
+      "main host missing index create",
+    ).toBe(true);
+    expect(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_WRITE), "main host missing index write").toBe(
+      true,
+    );
+    expect(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_FLUSH), "main host missing index flush").toBe(
+      true,
+    );
+    expect(mainKeys.has(HOST_IMPORT_NAME.OPFS_INDEX_SIZE), "main host missing index size").toBe(
+      true,
+    );
+  });
+
+  test("marks main OPFS index size as possibly stale", () => {
+    installBrowserGlobals({ raf: false, jspi: false });
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const mainHost = makeMainThreadHost(memory);
+    const workerHost = makeWorkerThreadHost(memory);
+
+    expect(
+      mainHost[OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+      "main OPFS host should probe for worker-appended index pages",
+    ).toBe(OPFS_BRIDGE_CONTRACT.mainIndexSizeMayBeStale);
+    expect(
+      workerHost[OPFS_BRIDGE_CONTRACT.indexSizeMayBeStaleMarker],
+      "worker OPFS host should not expose main-thread catalog probe marker",
+    ).toBeUndefined();
+  });
+
+  test("rejects worker file sources without main-thread file handles", () => {
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const workerHost = makeWorkerThreadHost(memory);
+
+    expect(
+      () => workerHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](1),
+      "worker file source import should explain main-thread file ownership",
+    ).toThrow(new RegExp(OPFS_BRIDGE_CONTRACT.workerUnsupportedFileReason));
+  });
+
+  test("reads worker file-backed sources into wasm memory", async () => {
+    const memory = new WebAssembly.Memory({ initial: 1 });
+    const workerFileHost = makeWorkerThreadHost(
+      memory,
+      new Map([
+        [
+          7,
+          {
+            size: 3,
+            slice(start, end) {
+              expect(start, "worker file source read should preserve start offset").toBe(1);
+              expect(end, "worker file source read should preserve end offset").toBe(3);
+              return {
+                async arrayBuffer() {
+                  return Uint8Array.from([8, 9]).buffer;
+                },
+              };
+            },
+          },
+        ],
+      ]),
+    );
+
+    const sourceId = await workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_FROM_FILE](7);
+
+    expect(sourceId).toBe(1);
+    await expect(
+      workerFileHost[HOST_IMPORT_NAME.OPFS_SOURCE_READ](sourceId, 1n, 2, 32),
+    ).resolves.toBe(2);
+    expect(Array.from(new Uint8Array(memory.buffer, 32, 2))).toEqual([8, 9]);
   });
 });
