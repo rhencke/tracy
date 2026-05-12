@@ -267,7 +267,7 @@ test: dist check-generated
 	node tools/direct-esm-check.js
 	node tools/dist-browser-helpers-check.js
 	node tools/service-worker-check.js
-	node tools/generated-file-writer-check.js
+	npm run test:node
 	node tools/dist-budget-check.js --self-test
 	node tools/app-load-bench.js --self-test
 	node tools/lighthouse-ci-check.js
