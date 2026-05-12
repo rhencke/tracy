@@ -2532,97 +2532,31 @@ async function checkProgressiveTraceRendererClampsToSliceCatalogCoverage() {
 
 async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const queryCalls = [];
-  const operations = [];
-  const canvas = {
-    height: 120,
-    width: 240,
-    getContext() {
-      return {
-        beginPath() {
-          operations.push({ op: "beginPath" });
-        },
-        clearRect(x, y, width, height) {
-          operations.push({ height, op: "clearRect", width, x, y });
-        },
-        clip() {
-          operations.push({ op: "clip" });
-        },
-        fillRect(x, y, width, height) {
-          operations.push({
-            fillStyle: this.fillStyle,
-            height,
-            op: "fillRect",
-            width,
-            x,
-            y,
-          });
-        },
-        lineTo(x, y) {
-          operations.push({ op: "lineTo", x, y });
-        },
-        moveTo(x, y) {
-          operations.push({ op: "moveTo", x, y });
-        },
-        rect(x, y, width, height) {
-          operations.push({ height, op: "rect", width, x, y });
-        },
-        restore() {
-          operations.push({ op: "restore" });
-        },
-        save() {
-          operations.push({ op: "save" });
-        },
-        stroke() {
-          operations.push({ op: "stroke", strokeStyle: this.strokeStyle });
-        },
-      };
+  const harness = createProgressiveRendererHarness({
+    coveredRange: { end: 200, start: 100, type: "covered_range", valid: true },
+    queryResult: {
+      capped: true,
+      count: 1,
+      matchedRows: 4096,
+      writtenRows: 1,
     },
-  };
-  const reader = {
-    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
-      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
-      const view = new DataView(memory.buffer);
-
-      view.setUint32(outPtr, 110, true);
-      view.setUint32(outPtr + 4, 8, true);
-      view.setUint32(outPtr + 12, 0, true);
-      view.setUint32(outPtr + 20, 0x2d74da, true);
-      view.setUint32(outPtr + 24, 0, true);
-      return {
-        capped: true,
-        count: 1,
-        matchedRows: 4096,
-        writtenRows: 1,
-      };
-    },
-    status() {
-      return { state: "ready" };
-    },
-    trackCount() {
-      return 1;
-    },
-  };
-  const ingestWorker = {
-    indexReader: reader,
-    status() {
-      return {
-        coveredRange: { end: 200, start: 100, type: "covered_range", valid: true },
-        state: "running",
-      };
-    },
-  };
-  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
-    canvas,
-    queryOutPtr: 2048,
-    queryRowCap: 1,
-    queryWindow: 100,
-    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
+    queryRows: [{ color: 0x2d74da, depth: 0, dur: 8, partial: false, start: 110 }],
+    trackCount: 1,
   });
+  const renderer = rendererModule.createProgressiveTraceRenderer(
+    harness.memory,
+    harness.ingestWorker,
+    {
+      canvas: harness.canvas,
+      queryOutPtr: 2048,
+      queryRowCap: 1,
+      queryWindow: 100,
+      renderPlannerExports: harness.renderPlannerExports(),
+    },
+  );
 
   assert.equal(renderer.draw(123), 1);
-  assert.deepEqual(queryCalls, [
+  harness.assertQueryCalls([
     { maxRows: 1, outPtr: 2048, trackId: 0, tsMax: 200, tsMin: 100 },
   ]);
   assert.deepEqual(renderer.status().cappedQueries, [
@@ -2631,88 +2565,56 @@ async function checkProgressiveTraceRendererSurfacesCappedQueries() {
   assert.deepEqual(renderer.status().incompleteQueryRanges, [
     { end: 200, start: 100, trackId: 0 },
   ]);
-  assert.equal(
-    operations.some(
-      (operation) =>
-        operation.op === "fillRect" &&
-        operation.fillStyle === "rgba(180, 83, 9, 0.16)" &&
-        operation.x === 0 &&
-        operation.width === 240,
-    ),
-    true,
+  harness.assertOperation(
+    {
+      fillStyle: "rgba(180, 83, 9, 0.16)",
+      op: "fillRect",
+      width: 240,
+      x: 0,
+    },
     "capped query ranges should be visibly marked incomplete",
   );
-  assert.equal(
-    operations.some(
-      (operation) =>
-        operation.op === "stroke" &&
-        operation.strokeStyle === "rgba(146, 64, 14, 0.42)",
-    ),
-    true,
+  harness.assertOperation(
+    { op: "stroke", strokeStyle: "rgba(146, 64, 14, 0.42)" },
     "capped query ranges should include an incomplete-range stripe overlay",
   );
 }
 
 async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
   const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const queryCalls = [];
-  const canvas = {
-    height: 120,
-    width: 240,
-    getContext() {
-      return {
-        clearRect() {},
-        fillRect() {},
-        restore() {},
-        save() {},
-      };
-    },
-  };
-  const reader = {
-    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
-      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
-      const view = new DataView(memory.buffer);
-
-      view.setUint32(outPtr, tsMin >= 2000 ? 2200 : tsMin + 10, true);
-      view.setUint32(outPtr + 4, 8, true);
-      view.setUint32(outPtr + 12, 0, true);
-      view.setUint32(outPtr + 20, 0x2d74da, true);
-      view.setUint32(outPtr + 24, 0, true);
-      return 1;
-    },
-    status() {
-      return { state: "ready" };
-    },
-    trackCount() {
-      return 1;
-    },
-  };
-  const ingestWorker = {
-    indexReader: reader,
-    status() {
-      return {
-        coveredRange: { end: 2500, start: 0, type: "covered_range", valid: true },
-        state: "running",
-      };
-    },
-  };
-  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
-    canvas,
-    queryOutPtr: 2048,
-    renderRowPtr: 4096,
-    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
+  const harness = createProgressiveRendererHarness({
+    coveredRange: { end: 2500, start: 0, type: "covered_range", valid: true },
+    queryRows: [
+      ({ tsMin }) => ({
+        color: 0x2d74da,
+        depth: 0,
+        dur: 8,
+        partial: false,
+        start: tsMin >= 2000 ? 2200 : tsMin + 10,
+      }),
+    ],
+    trackCount: 1,
   });
+  const renderer = rendererModule.createProgressiveTraceRenderer(
+    harness.memory,
+    harness.ingestWorker,
+    {
+      canvas: harness.canvas,
+      queryOutPtr: 2048,
+      renderRowPtr: 4096,
+      renderPlannerExports: harness.renderPlannerExports(),
+    },
+  );
 
   assert.equal(renderer.draw(123), 3);
 
-  assert.deepEqual(queryCalls, [
+  harness.assertQueryCalls([
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 1000, tsMin: 0 },
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2000, tsMin: 1000 },
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2500, tsMin: 2000 },
   ]);
   assert.deepEqual(
-    readTraceRenderRow(memory, 4096, 2),
+    harness.readTraceRenderRow(4096, 2),
     { color: 0x2d74da, depth: 0, dur: 8, partial: false, start: 2200 },
     "later visible rows should still render when the viewport exceeds the default query window",
   );
@@ -2720,66 +2622,41 @@ async function checkProgressiveTraceRendererTilesFullVisibleViewport() {
 
 async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
   const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const queryCalls = [];
-  const canvas = {
-    height: 120,
-    width: 240,
-    getContext() {
-      return {
-        clearRect() {},
-        fillRect() {},
-        restore() {},
-        save() {},
-      };
+  const harness = createProgressiveRendererHarness({
+    coveredRange: {
+      end: 10_000_000,
+      start: 0,
+      type: "covered_range",
+      valid: true,
     },
-  };
-  const reader = {
-    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
-      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
-      const view = new DataView(memory.buffer);
-
-      view.setUint32(outPtr, Math.floor(tsMin), true);
-      view.setUint32(outPtr + 4, 8, true);
-      view.setUint32(outPtr + 12, trackId, true);
-      view.setUint32(outPtr + 20, 0x2d74da, true);
-      view.setUint32(outPtr + 24, 0, true);
-      return 1;
-    },
-    status() {
-      return { state: "ready" };
-    },
-    trackCount() {
-      return 2;
-    },
-  };
-  const ingestWorker = {
-    indexReader: reader,
-    status() {
-      return {
-        coveredRange: {
-          end: 10_000_000,
-          start: 0,
-          type: "covered_range",
-          valid: true,
-        },
-        state: "running",
-      };
-    },
-  };
-  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
-    canvas,
-    queryOutPtr: 2048,
-    queryRangeBudget: 8,
-    queryWindow: 1000,
-    renderRowPtr: 4096,
-    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
+    queryRows: [
+      ({ trackId, tsMin }) => ({
+        color: 0x2d74da,
+        depth: trackId,
+        dur: 8,
+        partial: false,
+        start: Math.floor(tsMin),
+      }),
+    ],
+    trackCount: 2,
   });
+  const renderer = rendererModule.createProgressiveTraceRenderer(
+    harness.memory,
+    harness.ingestWorker,
+    {
+      canvas: harness.canvas,
+      queryOutPtr: 2048,
+      queryRangeBudget: 8,
+      queryWindow: 1000,
+      renderRowPtr: 4096,
+      renderPlannerExports: harness.renderPlannerExports(),
+    },
+  );
 
   assert.equal(renderer.draw(123), 8);
 
-  assert.equal(queryCalls.length, 8);
-  assert.deepEqual(queryCalls, [
+  assert.equal(harness.queryCalls.length, 8);
+  harness.assertQueryCalls([
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 2500000, tsMin: 0 },
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 5000000, tsMin: 2500000 },
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 7500000, tsMin: 5000000 },
@@ -2790,7 +2667,7 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
     { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 10000000, tsMin: 7500000 },
   ]);
   assert.deepEqual(
-    readTraceRenderRow(memory, 4096, 7),
+    harness.readTraceRenderRow(4096, 7),
     { color: 0x2d74da, depth: 1, dur: 8, partial: false, start: 7500000 },
     "large viewports should still represent later visible data within the query budget",
   );
@@ -2798,93 +2675,34 @@ async function checkProgressiveTraceRendererBoundsLargeViewportQueries() {
 
 async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhausted() {
   const rendererModule = await importRepoModule("host/progressive-trace-renderer.mjs");
-  const memory = new WebAssembly.Memory({ initial: 1 });
-  const queryCalls = [];
-  const operations = [];
-  const canvas = {
-    height: 120,
-    width: 240,
-    getContext() {
-      return {
-        beginPath() {
-          operations.push({ op: "beginPath" });
-        },
-        clearRect(x, y, width, height) {
-          operations.push({ height, op: "clearRect", width, x, y });
-        },
-        clip() {
-          operations.push({ op: "clip" });
-        },
-        fillRect(x, y, width, height) {
-          operations.push({
-            fillStyle: this.fillStyle,
-            height,
-            op: "fillRect",
-            width,
-            x,
-            y,
-          });
-        },
-        lineTo(x, y) {
-          operations.push({ op: "lineTo", x, y });
-        },
-        moveTo(x, y) {
-          operations.push({ op: "moveTo", x, y });
-        },
-        rect(x, y, width, height) {
-          operations.push({ height, op: "rect", width, x, y });
-        },
-        restore() {
-          operations.push({ op: "restore" });
-        },
-        save() {
-          operations.push({ op: "save" });
-        },
-        stroke() {
-          operations.push({ op: "stroke", strokeStyle: this.strokeStyle });
-        },
-      };
-    },
-  };
-  const reader = {
-    queryRange(trackId, tsMin, tsMax, outPtr, maxRows) {
-      queryCalls.push({ maxRows, outPtr, trackId, tsMax, tsMin });
-      const view = new DataView(memory.buffer);
-
-      view.setUint32(outPtr, 10 + trackId * 10, true);
-      view.setUint32(outPtr + 4, 8, true);
-      view.setUint32(outPtr + 12, trackId, true);
-      view.setUint32(outPtr + 20, 0x2d74da, true);
-      view.setUint32(outPtr + 24, 0, true);
-      return 1;
-    },
-    status() {
-      return { state: "ready" };
-    },
-    trackCount() {
-      return 4;
-    },
-  };
-  const ingestWorker = {
-    indexReader: reader,
-    status() {
-      return {
-        coveredRange: { end: 100, start: 0, type: "covered_range", valid: true },
-        state: "running",
-      };
-    },
-  };
-  const renderer = rendererModule.createProgressiveTraceRenderer(memory, ingestWorker, {
-    canvas,
-    queryOutPtr: 2048,
-    queryRangeBudget: 2,
-    queryWindow: 100,
-    renderPlannerExports: makeTraceRenderPlannerExports({ memory }),
+  const harness = createProgressiveRendererHarness({
+    coveredRange: { end: 100, start: 0, type: "covered_range", valid: true },
+    queryRows: [
+      ({ trackId }) => ({
+        color: 0x2d74da,
+        depth: trackId,
+        dur: 8,
+        partial: false,
+        start: 10 + trackId * 10,
+      }),
+    ],
+    trackCount: 4,
   });
+  const renderer = rendererModule.createProgressiveTraceRenderer(
+    harness.memory,
+    harness.ingestWorker,
+    {
+      canvas: harness.canvas,
+      queryOutPtr: 2048,
+      queryRangeBudget: 2,
+      queryWindow: 100,
+      renderPlannerExports: harness.renderPlannerExports(),
+    },
+  );
 
   assert.equal(renderer.draw(123), 2);
 
-  assert.deepEqual(queryCalls, [
+  harness.assertQueryCalls([
     { maxRows: 1024, outPtr: 2048, trackId: 0, tsMax: 100, tsMin: 0 },
     { maxRows: 1024, outPtr: 2048, trackId: 1, tsMax: 100, tsMin: 0 },
   ]);
@@ -2892,24 +2710,17 @@ async function checkProgressiveTraceRendererMarksSkippedTracksWhenBudgetExhauste
     { end: 100, start: 0, trackId: 2 },
     { end: 100, start: 0, trackId: 3 },
   ]);
-  assert.equal(
-    operations.some(
-      (operation) =>
-        operation.op === "fillRect" &&
-        operation.fillStyle === "rgba(180, 83, 9, 0.16)" &&
-        operation.x === 0 &&
-        operation.width === 240,
-    ),
-    true,
+  harness.assertOperation(
+    {
+      fillStyle: "rgba(180, 83, 9, 0.16)",
+      op: "fillRect",
+      width: 240,
+      x: 0,
+    },
     "tracks skipped by query budget exhaustion should be visibly marked incomplete",
   );
-  assert.equal(
-    operations.some(
-      (operation) =>
-        operation.op === "stroke" &&
-        operation.strokeStyle === "rgba(146, 64, 14, 0.42)",
-    ),
-    true,
+  harness.assertOperation(
+    { op: "stroke", strokeStyle: "rgba(146, 64, 14, 0.42)" },
     "tracks skipped by query budget exhaustion should include the incomplete stripe overlay",
   );
 }
