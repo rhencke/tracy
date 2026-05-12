@@ -228,7 +228,7 @@ function browserExecutablePath(options = {}) {
 
   for (const candidate of candidates) {
     const resolved = path.isAbsolute(candidate) ? "" : commandPathFn(candidate);
-    if (resolved) {
+    if (path.isAbsolute(resolved) && existsSync(resolved)) {
       return resolved;
     }
     if (path.isAbsolute(candidate) && existsSync(candidate)) {

@@ -212,6 +212,7 @@ function assertBrowserDiscovery() {
   const exists = new Set([
     "/custom/chrome",
     "/env/chrome",
+    "/usr/bin/chromium",
     "/pw/chromium-120/chrome-linux64/chrome",
   ]);
   const existsSync = (file) => exists.has(file);
@@ -251,6 +252,16 @@ function assertBrowserDiscovery() {
     browserExecutablePath({
       commandNames: [],
       commandPath,
+      env: {},
+      existsSync,
+      playwrightChromes: ["/pw/chromium-120/chrome-linux64/chrome"],
+    }),
+    "/pw/chromium-120/chrome-linux64/chrome",
+  );
+  assert.equal(
+    browserExecutablePath({
+      commandNames: ["chromium"],
+      commandPath: () => "chromium",
       env: {},
       existsSync,
       playwrightChromes: ["/pw/chromium-120/chrome-linux64/chrome"],
