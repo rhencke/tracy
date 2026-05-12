@@ -349,6 +349,21 @@ function makeProductionTopologyFixture(options = {}) {
     }
   }
 
+  function requireSelectedFileIngest({ file, handle }, operation) {
+    const ingest = selectedFileIngestsByHandle.get(handle);
+
+    assert.ok(
+      ingest !== undefined,
+      `${operation} requires selected-file ingest for handle ${handle}`,
+    );
+    assert.equal(
+      ingest.indexName,
+      defaultIndexName(file),
+      `${operation} requires selected file to match selected-file ingest index ${ingest.indexName}`,
+    );
+    return ingest;
+  }
+
   function startWorkerIndexGeneration(handoff, indexId) {
     handoff.bytesWrittenThisGeneration = 0;
     handoff.flushed = false;
@@ -1050,6 +1065,70 @@ function makeProductionTopologyFixture(options = {}) {
         return true;
       }
       throw new Error("worker message delivery requires emit or onmessage");
+    },
+    selectedFileWorkerMessageDelivery({
+      file,
+      handle,
+      indexName,
+      message = {},
+      messageType,
+      worker,
+    }) {
+      assert.equal(
+        typeof message,
+        "object",
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires a worker message object`,
+      );
+      assert.notEqual(
+        message,
+        null,
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires a worker message object`,
+      );
+      const ingest = requireSelectedFileIngest(
+        { file, handle },
+        FIXTURE_OPERATION.workerMessageDelivery,
+      );
+      const type = message.type ?? messageType;
+
+      if (message.type !== undefined && messageType !== undefined) {
+        assert.equal(
+          message.type,
+          messageType,
+          `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message type ${message.type} to match helper message type ${messageType}`,
+        );
+      }
+      assert.equal(
+        typeof type,
+        "string",
+        `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message type`,
+      );
+      if (indexName !== undefined && message.indexName !== undefined) {
+        assert.equal(
+          indexName,
+          message.indexName,
+          `${FIXTURE_OPERATION.workerMessageDelivery} requires helper index ${indexName} to match worker message index ${message.indexName}`,
+        );
+      }
+      if (message.ingestId !== undefined) {
+        assert.ok(
+          Number.isInteger(message.ingestId),
+          `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message ingestId`,
+        );
+        assert.equal(
+          message.ingestId,
+          ingest.ingestId,
+          `${FIXTURE_OPERATION.workerMessageDelivery} requires worker message ingestId ${message.ingestId} to match selected-file ingest ${ingest.ingestId}`,
+        );
+      }
+      return scenario.workerMessageDelivery({
+        indexName,
+        message: {
+          ...message,
+          ingestId: ingest.ingestId,
+          type,
+        },
+        worker,
+      });
     },
   });
 
