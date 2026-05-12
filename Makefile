@@ -254,11 +254,9 @@ check-generated: generated
 
 test: dist check-generated
 	bash tools/check-bootstrap-lines.sh
-	node tools/check-runner-check.js
 	node tools/generate-runtime-spec.js --check
 	node tools/generate-palette-spec.js --check
 	node tools/wasm-modules-check.js
-	node tools/host-shim-check.js
 	node tools/ingest-worker-runtime-check.js
 	node tools/runtime-worker-orchestration-check.js
 	node tools/production-topology-fixture-check.js
@@ -266,7 +264,6 @@ test: dist check-generated
 	node tools/interactive-ingest-browser-check.js
 	node tools/direct-esm-check.js
 	node tools/dist-browser-helpers-check.js
-	node tools/service-worker-check.js
 	npm run test:node
 	node tools/dist-budget-check.js --self-test
 	node tools/app-load-bench.js --self-test

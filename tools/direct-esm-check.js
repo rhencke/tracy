@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");
-const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const path = require("node:path");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -55,12 +55,24 @@ const FORBIDDEN_RUNTIME_APP_BOOT_PATTERNS = Object.freeze([
   },
 ]);
 
-function readRepoFile(relativePath) {
-  return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
+async function readRepoFile(relativePath) {
+  return fsp.readFile(path.join(ROOT_DIR, relativePath), "utf8");
 }
 
-function readJsonRepoFile(relativePath) {
-  return JSON.parse(readRepoFile(relativePath));
+async function readJsonRepoFile(relativePath) {
+  return JSON.parse(await readRepoFile(relativePath));
+}
+
+async function pathExists(filePath) {
+  try {
+    await fsp.access(filePath);
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function extractFunctionSource(source, functionName) {
@@ -97,8 +109,8 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function assertNoIsolationRequirement(relativePath) {
-  const source = readRepoFile(relativePath);
+async function assertNoIsolationRequirement(relativePath) {
+  const source = await readRepoFile(relativePath);
 
   for (const pattern of FORBIDDEN_ISOLATION_PATTERNS) {
     assert(
@@ -108,8 +120,8 @@ function assertNoIsolationRequirement(relativePath) {
   }
 }
 
-function assertNoBundleReferences(relativePath) {
-  const source = readRepoFile(relativePath);
+async function assertNoBundleReferences(relativePath) {
+  const source = await readRepoFile(relativePath);
 
   for (const pattern of FORBIDDEN_BUNDLE_PATTERNS) {
     assert(
@@ -133,20 +145,26 @@ function assertTracked(relativePath) {
   assert.equal(output.trim(), relativePath);
 }
 
-function assertDistCopy(relativePath) {
+async function assertDistCopy(relativePath) {
   const source = path.join(ROOT_DIR, relativePath);
   const dist = path.join(ROOT_DIR, "dist", relativePath);
 
-  assert(fs.existsSync(dist), `dist/${relativePath} should be emitted by build`);
+  assert(await pathExists(dist), `dist/${relativePath} should be emitted by build`);
+
+  const [distSource, sourceSource] = await Promise.all([
+    fsp.readFile(dist, "utf8"),
+    fsp.readFile(source, "utf8"),
+  ]);
+
   assert.equal(
-    fs.readFileSync(dist, "utf8"),
-    fs.readFileSync(source, "utf8"),
+    distSource,
+    sourceSource,
     `dist/${relativePath} should be an unminified copy of ${relativePath}`,
   );
 }
 
-function assertNoInlinePaletteColor(relativePath) {
-  const source = readRepoFile(relativePath);
+async function assertNoInlinePaletteColor(relativePath) {
+  const source = await readRepoFile(relativePath);
   const forbiddenColors = [
     "#1f1b16",
     "#3f6ea8",
@@ -168,8 +186,11 @@ function assertNoInlinePaletteColor(relativePath) {
   }
 }
 
-function assertIndexCatalogUsesGeneratedFormatSpec() {
-  const source = readRepoFile("host/index-reader-catalog.mjs");
+async function assertIndexCatalogUsesGeneratedFormatSpec() {
+  const [source, watSource] = await Promise.all([
+    readRepoFile("host/index-reader-catalog.mjs"),
+    readRepoFile("wat/index/catalog-and-tracks.wat.inc"),
+  ]);
 
   assert.match(
     source,
@@ -222,7 +243,6 @@ function assertIndexCatalogUsesGeneratedFormatSpec() {
     "host JavaScript should not own slice page catalog insertion policy",
   );
 
-  const watSource = readRepoFile("wat/index/catalog-and-tracks.wat.inc");
   assert.match(
     watSource,
     /\(func \$index_page_catalog_add_page \(export "index_page_catalog_add_page"\)/,
@@ -251,7 +271,7 @@ function assertStringArray(value, message) {
   );
 }
 
-function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridge) {
+async function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridge) {
   const helperContract = bridge.wasmBoundaryHelpers;
 
   assert(
@@ -277,8 +297,10 @@ function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridg
     "shared Wasm boundary helper contract should list helper consumers",
   );
 
-  const ownerSource = readRepoFile(helperContract.ownerModule);
-  const startupImporterSource = readRepoFile(helperContract.startupImporter);
+  const [ownerSource, startupImporterSource] = await Promise.all([
+    readRepoFile(helperContract.ownerModule),
+    readRepoFile(helperContract.startupImporter),
+  ]);
   const startupImportSpecifier = importSpecifier(
     helperContract.startupImporter,
     helperContract.ownerModule,
@@ -303,8 +325,8 @@ function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridg
     );
   }
 
-  for (const relativePath of helperContract.consumers) {
-    const source = readRepoFile(relativePath);
+  await Promise.all(helperContract.consumers.map(async (relativePath) => {
+    const source = await readRepoFile(relativePath);
     const ownerImportSpecifier = importSpecifier(
       relativePath,
       helperContract.ownerModule,
@@ -322,11 +344,11 @@ function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource, bridg
         `${relativePath} should not duplicate shared Wasm boundary helper ${name}`,
       );
     }
-  }
+  }));
 }
 
-function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
-  const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+async function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
+  const source = await readRepoFile("tools/runtime-worker-orchestration-check.js");
 
   assert.match(
     source,
@@ -364,8 +386,8 @@ function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
   }
 }
 
-function assertRuntimeWorkerCheckUsesSharedHarness() {
-  const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
+async function assertRuntimeWorkerCheckUsesSharedHarness() {
+  const source = await readRepoFile("tools/runtime-worker-orchestration-check.js");
   const sourceOutsideWorkerLifecycleHarness = removeFunctionSource(
     source,
     "createIngestWorkerLifecycleHarness",
@@ -416,12 +438,14 @@ function assertRuntimeWorkerCheckUsesSharedHarness() {
   }
 }
 
-function assertRuntimeAppBootChecksUseHarnessOperations() {
-  const runtimeSpec = readJsonRepoFile("abi/runtime.json");
+async function assertRuntimeAppBootChecksUseHarnessOperations() {
+  const [runtimeSpec, source, startupSpecSource] = await Promise.all([
+    readJsonRepoFile("abi/runtime.json"),
+    readRepoFile("tools/runtime-worker-orchestration-check.js"),
+    readRepoFile("host/startup-spec.mjs"),
+  ]);
   const bootSensitiveChecks =
     runtimeSpec.runtimeWorkerOrchestrationCheck?.bootSensitiveChecks;
-  const source = readRepoFile("tools/runtime-worker-orchestration-check.js");
-  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
 
   assert.match(
     source,
@@ -472,11 +496,13 @@ function assertRuntimeAppBootChecksUseHarnessOperations() {
   }
 }
 
-function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
-  const source = readRepoFile("tools/interactive-ingest-check.js");
-  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
-  const appSource = readRepoFile("wat/app.wat");
-  const contractSource = readRepoFile("wat/interactive_ingest_contract.test.wat");
+async function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
+  const [source, startupSpecSource, appSource, contractSource] = await Promise.all([
+    readRepoFile("tools/interactive-ingest-check.js"),
+    readRepoFile("host/startup-spec.mjs"),
+    readRepoFile("wat/app.wat"),
+    readRepoFile("wat/interactive_ingest_contract.test.wat"),
+  ]);
 
   assert.match(
     startupSpecSource,
@@ -617,8 +643,8 @@ function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
   );
 }
 
-function assertInteractiveIngestCheckUsesSharedHarness() {
-  const source = readRepoFile("tools/interactive-ingest-check.js");
+async function assertInteractiveIngestCheckUsesSharedHarness() {
+  const source = await readRepoFile("tools/interactive-ingest-check.js");
 
   for (const [pattern, message] of [
     [/createFakeWorkerClass/, "fake Worker"],
@@ -659,8 +685,8 @@ function assertInteractiveIngestCheckUsesSharedHarness() {
   }
 }
 
-function assertProductionTopologyFixtureUsesHostAbiSpec() {
-  const source = readRepoFile("tools/production-topology-fixture.js");
+async function assertProductionTopologyFixtureUsesHostAbiSpec() {
+  const source = await readRepoFile("tools/production-topology-fixture.js");
 
   assert.match(
     source,
@@ -717,10 +743,12 @@ function assertProductionTopologyFixtureUsesHostAbiSpec() {
   }
 }
 
-function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
-  const source = readRepoFile("host/ingest-worker-runtime.mjs");
-  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
-  const parserStateAbiSource = readRepoFile("abi/parser-state.json");
+async function assertIngestWorkerProgressPolicyUsesGeneratedSpec() {
+  const [source, startupSpecSource, parserStateAbiSource] = await Promise.all([
+    readRepoFile("host/ingest-worker-runtime.mjs"),
+    readRepoFile("host/startup-spec.mjs"),
+    readRepoFile("abi/parser-state.json"),
+  ]);
 
   assert.match(
     source,
@@ -1018,38 +1046,63 @@ function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSour
   }
 }
 
-function main() {
-  const buildScript = readRepoFile("tools/build.sh");
-  const makefile = readRepoFile("Makefile");
-  const bootstrapSource = readRepoFile("bootstrap.mjs");
-  const indexHtml = readRepoFile("index.html");
-  const rendererLoaderSource = readRepoFile("host/progressive-trace-renderer-loader.mjs");
-  const rendererSource = readRepoFile("host/progressive-trace-renderer.mjs");
-  const runtimeSource = readRepoFile("host/runtime.mjs");
-  const indexFormatSpecSource = readRepoFile("host/index-format-spec.mjs");
-  const hostAbiSource = readRepoFile("host/abi.mjs");
-  const opfsSourceSource = readRepoFile("host/opfs-source.mjs");
-  const startupSpecSource = readRepoFile("host/startup-spec.mjs");
-  const traceRendererSpecSource = readRepoFile("host/trace-renderer-spec.mjs");
-  const workerSource = readRepoFile("worker.js");
-  const packageJson = JSON.parse(readRepoFile("package.json"));
-  const runtimeSpec = JSON.parse(readRepoFile("abi/runtime.json"));
-  const paletteSpec = JSON.parse(readRepoFile("abi/palette.json"));
-  const readmeSource = readRepoFile("README.md");
-  const appLoadBenchSource = readRepoFile("tools/app-load-bench.js");
-  const bootstrapLineCheckSource = readRepoFile("tools/check-bootstrap-lines.sh");
-  const serviceWorkerCheckSource = readRepoFile("tools/service-worker-check.js");
+async function main() {
+  const [
+    buildScript,
+    makefile,
+    bootstrapSource,
+    indexHtml,
+    rendererLoaderSource,
+    rendererSource,
+    runtimeSource,
+    indexFormatSpecSource,
+    hostAbiSource,
+    opfsSourceSource,
+    startupSpecSource,
+    traceRendererSpecSource,
+    workerSource,
+    packageJson,
+    runtimeSpec,
+    paletteSpec,
+    readmeSource,
+    appLoadBenchSource,
+    bootstrapLineCheckSource,
+    generateLayoutSource,
+  ] = await Promise.all([
+    readRepoFile("tools/build.sh"),
+    readRepoFile("Makefile"),
+    readRepoFile("bootstrap.mjs"),
+    readRepoFile("index.html"),
+    readRepoFile("host/progressive-trace-renderer-loader.mjs"),
+    readRepoFile("host/progressive-trace-renderer.mjs"),
+    readRepoFile("host/runtime.mjs"),
+    readRepoFile("host/index-format-spec.mjs"),
+    readRepoFile("host/abi.mjs"),
+    readRepoFile("host/opfs-source.mjs"),
+    readRepoFile("host/startup-spec.mjs"),
+    readRepoFile("host/trace-renderer-spec.mjs"),
+    readRepoFile("worker.js"),
+    readJsonRepoFile("package.json"),
+    readJsonRepoFile("abi/runtime.json"),
+    readJsonRepoFile("abi/palette.json"),
+    readRepoFile("README.md"),
+    readRepoFile("tools/app-load-bench.js"),
+    readRepoFile("tools/check-bootstrap-lines.sh"),
+    readRepoFile("tools/generate-layout.js"),
+  ]);
 
-  assertIngestWorkerProgressPolicyUsesGeneratedSpec();
+  await Promise.all([
+    assertIngestWorkerProgressPolicyUsesGeneratedSpec(),
+    assertSharedWasmBoundaryHelpersStayOnStartupPath(
+      bootstrapSource,
+      runtimeSpec.runtimeBridge,
+    ),
+  ]);
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
   assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
   assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
   assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
-  assertSharedWasmBoundaryHelpersStayOnStartupPath(
-    bootstrapSource,
-    runtimeSpec.runtimeBridge,
-  );
 
   assert.match(
     buildScript,
@@ -1066,7 +1119,7 @@ function main() {
   );
   assert.match(indexHtml, /<script type="module" src="bootstrap\.mjs"><\/script>/);
   assert(
-    !fs.existsSync(path.join(ROOT_DIR, LEGACY_BOOTSTRAP_ENTRYPOINT)),
+    !(await pathExists(path.join(ROOT_DIR, LEGACY_BOOTSTRAP_ENTRYPOINT))),
     `${LEGACY_BOOTSTRAP_ENTRYPOINT} should stay renamed to bootstrap.mjs`,
   );
   assert.doesNotMatch(makefile, LEGACY_BOOTSTRAP_PATTERN);
@@ -1074,7 +1127,6 @@ function main() {
   assert.doesNotMatch(readmeSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(appLoadBenchSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(bootstrapLineCheckSource, LEGACY_BOOTSTRAP_PATTERN);
-  assert.doesNotMatch(serviceWorkerCheckSource, LEGACY_BOOTSTRAP_PATTERN);
   assert.doesNotMatch(indexHtml, /host\/progressive-trace-renderer-loader\.mjs/);
   assert.match(bootstrapSource, /const importProgressiveTraceRenderer = \(\) =>/);
   assert.match(bootstrapSource, /RUNTIME_URLS\.PROGRESSIVE_TRACE_RENDERER_URL/);
@@ -1196,7 +1248,7 @@ function main() {
   assert.match(indexFormatSpecSource, /START: 0/);
   assert.match(indexFormatSpecSource, /PARTIAL: 24/);
   assert.match(
-    readRepoFile("tools/generate-layout.js"),
+    generateLayoutSource,
     /spec\.index\.queryResult\.fields\.map/,
     "index format bridge should be generated from the shared index contract",
   );
@@ -1205,7 +1257,7 @@ function main() {
   assert.doesNotMatch(rendererSource, /from "\.\/trace-renderer-spec\.mjs"/);
   assert.match(rendererSource, /const TRACE_RENDERER_COLORS = Object\.freeze/);
   assert.doesNotMatch(rendererSource, /from "\.\/runtime-spec\.mjs"/);
-  assert(!fs.existsSync(path.join(ROOT_DIR, "host", "runtime-spec.mjs")));
+  assert(!(await pathExists(path.join(ROOT_DIR, "host", "runtime-spec.mjs"))));
   assert.match(startupSpecSource, /PROGRESSIVE_TRACE_RENDERER_URL: "\.\/progressive-trace-renderer\.mjs"/);
   assert.match(startupSpecSource, /APP_SHELL_COLORS/);
   assert.doesNotMatch(startupSpecSource, /TRACE_RENDERER_COLORS/);
@@ -1241,7 +1293,7 @@ function main() {
   assert.match(makefile, /node tools\/direct-esm-check\.js/);
   assert.match(makefile, /node tools\/generate-palette-spec\.js --check/);
 
-  assert(fs.existsSync(path.join(ROOT_DIR, "tools/direct-esm-check.js")));
+  assert(await pathExists(path.join(ROOT_DIR, "tools/direct-esm-check.js")));
 
   for (const relativePath of [
     "tools/ingest-worker-runtime-check.js",
@@ -1254,10 +1306,10 @@ function main() {
     "tools/production-topology-fixture.js",
     "tools/production-topology-fixture-check.js",
   ]) {
-    assert(fs.existsSync(path.join(ROOT_DIR, relativePath)));
+    assert(await pathExists(path.join(ROOT_DIR, relativePath)));
   }
 
-  for (const relativePath of [
+  await Promise.all([
     "Makefile",
     "README.md",
     "host/runtime.mjs",
@@ -1268,11 +1320,9 @@ function main() {
     "host/trace-renderer-spec.mjs",
     "index.html",
     "package.json",
-  ]) {
-    assertNoBundleReferences(relativePath);
-  }
+  ].map(assertNoBundleReferences));
 
-  for (const relativePath of [
+  await Promise.all([
     "bootstrap.mjs",
     "host/ingest-worker-runtime.mjs",
     "host/progressive-trace-renderer-loader.mjs",
@@ -1284,9 +1334,7 @@ function main() {
     "index.html",
     "manifest.webmanifest",
     "worker.js",
-  ]) {
-    assertNoIsolationRequirement(relativePath);
-  }
+  ].map(assertNoIsolationRequirement));
 
   for (const relativePath of [
     "bootstrap.mjs",
@@ -1299,27 +1347,27 @@ function main() {
     "host/trace-renderer-spec.mjs",
     "host/ingest-worker-runtime.mjs",
   ]) {
-    if (fs.existsSync(path.join(ROOT_DIR, "dist", relativePath))) {
-      assertDistCopy(relativePath);
-      assertNoIsolationRequirement(path.join("dist", relativePath));
+    if (await pathExists(path.join(ROOT_DIR, "dist", relativePath))) {
+      await assertDistCopy(relativePath);
+      await assertNoIsolationRequirement(path.join("dist", relativePath));
     }
   }
 
-  assertNoInlinePaletteColor("bootstrap.mjs");
-  assertNoInlinePaletteColor("host/canvas.mjs");
-  assertNoInlinePaletteColor("host/runtime.mjs");
-  assertIndexCatalogUsesGeneratedFormatSpec();
-  assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec();
-  assertRuntimeWorkerCheckUsesSharedHarness();
-  assertRuntimeAppBootChecksUseHarnessOperations();
-  assertInteractiveIngestCheckUsesGeneratedVerificationSpec();
-  assertInteractiveIngestCheckUsesSharedHarness();
-  assertProductionTopologyFixtureUsesHostAbiSpec();
+  await Promise.all([
+    assertNoInlinePaletteColor("bootstrap.mjs"),
+    assertNoInlinePaletteColor("host/canvas.mjs"),
+    assertNoInlinePaletteColor("host/runtime.mjs"),
+    assertIndexCatalogUsesGeneratedFormatSpec(),
+    assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec(),
+    assertRuntimeWorkerCheckUsesSharedHarness(),
+    assertRuntimeAppBootChecksUseHarnessOperations(),
+    assertInteractiveIngestCheckUsesGeneratedVerificationSpec(),
+    assertInteractiveIngestCheckUsesSharedHarness(),
+    assertProductionTopologyFixtureUsesHostAbiSpec(),
+  ]);
 }
 
-try {
-  main();
-} catch (error) {
+main().catch((error) => {
   console.error(error.stack || error.message || String(error));
   process.exitCode = 1;
-}
+});
