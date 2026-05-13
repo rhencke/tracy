@@ -82,6 +82,48 @@ async function assertFailureProbeExportNames(file) {
   return probes;
 }
 
+async function assertFailureProbeCases(file) {
+  return (await assertFailureProbeExportNames(file)).map((exportName) => ({
+    exportName,
+    expectedMessage: ASSERT_FAILURE_EXPECTED_MESSAGE,
+    file,
+  }));
+}
+
+async function findFiles(root, predicate, options = {}) {
+  const files = [];
+
+  async function walk(dir) {
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === "ENOENT" && options.allowMissing) {
+        return;
+      }
+
+      throw error;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(entryPath);
+      } else if (entry.isFile() && predicate(entry.name)) {
+        files.push(entryPath);
+      }
+    }
+  }
+
+  await walk(root);
+  files.sort();
+  return files;
+}
+
+function findTestWasms(root, options = {}) {
+  return findFiles(root, (name) => name.endsWith(".test.wasm"), options);
+}
+
 function coverageOutputPath(manifestPath) {
   return path.join(
     path.dirname(manifestPath),
@@ -315,7 +357,10 @@ module.exports = {
   ASSERT_FAILURE_PROBE_PREFIX,
   WatwatFailure,
   assertFailureProbeExportNames,
+  assertFailureProbeCases,
   createCoverageContext,
+  findFiles,
+  findTestWasms,
   functionExportNamesWithPrefix,
   instantiateTestModule,
   loadHarness,

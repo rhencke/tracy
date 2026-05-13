@@ -2,9 +2,10 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const {
-  ASSERT_FAILURE_EXPECTED_MESSAGE,
-  assertFailureProbeExportNames,
+  assertFailureProbeCases,
   createCoverageContext,
+  findFiles,
+  findTestWasms,
   loadHarness,
   runExpectedFailure,
   runTestFile,
@@ -15,33 +16,12 @@ async function readJson(file) {
   return JSON.parse(await fs.readFile(file, "utf8"));
 }
 
-async function findFiles(root, predicate) {
-  const files = [];
-
-  async function walk(dir) {
-    const entries = await fs.readdir(dir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const entryPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(entryPath);
-      } else if (entry.isFile() && predicate(entry.name)) {
-        files.push(entryPath);
-      }
-    }
-  }
-
-  await walk(root);
-  files.sort();
-  return files;
-}
-
 function findCoverageManifests(root) {
   return findFiles(root, (name) => name.endsWith(".cov.json"));
 }
 
 function findCoverageTestWasms(root) {
-  return findFiles(root, (name) => name.endsWith(".test.wasm"));
+  return findTestWasms(root);
 }
 
 function coveragePathFor(manifestPath) {
@@ -292,13 +272,11 @@ async function expectedFailureRunsFor(manifestPath, testPath) {
     return [];
   }
 
-  const probes = await assertFailureProbeExportNames(testPath);
-
-  return probes.map((exportName) => [
+  return (await assertFailureProbeCases(testPath)).map((probe) => [
     "--expect-failure",
-    exportName,
-    ASSERT_FAILURE_EXPECTED_MESSAGE,
-    testPath,
+    probe.exportName,
+    probe.expectedMessage,
+    probe.file,
   ]);
 }
 
