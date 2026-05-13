@@ -271,12 +271,7 @@ test: dist check-generated
 	node tools/coverage-selftest.js
 	node tools/cold-reload-index-check.js
 
-coverage: wasm-cov
-	npm run test:node -- --coverage
-
-coverage-strict: coverage
-
-coverage-report: wasm-cov
+coverage coverage-strict coverage-report: wasm-cov
 	npm run test:node -- --coverage
 
 clean:
