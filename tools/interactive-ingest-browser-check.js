@@ -13,6 +13,9 @@ const {
   cachedPlaywrightChromes,
   createDistServer,
 } = require("./dist-browser-helpers.js");
+const {
+  waitForBrowserReadiness,
+} = require("./browser-readiness-helpers.js");
 
 const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
@@ -267,19 +270,17 @@ async function browserState(page, { diagnoseReader = false } = {}) {
 }
 
 async function waitForPageCondition(page, predicate, label, timeoutMs = BROWSER_TIMEOUT_MS) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await page.evaluate(predicate)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-
-  throw new Error(
-    `${label}; browser ingest state=${JSON.stringify(
-      await browserState(page, { diagnoseReader: true }),
-    )}`,
-  );
+  return waitForBrowserReadiness({
+    collectFailureState: () => browserState(page, { diagnoseReader: true }),
+    collectState: async () => ({
+      ready: await page.evaluate(predicate),
+    }),
+    failureReason: () => null,
+    isReady: (state) => state.ready === true,
+    label,
+    pollIntervalMs: 25,
+    timeoutMs,
+  });
 }
 
 async function checkBrowserInteractiveIngest() {

@@ -7,6 +7,7 @@ function readinessFailureMessage(label, reason, state) {
 }
 
 async function waitForBrowserReadiness({
+  collectFailureState,
   collectState,
   failureReason,
   isReady,
@@ -14,6 +15,7 @@ async function waitForBrowserReadiness({
   pollIntervalMs = DEFAULT_READINESS_POLL_INTERVAL_MS,
   timeoutMs,
 }) {
+  const collectStateForFailure = collectFailureState ?? collectState;
   const start = Date.now();
   let state = {};
 
@@ -32,7 +34,7 @@ async function waitForBrowserReadiness({
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 
-  state = await collectState();
+  state = await collectStateForFailure();
   const reason = failureReason(state);
   if (reason !== null) {
     throw new Error(readinessFailureMessage(label, reason, state));
