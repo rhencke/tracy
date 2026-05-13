@@ -25,9 +25,8 @@ const READINESS_DIAGNOSTIC_MARK_NAMES = Object.freeze(
 );
 const DEFAULT_TIMEOUT_MS = 15000;
 const CORE_READY_REQUEST_EPSILON_MS = 0.5;
-// Keep early startup resource entries available until the post-coreReady
-// boundary assertion runs, even on pages that make many initial requests.
-const STARTUP_RESOURCE_TIMING_BUFFER_SIZE = 4096;
+const STARTUP_RESOURCE_TIMING_BUFFER_SIZE =
+  RUNTIME_SPEC.appLoadBench.startupResourceTimingBufferSize;
 // Warm samples reuse a page, so let post-ready frame callbacks start their
 // deferred preload requests and then require a short quiet window before reuse.
 const POST_READY_SETTLE_FRAME_COUNT = 2;
@@ -1166,6 +1165,10 @@ async function runSelfTest() {
     latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
     uploadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.uploadThroughputBytesPerSecond,
   });
+  assert.equal(
+    STARTUP_RESOURCE_TIMING_BUFFER_SIZE,
+    RUNTIME_SPEC.appLoadBench.startupResourceTimingBufferSize,
+  );
   assert.deepEqual(BUDGETS, RUNTIME_SPEC.appLoadBench.budgets);
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {

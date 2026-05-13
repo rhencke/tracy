@@ -29,6 +29,7 @@
   },
   "bootstrap": {},
   "appLoadBench": {
+    "startupResourceTimingBufferSize": 4096,
     "fast3g": {
       "downloadThroughputBytesPerSecond": 209715,
       "latencyMs": 150,
@@ -181,12 +182,13 @@
       {
         "numericValue": 4096,
         "paths": [
+          "appLoadBench.startupResourceTimingBufferSize",
           "runtimeDefaults.DEFAULT_INGEST_NAME_PTR",
           "runtimeDefaults.DEFAULT_INGEST_NAME_MAX_BYTES",
           "traceRenderer.query.DEFAULT_TRACE_RENDER_ROW_CAP",
           "traceRenderer.query.DEFAULT_TRACE_RENDER_INCOMPLETE_RANGE_CAP"
         ],
-        "description": "The ingest source-name pointer/capacity and renderer row/range caps are separate scratch-memory and command-buffer contracts."
+        "description": "The app-load startup resource timing buffer, ingest source-name pointer/capacity, and renderer row/range caps are separate browser-observation, scratch-memory, and command-buffer contracts."
       },
       {
         "numericValue": 8192,
