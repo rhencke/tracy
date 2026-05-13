@@ -2,6 +2,9 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const testNamePattern = /^test_/;
+// WAT modules import env.memory with a 32768-page maximum unless a harness
+// intentionally constrains a suite to exercise memory-limit behavior.
+const DEFAULT_WAT_MEMORY_MAXIMUM_PAGES = 32768;
 
 class WatwatFailure extends Error {
   constructor(code) {
@@ -191,7 +194,7 @@ async function memoryMaximumPagesFor(file, harness) {
     return harness.memoryMaximumPagesFor(file);
   }
 
-  return 32768;
+  return DEFAULT_WAT_MEMORY_MAXIMUM_PAGES;
 }
 
 async function instantiateTestModule(file, assertPath, coverage = null, harness = {}) {
