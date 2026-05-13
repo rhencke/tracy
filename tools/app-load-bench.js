@@ -1529,6 +1529,8 @@ async function runSelfTest() {
   assert.match(runtime, /globalThis\.dispatchEvent\?\.\(new Event\(PERFORMANCE_MARKS\.appReady\)\)/);
   assert.doesNotMatch(bootstrap, /const wasmModulesPromise = import\("\.\/host\/wasm-modules\.mjs"\)/);
   assert.doesNotMatch(bootstrap, /import\("\.\/host\/wasm-modules\.mjs"\)/);
+  assert.doesNotMatch(runtime, /import\("\.\/wasm-modules\.mjs"\)/);
+  assert.match(runtime, /import\(RUNTIME_URLS\.WASM_MODULES_URL\)/);
   assert.match(
     bootstrap,
     /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,

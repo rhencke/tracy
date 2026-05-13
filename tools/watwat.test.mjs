@@ -18,6 +18,10 @@ const ASSERT_FAILURE_PROBES = Object.freeze([
   "probe_assert_true_failure",
   "probe_assert_false_failure",
 ]);
+const EXPECTED_FAILURE_PROBE_FILES = Object.freeze([
+  "dist/wasm/watwat.test.wasm",
+  "dist/wasm/std/assert.test.wasm",
+]);
 
 async function watTestFilesIn(dir) {
   let entries;
@@ -41,6 +45,15 @@ const watTestFiles = (
   await Promise.all(WAT_TEST_DIRS.map((dir) => watTestFilesIn(dir)))
 ).flat().sort();
 const watTestFileSet = new Set(watTestFiles);
+const missingExpectedFailureProbeFiles = EXPECTED_FAILURE_PROBE_FILES.filter(
+  (file) => !watTestFileSet.has(file),
+);
+
+if (missingExpectedFailureProbeFiles.length > 0) {
+  throw new Error(
+    `missing expected-failure probe module(s): ${missingExpectedFailureProbeFiles.join(", ")}`,
+  );
+}
 
 if (watTestFiles.length > 0) {
   await registerWatwatTests(watTestFiles, {
@@ -59,7 +72,7 @@ const expectedFailureProbes = [
     expectedMessage: "assert test failed",
     file: "dist/wasm/std/assert.test.wasm",
   })),
-].filter((probe) => watTestFileSet.has(probe.file));
+];
 
 if (expectedFailureProbes.length > 0) {
   await registerWatwatExpectedFailureTests(expectedFailureProbes, {

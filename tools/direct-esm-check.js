@@ -1175,6 +1175,8 @@ async function main() {
     bootstrapSource,
     /import\("\.\/host\/wasm-modules\.mjs"\)/,
   );
+  assert.doesNotMatch(runtimeSource, /import\("\.\/wasm-modules\.mjs"\)/);
+  assert.match(runtimeSource, /import\(RUNTIME_URLS\.WASM_MODULES_URL\)/);
   assert.match(
     bootstrapSource,
     /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
