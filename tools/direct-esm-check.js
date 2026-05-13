@@ -1178,6 +1178,10 @@ async function main() {
   assert.doesNotMatch(runtimeSource, /import\("\.\/wasm-modules\.mjs"\)/);
   assert.match(runtimeSource, /import\(RUNTIME_URLS\.WASM_MODULES_URL\)/);
   assert.match(
+    runtimeSource,
+    /import\(RUNTIME_URLS\.WASM_MODULES_URL\)\.catch\(\(error\) => \{[\s\S]+defaultWasmModulesPromise = null;[\s\S]+throw error;/,
+  );
+  assert.match(
     bootstrapSource,
     /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
   );

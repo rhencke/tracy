@@ -1598,6 +1598,10 @@ async function runSelfTest() {
   assert.doesNotMatch(runtime, /import\("\.\/wasm-modules\.mjs"\)/);
   assert.match(runtime, /import\(RUNTIME_URLS\.WASM_MODULES_URL\)/);
   assert.match(
+    runtime,
+    /import\(RUNTIME_URLS\.WASM_MODULES_URL\)\.catch\(\(error\) => \{[\s\S]+defaultWasmModulesPromise = null;[\s\S]+throw error;/,
+  );
+  assert.match(
     bootstrap,
     /id !== "app" \|\| thread !== "main"[\s\S]+app\.wasm/,
   );

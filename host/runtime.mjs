@@ -49,7 +49,10 @@ function preloadDefaultProgressiveTraceRendererModule() {
 
 function importDefaultWasmModules() {
   if (defaultWasmModulesPromise === null) {
-    defaultWasmModulesPromise = import(RUNTIME_URLS.WASM_MODULES_URL);
+    defaultWasmModulesPromise = import(RUNTIME_URLS.WASM_MODULES_URL).catch((error) => {
+      defaultWasmModulesPromise = null;
+      throw error;
+    });
   }
 
   return defaultWasmModulesPromise;
