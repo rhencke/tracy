@@ -12,6 +12,10 @@ const {
   browserExecutablePath,
   createDistServer,
 } = require("./dist-browser-helpers.js");
+const {
+  readinessFailureMessage,
+  waitForBrowserReadiness,
+} = require("./browser-readiness-helpers.js");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const DIST_DIR = path.join(ROOT_DIR, "dist");
@@ -561,41 +565,19 @@ async function readinessPageState(cdp, page, markName) {
   return result.result?.value ?? {};
 }
 
-function readinessFailureMessage(label, reason, state) {
-  return `${label} ${reason}; readiness diagnostics=${JSON.stringify(state)}`;
-}
-
 function readinessHasAppLoadFailure(state) {
   return Boolean(state.alertText || state.appLoadError);
 }
 
 async function waitForReadinessMark(cdp, page, label, markName, timeoutMs = DEFAULT_TIMEOUT_MS) {
-  const start = Date.now();
-  let state = {};
-
-  while (Date.now() - start < timeoutMs) {
-    state = await readinessPageState(cdp, page, markName);
-
-    if (readinessHasAppLoadFailure(state)) {
-      throw new Error(
-        readinessFailureMessage(label, "reported app-load failure", state),
-      );
-    }
-
-    if (state.ready === true) {
-      return state;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  state = await readinessPageState(cdp, page, markName);
-  if (readinessHasAppLoadFailure(state)) {
-    throw new Error(
-      readinessFailureMessage(label, "reported app-load failure", state),
-    );
-  }
-  throw new Error(readinessFailureMessage(label, "timed out", state));
+  return waitForBrowserReadiness({
+    collectState: () => readinessPageState(cdp, page, markName),
+    failureReason: (state) =>
+      readinessHasAppLoadFailure(state) ? "reported app-load failure" : null,
+    isReady: (state) => state.ready === true,
+    label,
+    timeoutMs,
+  });
 }
 
 function isBenignLoadingFailure(failure) {
@@ -1948,11 +1930,19 @@ async function runSelfTest() {
   );
   assert.match(
     waitForReadinessMark.toString(),
-    /readinessPageState\(cdp, page, markName\)/,
+    /waitForBrowserReadiness\(\{/,
   );
   assert.match(
     waitForReadinessMark.toString(),
+    /collectState: \(\) => readinessPageState\(cdp, page, markName\)/,
+  );
+  assert.match(
+    waitForBrowserReadiness.toString(),
     /readinessFailureMessage\(label, "timed out", state\)/,
+  );
+  assert.equal(
+    readinessFailureMessage("app readiness", "timed out", timedOutState),
+    `app readiness timed out; readiness diagnostics=${JSON.stringify(timedOutState)}`,
   );
   assert.match(
     readinessPageState.toString(),

@@ -13,6 +13,9 @@ const {
   cachedPlaywrightChromes,
   createDistServer,
 } = require("./dist-browser-helpers.js");
+const {
+  waitForBrowserReadiness,
+} = require("./browser-readiness-helpers.js");
 
 const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
@@ -267,19 +270,17 @@ async function browserState(page, { diagnoseReader = false } = {}) {
 }
 
 async function waitForPageCondition(page, predicate, label, timeoutMs = BROWSER_TIMEOUT_MS) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (await page.evaluate(predicate)) {
-      return;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-
-  throw new Error(
-    `${label}; browser ingest state=${JSON.stringify(
-      await browserState(page, { diagnoseReader: true }),
-    )}`,
-  );
+  return waitForBrowserReadiness({
+    collectFailureState: () => browserState(page, { diagnoseReader: true }),
+    collectState: async () => ({
+      ready: await page.evaluate(predicate),
+    }),
+    failureReason: () => null,
+    isReady: (state) => state.ready === true,
+    label,
+    pollIntervalMs: 25,
+    timeoutMs,
+  });
 }
 
 async function checkBrowserInteractiveIngest() {
@@ -373,7 +374,79 @@ async function checkBrowserInteractiveIngest() {
   }
 }
 
-checkBrowserInteractiveIngest().catch((error) => {
+async function runSelfTest() {
+  const ingestTimeoutState = {
+    appError: "",
+    performanceMarks: ["tracy.app.ready"],
+    page: {
+      readyState: "complete",
+      title: "tracy",
+      url: "http://127.0.0.1/",
+      visibilityState: "visible",
+    },
+    readerDiagnostic: {
+      coveredRange: { end: 1000, start: 0 },
+      status: { state: "ready" },
+    },
+    workerMessageCount: 3,
+    workerMessagesHead: [
+      { fileOffset: 0, type: "preloaded" },
+      { fileOffset: 65536, type: "progress" },
+    ],
+    workerMessagesTail: [
+      { fileOffset: 65536, type: "progress" },
+      { error: "stalled", type: "worker-error" },
+    ],
+  };
+  const timedOutPage = {
+    async evaluate(_callback, ...args) {
+      return args.length > 0 ? ingestTimeoutState : false;
+    },
+  };
+
+  let timeoutError = null;
+  try {
+    await waitForPageCondition(
+      timedOutPage,
+      () => globalThis.__TRACY_BROWSER_INGEST__?.firstPresentedAt !== null,
+      "browser did not present first ingest draw",
+      0,
+    );
+  } catch (error) {
+    timeoutError = error;
+  }
+  assert.notEqual(timeoutError, null);
+  assert.match(
+    timeoutError.message,
+    /browser did not present first ingest draw timed out; readiness diagnostics=/,
+  );
+  assert.match(timeoutError.message, /"workerMessagesHead":.*"preloaded"/);
+  assert.match(timeoutError.message, /"workerMessagesTail":.*"worker-error"/);
+  assert.match(timeoutError.message, /"page":.*"readyState":"complete"/);
+  assert.match(timeoutError.message, /"readerDiagnostic":/);
+  assert.match(
+    waitForPageCondition.toString(),
+    /waitForBrowserReadiness\(\{/,
+  );
+  assert.match(
+    waitForPageCondition.toString(),
+    /collectFailureState: \(\) => browserState\(page, \{ diagnoseReader: true \}\)/,
+  );
+  assert.doesNotMatch(
+    waitForPageCondition.toString(),
+    /browser ingest state|Date\.now\(\) - start/,
+  );
+}
+
+async function main() {
+  if (process.argv.includes("--self-test")) {
+    await runSelfTest();
+  } else {
+    await checkBrowserInteractiveIngest();
+  }
+}
+
+main().catch((error) => {
   console.error(error.stack || error.message || String(error));
   process.exitCode = 1;
 });
