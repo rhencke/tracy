@@ -765,6 +765,35 @@ function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPa
   return violations;
 }
 
+function protectedStartupBoundaryResourceViolations(
+  resourceTimings,
+  markStartMs,
+  protectedPaths,
+) {
+  const paths = new Set(protectedPaths);
+  const cutoffMs = markStartMs + CORE_READY_REQUEST_EPSILON_MS;
+  const violations = [];
+
+  for (const resource of resourceTimings) {
+    if (!Number.isFinite(resource.startTime) || resource.startTime > cutoffMs) {
+      continue;
+    }
+
+    let pathname;
+    try {
+      pathname = new URL(resource.name).pathname.replace(/^\//, "");
+    } catch {
+      pathname = String(resource.name).replace(/^\//, "");
+    }
+
+    if (paths.has(pathname)) {
+      violations.push(pathname);
+    }
+  }
+
+  return violations;
+}
+
 function assertNoProtectedStartupBoundaryRequests(requestIds, requestUrls, protectedPaths) {
   const violations = protectedStartupBoundaryViolations(
     requestIds,
@@ -779,6 +808,45 @@ function assertNoProtectedStartupBoundaryRequests(requestIds, requestUrls, prote
       ].join(", ")}`,
     );
   }
+}
+
+function assertNoProtectedStartupBoundaryResources(
+  resourceTimings,
+  markStartMs,
+  protectedPaths,
+) {
+  const violations = protectedStartupBoundaryResourceViolations(
+    resourceTimings,
+    markStartMs,
+    protectedPaths,
+  );
+
+  if (violations.length > 0) {
+    throw new Error(
+      `protected startup boundary fetched broad modules before coreReady: ${[
+        ...new Set(violations),
+      ].join(", ")}`,
+    );
+  }
+}
+
+async function performanceMarkStartMs(cdp, page, markName) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const marks = performance.getEntriesByName(${JSON.stringify(markName)}, "mark");
+      const mark = marks[marks.length - 1];
+      return mark?.startTime ?? null;
+    })()`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  const startTimeMs = result.result?.value;
+
+  if (!Number.isFinite(startTimeMs)) {
+    throw new Error(`missing performance mark ${markName}`);
+  }
+
+  return startTimeMs;
 }
 
 async function performanceMarkWallMs(cdp, page, markName) {
@@ -801,6 +869,18 @@ async function performanceMarkWallMs(cdp, page, markName) {
   }
 
   return wallTimeMs;
+}
+
+async function resourceTimings(cdp, page) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `performance.getEntriesByType("resource").map((entry) => ({
+      name: entry.name,
+      startTime: entry.startTime,
+    }))`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  return Array.isArray(result.result?.value) ? result.result.value : [];
 }
 
 async function createPage(cdp) {
@@ -914,6 +994,11 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     page,
     PERFORMANCE_MARKS.coreReady,
   );
+  const coreReadyStartMs = await performanceMarkStartMs(
+    cdp,
+    page,
+    PERFORMANCE_MARKS.coreReady,
+  );
   coreRequestIds = navigationFrameRequestIds(
     coreTransferRequestIds(
       requestIdsStartedAtOrBefore(
@@ -926,16 +1011,16 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     requestFrameIds,
     navigation.frameId,
   );
-  assertNoProtectedStartupBoundaryRequests(
-    coreRequestIds,
-    requestUrls,
-    ["host/wasm-modules.mjs"],
-  );
   await waitForReadinessMark(
     cdp,
     page,
     "app readiness",
     PERFORMANCE_MARKS.appReady,
+  );
+  assertNoProtectedStartupBoundaryResources(
+    await resourceTimings(cdp, page),
+    coreReadyStartMs,
+    ["host/wasm-modules.mjs"],
   );
   await waitUntil(() =>
     unfinishedTransferRequestIds(
@@ -1301,6 +1386,47 @@ async function runSelfTest() {
       assertNoProtectedStartupBoundaryRequests(
         new Set(["wasm-graph"]),
         requestUrls,
+        ["host/wasm-modules.mjs"],
+      ),
+    /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
+  );
+  const coreReadyStartMs = 100;
+  const resourceTimingsBeforeCoreReady = [
+    { name: "http://127.0.0.1/bootstrap.mjs", startTime: 5 },
+    { name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 90 },
+    { name: "http://127.0.0.1/host/runtime.mjs", startTime: 95 },
+  ];
+  assert.deepEqual(
+    protectedStartupBoundaryResourceViolations(
+      resourceTimingsBeforeCoreReady,
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+    ["host/wasm-modules.mjs"],
+  );
+  assert.deepEqual(
+    protectedStartupBoundaryResourceViolations(
+      [
+        { name: "host/wasm-modules.mjs", startTime: 90 },
+        { name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 101 },
+      ],
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+    ["host/wasm-modules.mjs"],
+  );
+  assert.doesNotThrow(() =>
+    assertNoProtectedStartupBoundaryResources(
+      [{ name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 102 }],
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+  );
+  assert.throws(
+    () =>
+      assertNoProtectedStartupBoundaryResources(
+        resourceTimingsBeforeCoreReady,
+        coreReadyStartMs,
         ["host/wasm-modules.mjs"],
       ),
     /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
@@ -1708,6 +1834,10 @@ async function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
+    /performanceMarkStartMs\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
     /networkRequestMonotonicWallTimeOffsetMs\(event\)/,
   );
   assert.match(
@@ -1736,7 +1866,7 @@ async function runSelfTest() {
   );
   assert.match(
     navigateAndMeasure.toString(),
-    /assertNoProtectedStartupBoundaryRequests\([\s\S]+coreRequestIds,[\s\S]+requestUrls,[\s\S]+\["host\/wasm-modules\.mjs"\]/,
+    /assertNoProtectedStartupBoundaryResources\([\s\S]+await resourceTimings\(cdp, page\),[\s\S]+coreReadyStartMs,[\s\S]+\["host\/wasm-modules\.mjs"\]/,
   );
   assert.match(
     navigateAndMeasure.toString(),
