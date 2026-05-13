@@ -1059,7 +1059,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `(() => {
       const shellPaintEntries = performance.getEntriesByName(${JSON.stringify(PERFORMANCE_MARKS.appShellPaint)});
-      const shellPaint = shellPaintEntries[0]?.startTime;
+      const shellPaint = shellPaintEntries.at(-1)?.startTime;
       if (shellPaint === undefined) {
         throw new Error("missing shell paint performance entry");
       }
@@ -2045,7 +2045,7 @@ async function runSelfTest() {
   );
   assert.match(
     navigateAndMeasureSource,
-    /shellPaintEntries\[0\]\?\.startTime/,
+    /shellPaintEntries\.at\(-1\)\?\.startTime/,
   );
   assert.match(
     navigateAndMeasureSource,
