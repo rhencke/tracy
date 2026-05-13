@@ -16,6 +16,12 @@ const {
 const {
   waitForBrowserReadiness,
 } = require("./browser-readiness-helpers.js");
+const {
+  BROWSER_INGEST_STATE_KEY,
+  emptyFileSelectionSnapshot,
+  fileSelectionSnapshot,
+  installBrowserFileSelectionInstrumentation,
+} = require("./browser-file-selection-page-helper.js");
 
 const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
@@ -88,9 +94,11 @@ async function writeTraceFile(file) {
 }
 
 async function installIngestInstrumentation(page) {
-  await page.evaluateOnNewDocument(() => {
-    const state = {
-      fileSelectionAt: null,
+  await installBrowserFileSelectionInstrumentation(page);
+  await page.evaluateOnNewDocument((stateKey) => {
+    const state = globalThis[stateKey] ?? {};
+
+    Object.assign(state, {
       firstDrawAt: null,
       firstPresentedAt: null,
       fillRectCount: 0,
@@ -98,41 +106,14 @@ async function installIngestInstrumentation(page) {
       frameDurations: [],
       maxFrameDuration: 0,
       promisingType: typeof WebAssembly.promising,
-      selectedFileName: null,
-      selectedFileSize: null,
       suspendingType: typeof WebAssembly.Suspending,
       workerMessages: [],
       workerPosts: [],
-    };
-    globalThis.__TRACY_BROWSER_INGEST__ = state;
-
-    const addEventListener = EventTarget.prototype.addEventListener;
-    EventTarget.prototype.addEventListener = function addInstrumentedListener(
-      type,
-      listener,
-      options,
-    ) {
-      if (
-        this instanceof HTMLInputElement &&
-        this.type === "file" &&
-        type === "change" &&
-        typeof listener === "function"
-      ) {
-        return addEventListener.call(
-          this,
-          type,
-          function instrumentedChange(event) {
-            state.fileSelectionAt ??= performance.now();
-            state.selectedFileName = this.files?.[0]?.name ?? null;
-            state.selectedFileSize = this.files?.[0]?.size ?? null;
-            return listener.call(this, event);
-          },
-          options,
-        );
-      }
-
-      return addEventListener.call(this, type, listener, options);
-    };
+    });
+    globalThis[stateKey] = state;
+    const fileSelectionStarted = () =>
+      state.fileSelection?.selectedAt !== null &&
+      state.fileSelection?.selectedAt !== undefined;
 
     const requestAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis);
     globalThis.requestAnimationFrame = (callback) =>
@@ -141,7 +122,7 @@ async function installIngestInstrumentation(page) {
         try {
           return callback(timestamp);
         } finally {
-          if (state.fileSelectionAt !== null) {
+          if (fileSelectionStarted()) {
             const duration = performance.now() - startedAt;
             state.frameDurations.push(duration);
             state.maxFrameDuration = Math.max(state.maxFrameDuration, duration);
@@ -157,7 +138,7 @@ async function installIngestInstrumentation(page) {
       height,
     ) {
       const result = fillRect.apply(this, arguments);
-      if (this.canvas?.id === "tracy" && state.fileSelectionAt !== null) {
+      if (this.canvas?.id === "tracy" && fileSelectionStarted()) {
         state.fillRectCount += 1;
         if (state.fillRectSamples.length < 16) {
           state.fillRectSamples.push({ height, width, x, y });
@@ -165,7 +146,7 @@ async function installIngestInstrumentation(page) {
       }
       if (
         this.canvas?.id === "tracy" &&
-        state.fileSelectionAt !== null &&
+        fileSelectionStarted() &&
         state.firstDrawAt === null &&
         y > 0 &&
         height > 0 &&
@@ -217,12 +198,12 @@ async function installIngestInstrumentation(page) {
       });
       return worker;
     };
-  });
+  }, BROWSER_INGEST_STATE_KEY);
 }
 
 async function browserState(page, { diagnoseReader = false } = {}) {
-  return page.evaluate(async (shouldDiagnoseReader) => {
-    const state = globalThis.__TRACY_BROWSER_INGEST__ ?? {};
+  const state = await page.evaluate(async (shouldDiagnoseReader, stateKey) => {
+    const state = globalThis[stateKey] ?? {};
     const workerMessages = state.workerMessages ?? [];
     let readerDiagnostic = null;
 
@@ -266,7 +247,12 @@ async function browserState(page, { diagnoseReader = false } = {}) {
         ),
       ),
     };
-  }, diagnoseReader);
+  }, diagnoseReader, BROWSER_INGEST_STATE_KEY);
+
+  return {
+    ...state,
+    fileSelection: fileSelectionSnapshot(state.fileSelection),
+  };
 }
 
 async function waitForPageCondition(page, predicate, label, timeoutMs = BROWSER_TIMEOUT_MS) {
@@ -353,15 +339,16 @@ async function checkBrowserInteractiveIngest() {
     );
 
     const result = await browserState(page);
+    const { fileSelection } = result;
     assert.equal(result.appError, "");
-    assert.equal(result.selectedFileName, "throttled-100mb.json");
-    assert.equal(result.selectedFileSize, TRACE_SIZE_BYTES);
-    assert.notEqual(result.fileSelectionAt, null);
+    assert.equal(fileSelection.selectedFile.name, "throttled-100mb.json");
+    assert.equal(fileSelection.selectedFile.size, TRACE_SIZE_BYTES);
+    assert.notEqual(fileSelection.selectedAt, null);
     assert.notEqual(result.firstDrawAt, null);
     assert.notEqual(result.firstPresentedAt, null);
     assert.ok(
-      result.firstPresentedAt - result.fileSelectionAt <= FIRST_PRESENTED_BUDGET,
-      `first presented ingest draw took ${result.firstPresentedAt - result.fileSelectionAt}ms`,
+      result.firstPresentedAt - fileSelection.selectedAt <= FIRST_PRESENTED_BUDGET,
+      `first presented ingest draw took ${result.firstPresentedAt - fileSelection.selectedAt}ms`,
     );
     assert.ok(
       result.maxFrameDuration <= FRAME_BUDGET,
@@ -375,6 +362,18 @@ async function checkBrowserInteractiveIngest() {
 }
 
 async function runSelfTest() {
+  assert.deepEqual(fileSelectionSnapshot(), emptyFileSelectionSnapshot());
+  assert.deepEqual(
+    fileSelectionSnapshot({
+      selectedAt: 12.5,
+      selectedFile: { name: "trace.json", size: TRACE_SIZE_BYTES },
+    }),
+    {
+      selectedAt: 12.5,
+      selectedFile: { name: "trace.json", size: TRACE_SIZE_BYTES },
+    },
+  );
+
   const ingestTimeoutState = {
     appError: "",
     performanceMarks: ["tracy.app.ready"],
