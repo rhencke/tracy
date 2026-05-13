@@ -106,6 +106,10 @@ export async function registerWatwatTests(files, options = {}) {
     suites.push({ name: moduleName, tests });
   }
 
+  if (suites.length === 0) {
+    return suites;
+  }
+
   describe(suiteName, () => {
     for (const suite of suites) {
       describe(suite.name, () => {
