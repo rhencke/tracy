@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,20 +8,18 @@ import {
   registerWatwatTests,
 } from "./watwat-vitest.mjs";
 
+const require = createRequire(import.meta.url);
+const {
+  ASSERT_FAILURE_EXPECTED_MESSAGE,
+  assertFailureProbeExportNames,
+} = require("./watwat-core.js");
+
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WAT_TEST_DIRS = Object.freeze(["dist/wasm", "dist/wasm/std"]);
-const ASSERT_FAILURE_PROBES = Object.freeze([
-  "probe_assert_eq_i32_failure",
-  "probe_assert_eq_i64_failure",
-  "probe_assert_eq_f64_failure",
-  "probe_assert_eq_str_length_failure",
-  "probe_assert_eq_str_value_failure",
-  "probe_assert_true_failure",
-  "probe_assert_false_failure",
-]);
+const ASSERT_FAILURE_PROBE_FILE = "dist/wasm/std/assert.test.wasm";
 const EXPECTED_FAILURE_PROBE_FILES = Object.freeze([
   "dist/wasm/watwat.test.wasm",
-  "dist/wasm/std/assert.test.wasm",
+  ASSERT_FAILURE_PROBE_FILE,
 ]);
 
 function normalizedWatTestPath(file) {
@@ -71,11 +70,13 @@ const expectedFailureProbes = [
     expectedMessage: "deliberate i32 failure",
     file: "dist/wasm/watwat.test.wasm",
   },
-  ...ASSERT_FAILURE_PROBES.map((exportName) => ({
-    exportName,
-    expectedMessage: "assert test failed",
-    file: "dist/wasm/std/assert.test.wasm",
-  })),
+  ...(await assertFailureProbeExportNames(path.join(ROOT_DIR, ASSERT_FAILURE_PROBE_FILE))).map(
+    (exportName) => ({
+      exportName,
+      expectedMessage: ASSERT_FAILURE_EXPECTED_MESSAGE,
+      file: ASSERT_FAILURE_PROBE_FILE,
+    }),
+  ),
 ];
 
 if (expectedFailureProbes.length > 0) {

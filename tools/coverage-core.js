@@ -2,22 +2,14 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const {
+  ASSERT_FAILURE_EXPECTED_MESSAGE,
+  assertFailureProbeExportNames,
   createCoverageContext,
   loadHarness,
   runExpectedFailure,
   runTestFile,
   writeCoverageReport,
 } = require("./watwat-core.js");
-
-const ASSERT_FAILURE_PROBES = Object.freeze([
-  ["probe_assert_eq_i32_failure", "assert test failed"],
-  ["probe_assert_eq_i64_failure", "assert test failed"],
-  ["probe_assert_eq_f64_failure", "assert test failed"],
-  ["probe_assert_eq_str_length_failure", "assert test failed"],
-  ["probe_assert_eq_str_value_failure", "assert test failed"],
-  ["probe_assert_true_failure", "assert test failed"],
-  ["probe_assert_false_failure", "assert test failed"],
-]);
 
 async function readJson(file) {
   return JSON.parse(await fs.readFile(file, "utf8"));
@@ -295,15 +287,17 @@ async function runWithCoverage(manifestPath, args, options = {}) {
   return readJson(coveragePath);
 }
 
-function expectedFailureRunsFor(manifestPath, testPath) {
+async function expectedFailureRunsFor(manifestPath, testPath) {
   if (path.basename(manifestPath) !== "assert.cov.json") {
     return [];
   }
 
-  return ASSERT_FAILURE_PROBES.map(([exportName, expectedMessage]) => [
+  const probes = await assertFailureProbeExportNames(testPath);
+
+  return probes.map((exportName) => [
     "--expect-failure",
     exportName,
-    expectedMessage,
+    ASSERT_FAILURE_EXPECTED_MESSAGE,
     testPath,
   ]);
 }
@@ -338,7 +332,7 @@ async function runCoverageManifest(manifestPath, testPaths, options = {}) {
     mergeHits(hits, await runWithCoverage(manifestPath, [suiteTestPath], options));
   }
 
-  const expectedFailureRuns = expectedFailureRunsFor(manifestPath, testPath);
+  const expectedFailureRuns = await expectedFailureRunsFor(manifestPath, testPath);
   if (expectedFailureRuns.length > 0) {
     await accessOrThrow(testPath, "coverage test wasm missing");
   }
@@ -373,7 +367,6 @@ async function runCoverageRoot(root, options = {}) {
 }
 
 module.exports = {
-  ASSERT_FAILURE_PROBES,
   checkCoverageManifest,
   checkCoverageRoot,
   coveragePathFor,

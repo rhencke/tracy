@@ -2,6 +2,8 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const testNamePattern = /^test_/;
+const ASSERT_FAILURE_PROBE_PREFIX = "probe_assert_";
+const ASSERT_FAILURE_EXPECTED_MESSAGE = "assert test failed";
 // WAT modules import env.memory with a 32768-page maximum unless a harness
 // intentionally constrains a suite to exercise memory-limit behavior.
 const DEFAULT_WAT_MEMORY_MAXIMUM_PAGES = 32768;
@@ -59,6 +61,25 @@ function testExports(instance) {
   return Object.entries(instance.exports)
     .filter(([name, value]) => testNamePattern.test(name) && typeof value === "function")
     .map(([name, value]) => [name, value]);
+}
+
+async function functionExportNamesWithPrefix(file, prefix) {
+  const bytes = await fs.readFile(file);
+  const module = await WebAssembly.compile(bytes);
+
+  return WebAssembly.Module.exports(module)
+    .filter((entry) => entry.kind === "function" && entry.name.startsWith(prefix))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+async function assertFailureProbeExportNames(file) {
+  const probes = await functionExportNamesWithPrefix(file, ASSERT_FAILURE_PROBE_PREFIX);
+  if (probes.length === 0) {
+    throw new Error(`missing assertion failure probe exports in ${file}`);
+  }
+
+  return probes;
 }
 
 function coverageOutputPath(manifestPath) {
@@ -290,8 +311,12 @@ async function runExpectedFailure(exportName, expectedMessage, file, assertPath,
 }
 
 module.exports = {
+  ASSERT_FAILURE_EXPECTED_MESSAGE,
+  ASSERT_FAILURE_PROBE_PREFIX,
   WatwatFailure,
+  assertFailureProbeExportNames,
   createCoverageContext,
+  functionExportNamesWithPrefix,
   instantiateTestModule,
   loadHarness,
   messageFor,

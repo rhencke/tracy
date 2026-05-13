@@ -36,10 +36,12 @@ async function coverageRootExists() {
   }
 }
 
-function coverageCaseName(manifest, manifestPath) {
+async function coverageCaseName(manifest, manifestPath, testPaths) {
   const moduleName = manifest.module ?? relativeCoveragePath(manifestPath);
   const testPath = coverageTestPathFor(manifestPath);
-  const expectedFailureRuns = expectedFailureRunsFor(manifestPath, testPath);
+  const expectedFailureRuns = testPaths.includes(testPath)
+    ? await expectedFailureRunsFor(manifestPath, testPath)
+    : [];
 
   if (expectedFailureRuns.length === 0) {
     return `${moduleName} coverage`;
@@ -67,7 +69,7 @@ async function coverageArtifacts() {
     cases: await Promise.all(
       manifestPaths.map(async (manifestPath) => ({
         manifestPath,
-        name: coverageCaseName(await readJson(manifestPath), manifestPath),
+        name: await coverageCaseName(await readJson(manifestPath), manifestPath, testPaths),
         testPaths,
       })),
     ),
