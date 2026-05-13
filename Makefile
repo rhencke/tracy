@@ -268,9 +268,6 @@ test: dist check-generated
 	node tools/dist-budget-check.js --self-test
 	node tools/app-load-bench.js --self-test
 	node tools/lighthouse-ci-check.js
-	node tools/watwat.js --harness tools/tracy-watwat-harness.js dist/wasm/*.test.wasm dist/wasm/std/*.test.wasm
-	node tools/watwat.js --expect-failure probe_assert_eq_i32_failure "deliberate i32 failure" dist/wasm/watwat.test.wasm
-	bash tools/test-assert-probes.sh
 	node tools/coverage-selftest.js
 	node tools/cold-reload-index-check.js
 

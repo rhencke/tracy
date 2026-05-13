@@ -36,6 +36,7 @@ const {
 const DEFAULT_STALE_CATALOG_PROBE_PAGES = 1;
 
 let defaultProgressiveTraceRendererModulePromise = null;
+let defaultWasmModulesPromise = null;
 
 function preloadDefaultProgressiveTraceRendererModule() {
   if (defaultProgressiveTraceRendererModulePromise === null) {
@@ -44,6 +45,17 @@ function preloadDefaultProgressiveTraceRendererModule() {
   }
 
   return defaultProgressiveTraceRendererModulePromise;
+}
+
+function importDefaultWasmModules() {
+  if (defaultWasmModulesPromise === null) {
+    defaultWasmModulesPromise = import(RUNTIME_URLS.WASM_MODULES_URL).catch((error) => {
+      defaultWasmModulesPromise = null;
+      throw error;
+    });
+  }
+
+  return defaultWasmModulesPromise;
 }
 
 function markPerformance(name, options) {
@@ -171,7 +183,7 @@ function assertIndexReaderCappedQueryMetadataAbi(exports) {
 
 export function createMainThreadIndexReaderController(memory, host, options = {}) {
   async function defaultInstantiateIndexWasm(...args) {
-    const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
+    const { instantiateWasmModuleForThread } = await importDefaultWasmModules();
 
     return instantiateWasmModuleForThread(...args);
   }
@@ -1064,7 +1076,7 @@ async function loadApp(memory, host, options = {}) {
     compile = defaultCompileWasm,
     instantiate = defaultInstantiateWasm,
   } = {}) {
-    const { instantiateWasmModuleForThread } = await import("./wasm-modules.mjs");
+    const { instantiateWasmModuleForThread } = await importDefaultWasmModules();
 
     return instantiateWasmModuleForThread(id, thread, baseImports, {
       baseUrl,

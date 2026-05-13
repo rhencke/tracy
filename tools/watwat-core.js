@@ -1,9 +1,10 @@
-#!/usr/bin/env node
-
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const testNamePattern = /^test_/;
+// WAT modules import env.memory with a 32768-page maximum unless a harness
+// intentionally constrains a suite to exercise memory-limit behavior.
+const DEFAULT_WAT_MEMORY_MAXIMUM_PAGES = 32768;
 
 class WatwatFailure extends Error {
   constructor(code) {
@@ -11,28 +12,6 @@ class WatwatFailure extends Error {
     this.name = "WatwatFailure";
     this.code = code;
   }
-}
-
-function usage() {
-  console.error("usage: watwat [--harness tools/harness.js] dist/wasm/foo.test.wasm [dist/wasm/bar.test.wasm ...]");
-  console.error("usage: watwat [--harness tools/harness.js] --cov dist/wasm/foo.cov.json dist/wasm/foo.test.wasm");
-  console.error("usage: watwat [--harness tools/harness.js] --expect-failure export_name expected_message dist/wasm/foo.test.wasm");
-}
-
-function hasGlobMeta(value) {
-  return /[*?\[]/.test(value);
-}
-
-function tapEscape(value) {
-  return String(value).replace(/[\\\n\r]/g, (match) => {
-    if (match === "\\") {
-      return "\\\\";
-    }
-    if (match === "\n") {
-      return "\\n";
-    }
-    return "\\r";
-  });
 }
 
 function resultPair(result) {
@@ -80,10 +59,6 @@ function testExports(instance) {
   return Object.entries(instance.exports)
     .filter(([name, value]) => testNamePattern.test(name) && typeof value === "function")
     .map(([name, value]) => [name, value]);
-}
-
-async function readJson(file) {
-  return JSON.parse(await fs.readFile(file, "utf8"));
 }
 
 function coverageOutputPath(manifestPath) {
@@ -181,22 +156,6 @@ async function loadHarness(harnessPath) {
   return loaded.default ?? loaded;
 }
 
-function parseOptions(args) {
-  let harnessPath = null;
-  const files = [...args];
-
-  if (files[0] === "--harness") {
-    if (files.length < 2) {
-      return { error: true };
-    }
-
-    harnessPath = files[1];
-    files.splice(0, 2);
-  }
-
-  return { files, harnessPath };
-}
-
 async function instantiateHarnessDependencies(file, imports, coverage, harness) {
   if (typeof harness.dependencies !== "function") {
     return {};
@@ -235,7 +194,7 @@ async function memoryMaximumPagesFor(file, harness) {
     return harness.memoryMaximumPagesFor(file);
   }
 
-  return 32768;
+  return DEFAULT_WAT_MEMORY_MAXIMUM_PAGES;
 }
 
 async function instantiateTestModule(file, assertPath, coverage = null, harness = {}) {
@@ -330,122 +289,14 @@ async function runExpectedFailure(exportName, expectedMessage, file, assertPath,
   }
 }
 
-function emitTap(results) {
-  console.log("TAP version 13");
-  console.log(`1..${results.length}`);
-
-  results.forEach((result, index) => {
-    const number = index + 1;
-    const name = tapEscape(result.name);
-
-    if (result.ok) {
-      console.log(`ok ${number} - ${name}`);
-      return;
-    }
-
-    console.log(`not ok ${number} - ${name} # ${tapEscape(result.message)}`);
-  });
-}
-
-async function main() {
-  const options = parseOptions(process.argv.slice(2));
-
-  if (options.error || options.files.length === 0) {
-    usage();
-    process.exitCode = 64;
-    return;
-  }
-
-  let files = options.files;
-  const harness = await loadHarness(options.harnessPath);
-  const assertPath = path.resolve(__dirname, "../dist/wasm/std/assert.wasm");
-
-  if (files[0] === "--expect-failure") {
-    if (files.length !== 4) {
-      usage();
-      process.exitCode = 64;
-      return;
-    }
-
-    const [, exportName, expectedMessage, file] = files;
-    const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, null, harness);
-    emitTap([result]);
-    if (!result.ok) {
-      process.exitCode = 1;
-    }
-    return;
-  }
-
-  let coverage = null;
-  let coverageManifest = null;
-  let coverageManifestPath = null;
-
-  if (files[0] === "--cov") {
-    if (files.length < 3) {
-      usage();
-      process.exitCode = 64;
-      return;
-    }
-
-    coverageManifestPath = files[1];
-    coverageManifest = await readJson(coverageManifestPath);
-    coverage = createCoverageContext(coverageManifest);
-    files = files.slice(2);
-
-    if (files[0] === "--expect-failure") {
-      if (files.length !== 4) {
-        usage();
-        process.exitCode = 64;
-        return;
-      }
-
-      const [, exportName, expectedMessage, file] = files;
-      const result = await runExpectedFailure(exportName, expectedMessage, file, assertPath, coverage, harness);
-      emitTap([result]);
-      if (!result.ok) {
-        process.exitCode = 1;
-        return;
-      }
-
-      await writeCoverageReport(coverageManifestPath, coverageManifest, coverage);
-      return;
-    }
-  }
-
-  const results = [];
-  let harnessFailed = false;
-
-  for (const file of files) {
-    try {
-      await fs.access(file);
-      results.push(...(await runTestFile(file, assertPath, coverage, harness)));
-    } catch (error) {
-      if (error.code === "ENOENT" && hasGlobMeta(file)) {
-        continue;
-      }
-
-      harnessFailed = true;
-      results.push({
-        ok: false,
-        name: file,
-        message: error.message || String(error),
-      });
-    }
-  }
-
-  emitTap(results);
-
-  if (harnessFailed || results.some((result) => !result.ok)) {
-    process.exitCode = 1;
-    return;
-  }
-
-  if (coverage !== null) {
-    await writeCoverageReport(coverageManifestPath, coverageManifest, coverage);
-  }
-}
-
-main().catch((error) => {
-  console.error(error.stack || error.message || String(error));
-  process.exitCode = 1;
-});
+module.exports = {
+  WatwatFailure,
+  createCoverageContext,
+  instantiateTestModule,
+  loadHarness,
+  messageFor,
+  runExpectedFailure,
+  runTestFile,
+  testExports,
+  writeCoverageReport,
+};
