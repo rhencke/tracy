@@ -17,8 +17,7 @@ const {
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COVERAGE_ROOT = path.join(ROOT_DIR, "dist/wasm-cov");
-const CHECK_COVERAGE =
-  process.env.WAT_COVERAGE_CHECK === "1" || process.env.VITEST_WAT_COVERAGE === "1";
+const CHECK_COVERAGE = process.env.VITEST_WAT_COVERAGE === "1";
 
 function relativeCoveragePath(file) {
   return path.relative(ROOT_DIR, file).replaceAll(path.sep, "/");
