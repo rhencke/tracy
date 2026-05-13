@@ -136,6 +136,10 @@ export async function registerWatwatExpectedFailureTests(probes, options = {}) {
     };
   });
 
+  if (cases.length === 0) {
+    return cases;
+  }
+
   describe(suiteName, () => {
     for (const testCase of cases) {
       test(`${testCase.moduleName} ${testCase.name}`, async () => {
