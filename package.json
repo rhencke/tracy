@@ -34,9 +34,9 @@
     "test:generated-trace": "node tools/generated-trace-extractor-check.js",
     "test:cold-reload-index": "node tools/cold-reload-index-check.js",
     "test:coverage-selftest": "node tools/coverage-selftest.js",
-    "test:coverage": "node tools/coverage-run.js --check dist/wasm-cov",
-    "test:coverage:report": "node tools/coverage-run.js dist/wasm-cov",
-    "test:coverage:strict": "node tools/coverage-run.js --check dist/wasm-cov",
+    "test:coverage": "WAT_COVERAGE_CHECK=1 vitest run tools/wat-coverage.test.mjs",
+    "test:coverage:report": "vitest run tools/wat-coverage.test.mjs",
+    "test:coverage:strict": "WAT_COVERAGE_CHECK=1 vitest run tools/wat-coverage.test.mjs",
     "coverage": "make coverage",
     "coverage:strict": "make coverage-strict"
   },

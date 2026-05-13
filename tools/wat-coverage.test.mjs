@@ -6,6 +6,7 @@ import { describe, test } from "vitest";
 
 const require = createRequire(import.meta.url);
 const {
+  checkCoverageRoot,
   coverageTestPathFor,
   expectedFailureRunsFor,
   findCoverageManifests,
@@ -16,6 +17,7 @@ const {
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COVERAGE_ROOT = path.join(ROOT_DIR, "dist/wasm-cov");
+const CHECK_COVERAGE = process.env.WAT_COVERAGE_CHECK === "1";
 
 function relativeCoveragePath(file) {
   return path.relative(ROOT_DIR, file).replaceAll(path.sep, "/");
@@ -66,15 +68,33 @@ async function coverageCases() {
   );
 }
 
+async function assertCoverageRootComplete() {
+  const result = await checkCoverageRoot(COVERAGE_ROOT);
+
+  for (const line of result.lines) {
+    console.error(line);
+  }
+
+  if (result.failed) {
+    throw new Error(result.lines.join("\n"));
+  }
+}
+
 const cases = await coverageCases();
 
 if (cases.length === 0) {
   test.skip("dist/wasm-cov coverage artifacts are not built", () => {});
 } else {
-  describe("WAT coverage", () => {
+  describe.sequential("WAT coverage", () => {
     for (const coverageCase of cases) {
       test(coverageCase.name, async () => {
         await runCoverageManifest(coverageCase.manifestPath, coverageCase.testPaths);
+      });
+    }
+
+    if (CHECK_COVERAGE) {
+      test("coverage-check reports full WAT coverage", async () => {
+        await assertCoverageRootComplete();
       });
     }
   });
