@@ -519,6 +519,7 @@ async function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     [/const\s+HUNDRED_MB\s*=/, "100 MB fixture size"],
     [/const\s+TEN_MB\s*=/, "10 MB ingest window"],
     [/const\s+FRAME_BUDGET_MS\s*=\s*16\.67/, "60 fps frame budget"],
+    [/const\s+FIRST_EVENTS_BUDGET_MS\s*=\s*100/, "first events budget"],
     [/100\s*\*\s*1024\s*\*\s*1024/, "100 MB fixture size expression"],
     [/10\s*\*\s*1024\s*\*\s*1024/, "10 MB ingest window expression"],
   ]) {
@@ -564,6 +565,7 @@ async function assertInteractiveIngestCheckUsesGeneratedVerificationSpec() {
     [/INTERACTIVE_INGEST_CHECK\.FIXTURE_SIZE_BYTES/, "fixture size"],
     [/INTERACTIVE_INGEST_CHECK\.INGEST_WINDOW_BYTES/, "ingest window"],
     [/INTERACTIVE_INGEST_CHECK\.FRAME_BUDGET_MS/, "frame budget"],
+    [/INTERACTIVE_INGEST_CHECK\.FIRST_EVENTS_BUDGET_MS/, "first events budget"],
   ]) {
     assert.match(
       source,

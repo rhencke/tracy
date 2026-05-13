@@ -34,15 +34,13 @@
     "test:generated-trace": "node tools/generated-trace-extractor-check.js",
     "test:cold-reload-index": "node tools/cold-reload-index-check.js",
     "test:coverage-selftest": "node tools/coverage-selftest.js",
-    "test:coverage": "node tools/coverage-run.js --check dist/wasm-cov",
-    "test:coverage:report": "node tools/coverage-run.js dist/wasm-cov",
-    "test:coverage:strict": "node tools/coverage-run.js --check dist/wasm-cov",
     "coverage": "make coverage",
-    "coverage:strict": "make coverage-strict"
+    "coverage:strict": "make coverage"
   },
   "devDependencies": {
     "@lhci/cli": "0.15.1",
     "@playwright/test": "1.59.1",
+    "@vitest/coverage-istanbul": "^4.1.6",
     "puppeteer-core": "24.43.0",
     "vitest": "^4.1.6"
   }

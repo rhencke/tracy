@@ -18,12 +18,16 @@ const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
   fs.readFileSync(repoPath("abi/runtime.json"), "utf8"),
 );
-const { FIXTURE_SIZE_BYTES, FRAME_BUDGET_MS, FILE_CHOOSER_TIMEOUT_MS } =
-  RUNTIME_SPEC.interactiveIngestCheck;
+const {
+  FIRST_PRESENTED_BUDGET_MS,
+  FIXTURE_SIZE_BYTES,
+  FRAME_BUDGET_MS,
+  FILE_CHOOSER_TIMEOUT_MS,
+} = RUNTIME_SPEC.interactiveIngestCheck;
 const TRACE_SIZE_BYTES = FIXTURE_SIZE_BYTES.value;
 const FRAME_BUDGET = FRAME_BUDGET_MS.value;
 const FILE_CHOOSER_TIMEOUT = FILE_CHOOSER_TIMEOUT_MS.value;
-const FIRST_EVENTS_BUDGET_MS = 100;
+const FIRST_PRESENTED_BUDGET = FIRST_PRESENTED_BUDGET_MS.value;
 const BROWSER_TIMEOUT_MS = 15_000;
 
 function browserExecutablePath() {
@@ -355,7 +359,7 @@ async function checkBrowserInteractiveIngest() {
     assert.notEqual(result.firstDrawAt, null);
     assert.notEqual(result.firstPresentedAt, null);
     assert.ok(
-      result.firstPresentedAt - result.fileSelectionAt <= FIRST_EVENTS_BUDGET_MS,
+      result.firstPresentedAt - result.fileSelectionAt <= FIRST_PRESENTED_BUDGET,
       `first presented ingest draw took ${result.firstPresentedAt - result.fileSelectionAt}ms`,
     );
     assert.ok(

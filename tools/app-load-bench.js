@@ -24,7 +24,18 @@ const READINESS_DIAGNOSTIC_MARK_NAMES = Object.freeze(
   Object.values(PERFORMANCE_MARKS),
 );
 const DEFAULT_TIMEOUT_MS = 15000;
-const CORE_READY_REQUEST_EPSILON_MS = 0.5;
+const CORE_READY_REQUEST_EPSILON_MS =
+  RUNTIME_SPEC.appLoadBench.startupBoundary.coreReadyRequestEpsilonMs;
+const STARTUP_RESOURCE_TIMING_BUFFER_SIZE =
+  RUNTIME_SPEC.appLoadBench.startupResourceTimingBufferSize;
+const STARTUP_BOUNDARY_SELF_TEST = Object.freeze({
+  ...RUNTIME_SPEC.appLoadBench.startupBoundary.selfTest,
+  resourceTimingsBeforeCoreReady: Object.freeze(
+    RUNTIME_SPEC.appLoadBench.startupBoundary.selfTest.resourceTimingsBeforeCoreReady.map(
+      (resource) => Object.freeze({ ...resource }),
+    ),
+  ),
+});
 // Warm samples reuse a page, so let post-ready frame callbacks start their
 // deferred preload requests and then require a short quiet window before reuse.
 const POST_READY_SETTLE_FRAME_COUNT = 2;
@@ -50,6 +61,13 @@ const CORE_TRANSFER_RESOURCE_TYPES = new Set([
   "TextTrack",
   "XHR",
 ]);
+const PROTECTED_STARTUP_BOUNDARY_RESOURCE_INITIATOR_TYPES = new Set([
+  "fetch",
+  "link",
+  "script",
+  "xmlhttprequest",
+]);
+const resourceTimingBufferPages = new WeakSet();
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
   latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
@@ -765,6 +783,41 @@ function protectedStartupBoundaryViolations(requestIds, requestUrls, protectedPa
   return violations;
 }
 
+function protectedStartupBoundaryResourceViolations(
+  resourceTimings,
+  markStartMs,
+  protectedPaths,
+) {
+  const paths = new Set(protectedPaths);
+  const violations = [];
+
+  for (const resource of resourceTimings) {
+    if (!Number.isFinite(resource.startTime) || resource.startTime > markStartMs) {
+      continue;
+    }
+
+    if (
+      typeof resource.initiatorType === "string" &&
+      !PROTECTED_STARTUP_BOUNDARY_RESOURCE_INITIATOR_TYPES.has(resource.initiatorType)
+    ) {
+      continue;
+    }
+
+    let pathname;
+    try {
+      pathname = new URL(resource.name).pathname.replace(/^\//, "");
+    } catch {
+      pathname = String(resource.name).replace(/^\//, "");
+    }
+
+    if (paths.has(pathname)) {
+      violations.push(pathname);
+    }
+  }
+
+  return violations;
+}
+
 function assertNoProtectedStartupBoundaryRequests(requestIds, requestUrls, protectedPaths) {
   const violations = protectedStartupBoundaryViolations(
     requestIds,
@@ -779,6 +832,45 @@ function assertNoProtectedStartupBoundaryRequests(requestIds, requestUrls, prote
       ].join(", ")}`,
     );
   }
+}
+
+function assertNoProtectedStartupBoundaryResources(
+  resourceTimings,
+  markStartMs,
+  protectedPaths,
+) {
+  const violations = protectedStartupBoundaryResourceViolations(
+    resourceTimings,
+    markStartMs,
+    protectedPaths,
+  );
+
+  if (violations.length > 0) {
+    throw new Error(
+      `protected startup boundary fetched broad modules before coreReady: ${[
+        ...new Set(violations),
+      ].join(", ")}`,
+    );
+  }
+}
+
+async function performanceMarkStartMs(cdp, page, markName) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `(() => {
+      const marks = performance.getEntriesByName(${JSON.stringify(markName)}, "mark");
+      const mark = marks[marks.length - 1];
+      return mark?.startTime ?? null;
+    })()`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  const startTimeMs = result.result?.value;
+
+  if (!Number.isFinite(startTimeMs)) {
+    throw new Error(`missing performance mark ${markName}`);
+  }
+
+  return startTimeMs;
 }
 
 async function performanceMarkWallMs(cdp, page, markName) {
@@ -801,6 +893,30 @@ async function performanceMarkWallMs(cdp, page, markName) {
   }
 
   return wallTimeMs;
+}
+
+async function resourceTimings(cdp, page) {
+  const result = await cdp.send("Runtime.evaluate", {
+    expression: `performance.getEntriesByType("resource").map((entry) => ({
+      initiatorType: entry.initiatorType,
+      name: entry.name,
+      startTime: entry.startTime,
+    }))`,
+    returnByValue: true,
+  }, page.sessionId);
+
+  return Array.isArray(result.result?.value) ? result.result.value : [];
+}
+
+async function ensureStartupResourceTimingBuffer(cdp, page) {
+  if (resourceTimingBufferPages.has(page)) {
+    return;
+  }
+
+  await cdp.send("Page.addScriptToEvaluateOnNewDocument", {
+    source: `performance.setResourceTimingBufferSize?.(${STARTUP_RESOURCE_TIMING_BUFFER_SIZE});`,
+  }, page.sessionId);
+  resourceTimingBufferPages.add(page);
 }
 
 async function createPage(cdp) {
@@ -899,6 +1015,7 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   await cdp.send("Network.setBypassServiceWorker", {
     bypass: options.bypassServiceWorker === true,
   }, page.sessionId);
+  await ensureStartupResourceTimingBuffer(cdp, page);
 
   const loaded = waitForSessionEvent(cdp, page.sessionId, "Page.loadEventFired");
   const navigation = await cdp.send("Page.navigate", { url }, page.sessionId);
@@ -910,6 +1027,11 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     PERFORMANCE_MARKS.coreReady,
   );
   const coreReadyWallMs = await performanceMarkWallMs(
+    cdp,
+    page,
+    PERFORMANCE_MARKS.coreReady,
+  );
+  const coreReadyStartMs = await performanceMarkStartMs(
     cdp,
     page,
     PERFORMANCE_MARKS.coreReady,
@@ -926,11 +1048,6 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
     requestFrameIds,
     navigation.frameId,
   );
-  assertNoProtectedStartupBoundaryRequests(
-    coreRequestIds,
-    requestUrls,
-    ["host/wasm-modules.mjs"],
-  );
   await waitForReadinessMark(
     cdp,
     page,
@@ -944,6 +1061,11 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
       loadingBytes,
       loadingFailures,
     ).length === 0,
+  );
+  assertNoProtectedStartupBoundaryResources(
+    await resourceTimings(cdp, page),
+    coreReadyStartMs,
+    ["host/wasm-modules.mjs"],
   );
   assertNoFailedCoreRequests(coreRequestIds, loadingFailures, requestUrls);
   const coreTransferBytes = coreTransferBytesForRequests(
@@ -1065,6 +1187,10 @@ async function runSelfTest() {
     latency: RUNTIME_SPEC.appLoadBench.fast3g.latencyMs,
     uploadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.uploadThroughputBytesPerSecond,
   });
+  assert.equal(
+    STARTUP_RESOURCE_TIMING_BUFFER_SIZE,
+    RUNTIME_SPEC.appLoadBench.startupResourceTimingBufferSize,
+  );
   assert.deepEqual(BUDGETS, RUNTIME_SPEC.appLoadBench.budgets);
   assert.doesNotThrow(() =>
     assertMeasuredBudget("fixture", {
@@ -1305,6 +1431,141 @@ async function runSelfTest() {
       ),
     /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
   );
+  const {
+    beforeCoreReadyStartMs,
+    coreReadyStartMs,
+    resourceAfterCoreReadyStartMs,
+    resourceTimingsBeforeCoreReady,
+    runtimeBeforeCoreReadyStartMs,
+    scriptAfterCoreReadyStartMs,
+  } = STARTUP_BOUNDARY_SELF_TEST;
+  assert.deepEqual(
+    resourceTimingsBeforeCoreReady,
+    RUNTIME_SPEC.appLoadBench.startupBoundary.selfTest.resourceTimingsBeforeCoreReady,
+  );
+  assert.equal(
+    resourceTimingsBeforeCoreReady.find((resource) =>
+      resource.name.endsWith("/host/wasm-modules.mjs"),
+    )?.startTime,
+    beforeCoreReadyStartMs,
+  );
+  assert.equal(
+    resourceTimingsBeforeCoreReady.find((resource) =>
+      resource.name.endsWith("/host/runtime.mjs"),
+    )?.startTime,
+    runtimeBeforeCoreReadyStartMs,
+  );
+  assert.deepEqual(
+    protectedStartupBoundaryResourceViolations(
+      resourceTimingsBeforeCoreReady,
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+    ["host/wasm-modules.mjs"],
+  );
+  assert.deepEqual(
+    protectedStartupBoundaryResourceViolations(
+      [
+        {
+          initiatorType: "fetch",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+        {
+          initiatorType: "xmlhttprequest",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+        {
+          initiatorType: "link",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+        {
+          initiatorType: "script",
+          name: "http://127.0.0.1/host/wasm-modules.mjs",
+          startTime: scriptAfterCoreReadyStartMs,
+        },
+      ],
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+    [
+      "host/wasm-modules.mjs",
+      "host/wasm-modules.mjs",
+      "host/wasm-modules.mjs",
+    ],
+  );
+  for (const initiatorType of ["fetch", "xmlhttprequest"]) {
+    assert.throws(
+      () =>
+        assertNoProtectedStartupBoundaryResources(
+          [
+            {
+              initiatorType,
+              name: "host/wasm-modules.mjs",
+              startTime: beforeCoreReadyStartMs,
+            },
+          ],
+          coreReadyStartMs,
+          ["host/wasm-modules.mjs"],
+        ),
+      /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
+    );
+  }
+  assert.doesNotThrow(() =>
+    assertNoProtectedStartupBoundaryResources(
+      [
+        {
+          initiatorType: "script",
+          name: "http://127.0.0.1/host/wasm-modules.mjs",
+          startTime: coreReadyStartMs + (CORE_READY_REQUEST_EPSILON_MS / 2),
+        },
+      ],
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+  );
+  assert.doesNotThrow(() =>
+    assertNoProtectedStartupBoundaryResources(
+      [
+        {
+          name: "http://127.0.0.1/host/wasm-modules.mjs",
+          startTime: resourceAfterCoreReadyStartMs,
+        },
+      ],
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
+  );
+  assert.throws(
+    () =>
+      assertNoProtectedStartupBoundaryResources(
+        resourceTimingsBeforeCoreReady,
+        coreReadyStartMs,
+        ["host/wasm-modules.mjs"],
+      ),
+    /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
+  );
+  const bufferPage = { sessionId: "buffer-session" };
+  const bufferCalls = [];
+  const bufferCdp = {
+    async send(method, params, sessionId) {
+      bufferCalls.push({ method, params, sessionId });
+      return {};
+    },
+  };
+  await ensureStartupResourceTimingBuffer(bufferCdp, bufferPage);
+  await ensureStartupResourceTimingBuffer(bufferCdp, bufferPage);
+  assert.deepEqual(bufferCalls, [
+    {
+      method: "Page.addScriptToEvaluateOnNewDocument",
+      params: {
+        source: `performance.setResourceTimingBufferSize?.(${STARTUP_RESOURCE_TIMING_BUFFER_SIZE});`,
+      },
+      sessionId: bufferPage.sessionId,
+    },
+  ]);
   const readinessPage = { sessionId: "readiness-session" };
   const readyState = {
     alertText: "",
@@ -1653,6 +1914,9 @@ async function runSelfTest() {
   assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
   assert.match(startupSpec, /APP_SHELL_COLORS/);
+  assert.match(startupSpec, /APP_LOAD_BENCH_STARTUP/);
+  assert.match(startupSpec, /startupBoundary/);
+  assert.match(startupSpec, /coreReadyRequestEpsilonMs/);
   assert.doesNotMatch(startupSpec, /TRACE_RENDERER_COLORS/);
   assert.match(traceRendererSpec, /TRACE_RENDERER_COLORS/);
   assert.doesNotMatch(traceRendererSpec, /APP_SHELL_COLORS/);
@@ -1673,12 +1937,13 @@ async function runSelfTest() {
     }
   }
   assert.match(bootstrap, /BOOTSTRAP_WASM_MEMORY\.BOOTSTRAP_MEMORY_INITIAL_PAGES/);
+  const navigateAndMeasureSource = navigateAndMeasure.toString();
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /waitForReadinessMark\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /waitForReadinessMark\([\s\S]+PERFORMANCE_MARKS\.appReady/,
   );
   assert.match(
@@ -1703,84 +1968,106 @@ async function runSelfTest() {
   );
   assert.doesNotMatch(readinessPageState.toString(), /workerMessages|__TRACY_BROWSER_INGEST__/);
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /performanceMarkWallMs\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
+    /performanceMarkStartMs\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
+  );
+  assert.match(
+    navigateAndMeasureSource,
     /networkRequestMonotonicWallTimeOffsetMs\(event\)/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /networkRequestStartWallMs\([\s\S]+event,[\s\S]+observedWallMs,[\s\S]+monotonicWallTimeOffsetMs/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /navigationFrameRequestIds\([\s\S]+coreTransferRequestIds\([\s\S]+requestIdsStartedAtOrBefore\([\s\S]+requestStartWallMs,[\s\S]+coreReadyWallMs,[\s\S]+requestIds,[\s\S]+requestTypes,[\s\S]+requestFrameIds,[\s\S]+navigation\.frameId/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /requestFrameIds\.set\(event\.requestId, event\.frameId\)/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
+    /ensureStartupResourceTimingBuffer\(cdp, page\)/,
+  );
+  assert.match(
+    ensureStartupResourceTimingBuffer.toString(),
+    /Page\.addScriptToEvaluateOnNewDocument[\s\S]+setResourceTimingBufferSize/,
+  );
+  assert.ok(
+    navigateAndMeasureSource.indexOf("await ensureStartupResourceTimingBuffer(cdp, page)") <
+      navigateAndMeasureSource.indexOf('const navigation = await cdp.send("Page.navigate"'),
+    "startup resource timing buffer should be configured before navigation",
+  );
+  assert.match(
+    navigateAndMeasureSource,
     /const navigation = await cdp\.send\("Page\.navigate"/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /requestTypes\.set\(event\.requestId, event\.type\)/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /requestUrls\.set\(event\.requestId, event\.request\.url\)/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
-    /assertNoProtectedStartupBoundaryRequests\([\s\S]+coreRequestIds,[\s\S]+requestUrls,[\s\S]+\["host\/wasm-modules\.mjs"\]/,
+    navigateAndMeasureSource,
+    /assertNoProtectedStartupBoundaryResources\([\s\S]+await resourceTimings\(cdp, page\),[\s\S]+coreReadyStartMs,[\s\S]+\["host\/wasm-modules\.mjs"\]/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /unfinishedTransferRequestIds\([\s\S]+coreRequestIds,[\s\S]+cachedRequestIds,[\s\S]+loadingBytes,[\s\S]+loadingFailures/,
   );
+  assert.ok(
+    navigateAndMeasureSource.indexOf("await waitUntil(() =>") <
+      navigateAndMeasureSource.indexOf("assertNoProtectedStartupBoundaryResources"),
+    "startup boundary resource assertion should run after core transfers finish",
+  );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /Network\.loadingFailed/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /loadingFailures\.set\(event\.requestId/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /assertNoFailedCoreRequests\(coreRequestIds, loadingFailures, requestUrls\)/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /coreTransferBytesForRequests\([\s\S]+coreRequestIds,[\s\S]+cachedRequestIds,[\s\S]+loadingBytes/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /metrics\.transferBytes = coreTransferBytes/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /performance\.getEntriesByName\(\$\{JSON\.stringify\(PERFORMANCE_MARKS\.appShellPaint\)\}\)/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /shellPaintEntries\.at\(-1\)\?\.startTime/,
   );
   assert.match(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /shellPaintMs: shellPaint/,
   );
-  assert.doesNotMatch(navigateAndMeasure.toString(), /first-contentful-paint/);
-  assert.doesNotMatch(navigateAndMeasure.toString(), /fcpMs:/);
+  assert.doesNotMatch(navigateAndMeasureSource, /first-contentful-paint/);
+  assert.doesNotMatch(navigateAndMeasureSource, /fcpMs:/);
   assert.doesNotMatch(
-    navigateAndMeasure.toString(),
+    navigateAndMeasureSource,
     /fcpMs: fcp\?\.startTime \?\? shellPaint/,
   );
-  assert.doesNotMatch(navigateAndMeasure.toString(), /fullReady:/);
+  assert.doesNotMatch(navigateAndMeasureSource, /fullReady:/);
   assert.match(
     indexHtml,
     /<link rel="modulepreload" href="bootstrap\.mjs">/,

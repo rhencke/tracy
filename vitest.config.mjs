@@ -4,5 +4,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["tools/**/*.test.{js,mjs}"],
+    coverage: {
+      provider: "custom",
+      customProviderModule: "./tools/vitest-wat-coverage-provider.mjs",
+      reportsDirectory: "dist/js-cov",
+      reporter: ["text"],
+    },
   },
 });

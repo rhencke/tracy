@@ -116,8 +116,6 @@ GENERATED_INPUTS := \
 	check-generated \
 	clean \
 	coverage \
-	coverage-report \
-	coverage-strict \
 	dist \
 	dist-size-budget \
 	generated \
@@ -272,12 +270,7 @@ test: dist check-generated
 	node tools/cold-reload-index-check.js
 
 coverage: wasm-cov
-	node tools/coverage-run.js --check dist/wasm-cov
-
-coverage-strict: coverage
-
-coverage-report: wasm-cov
-	node tools/coverage-run.js dist/wasm-cov
+	npm run test:node -- --coverage
 
 clean:
 	rm -rf dist $(CLEAN_GENERATED_FILES)
