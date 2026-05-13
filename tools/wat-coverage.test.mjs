@@ -49,9 +49,12 @@ function coverageCaseName(manifest, manifestPath) {
   return `${moduleName} coverage with expected-failure probes: ${probes}`;
 }
 
-async function coverageCases() {
+async function coverageArtifacts() {
   if (!(await coverageRootExists())) {
-    return [];
+    return {
+      rootExists: false,
+      cases: [],
+    };
   }
 
   const [manifestPaths, testPaths] = await Promise.all([
@@ -59,13 +62,16 @@ async function coverageCases() {
     findCoverageTestWasms(COVERAGE_ROOT),
   ]);
 
-  return Promise.all(
-    manifestPaths.map(async (manifestPath) => ({
-      manifestPath,
-      name: coverageCaseName(await readJson(manifestPath), manifestPath),
-      testPaths,
-    })),
-  );
+  return {
+    rootExists: true,
+    cases: await Promise.all(
+      manifestPaths.map(async (manifestPath) => ({
+        manifestPath,
+        name: coverageCaseName(await readJson(manifestPath), manifestPath),
+        testPaths,
+      })),
+    ),
+  };
 }
 
 async function assertCoverageRootComplete() {
@@ -80,13 +86,19 @@ async function assertCoverageRootComplete() {
   }
 }
 
-const cases = await coverageCases();
+const artifacts = await coverageArtifacts();
 
-if (cases.length === 0) {
+if (!artifacts.rootExists) {
+  const testMissingCoverageRoot = CHECK_COVERAGE ? test : test.skip;
+
+  testMissingCoverageRoot("dist/wasm-cov coverage artifacts are built", () => {
+    throw new Error("dist/wasm-cov coverage artifacts are not built");
+  });
+} else if (artifacts.cases.length === 0) {
   test.skip("dist/wasm-cov coverage artifacts are not built", () => {});
 } else {
   describe.sequential("WAT coverage", () => {
-    for (const coverageCase of cases) {
+    for (const coverageCase of artifacts.cases) {
       test(coverageCase.name, async () => {
         await runCoverageManifest(coverageCase.manifestPath, coverageCase.testPaths);
       });
