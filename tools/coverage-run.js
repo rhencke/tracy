@@ -4,6 +4,14 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 
+const {
+  createCoverageContext,
+  loadHarness,
+  runExpectedFailure,
+  runTestFile,
+  writeCoverageReport,
+} = require("./watwat-core.js");
+
 const assertFailureProbes = [
   ["probe_assert_eq_i32_failure", "assert test failed"],
   ["probe_assert_eq_i64_failure", "assert test failed"],
@@ -103,15 +111,11 @@ async function accessOrThrow(file, message) {
   }
 }
 
-function runWatwat(args) {
-  execFileSync(process.execPath, [
-    path.join(__dirname, "watwat.js"),
-    "--harness",
-    path.join(__dirname, "tracy-watwat-harness.js"),
-    ...args,
-  ], {
-    stdio: "inherit",
-  });
+async function loadWatwatRuntime() {
+  return {
+    assertPath: path.resolve(__dirname, "../dist/wasm/std/assert.wasm"),
+    harness: await loadHarness(path.join(__dirname, "tracy-watwat-harness.js")),
+  };
 }
 
 async function runWithCoverage(manifestPath, args) {
@@ -125,7 +129,36 @@ async function runWithCoverage(manifestPath, args) {
     }
   }
 
-  runWatwat(["--cov", manifestPath, ...args]);
+  const manifest = await readJson(manifestPath);
+  const coverage = createCoverageContext(manifest);
+  const { assertPath, harness } = await loadWatwatRuntime();
+
+  if (args[0] === "--expect-failure") {
+    const [, exportName, expectedMessage, testPath] = args;
+    const result = await runExpectedFailure(
+      exportName,
+      expectedMessage,
+      testPath,
+      assertPath,
+      coverage,
+      harness,
+    );
+
+    if (!result.ok) {
+      throw new Error(`${result.name}: ${result.message}`);
+    }
+  } else {
+    for (const testPath of args) {
+      await fs.access(testPath);
+      const results = await runTestFile(testPath, assertPath, coverage, harness);
+      const failure = results.find((result) => !result.ok);
+      if (failure !== undefined) {
+        throw new Error(`${testPath} ${failure.name}: ${failure.message}`);
+      }
+    }
+  }
+
+  await writeCoverageReport(manifestPath, manifest, coverage);
   return readJson(coveragePath);
 }
 

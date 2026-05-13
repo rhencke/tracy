@@ -7,6 +7,12 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { instrumentWatFile } = require("./instrument.js");
+const {
+  createCoverageContext,
+  loadHarness,
+  runTestFile,
+  writeCoverageReport,
+} = require("./watwat-core.js");
 
 const rootDir = path.resolve(__dirname, "..");
 
@@ -58,7 +64,21 @@ async function assertWatwatCoverageOutput(tmpDir) {
     `${JSON.stringify({ module: "wat/watwat.test.wat", blocks: [] }, null, 2)}\n`,
   );
 
-  runNode(["tools/watwat.js", "--cov", manifestPath, "dist/wasm/watwat.test.wasm"]);
+  const manifest = JSON.parse(await fsp.readFile(manifestPath, "utf8"));
+  const coverage = createCoverageContext(manifest);
+  const harness = await loadHarness(path.join(rootDir, "tools/tracy-watwat-harness.js"));
+  const results = await runTestFile(
+    path.join(rootDir, "dist/wasm/watwat.test.wasm"),
+    path.join(rootDir, "dist/wasm/std/assert.wasm"),
+    coverage,
+    harness,
+  );
+  const failure = results.find((result) => !result.ok);
+  if (failure !== undefined) {
+    throw new Error(`${failure.name}: ${failure.message}`);
+  }
+
+  await writeCoverageReport(manifestPath, manifest, coverage);
 
   const reportPath = path.join(tmpDir, "watwat.test.coverage.json");
   const report = JSON.parse(await fsp.readFile(reportPath, "utf8"));
