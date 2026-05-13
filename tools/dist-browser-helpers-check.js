@@ -18,9 +18,77 @@ const {
 } = require("./dist-browser-helpers.js");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
+const BROWSER_FILE_SELECTION_HELPER = "tools/browser-file-selection-page-helper.js";
+const BROWSER_FILE_SELECTION_CHECK = "tools/interactive-ingest-browser-check.js";
+const PRODUCTION_APP_TEXT_FILES = Object.freeze([
+  "bootstrap.mjs",
+  "index.html",
+  "service-worker.js",
+  "worker.js",
+  "host/canvas.mjs",
+  "host/file-picker.mjs",
+  "host/index-reader-catalog.mjs",
+  "host/ingest-worker-runtime.mjs",
+  "host/memory.mjs",
+  "host/opfs-source.mjs",
+  "host/pointer.mjs",
+  "host/progressive-trace-renderer-loader.mjs",
+  "host/progressive-trace-renderer.mjs",
+  "host/runtime.mjs",
+  "host/shim.mjs",
+  "host/startup-spec.mjs",
+  "host/trace-renderer-spec.mjs",
+  "host/wasm-modules.mjs",
+]);
+const DIST_APP_TEXT_EXTENSIONS = new Set([".html", ".js", ".mjs"]);
+const FILE_SELECTION_INSTRUMENTATION_MARKERS = Object.freeze([
+  "installBrowserFileSelectionInstrumentation",
+  "browser-file-selection-page-helper",
+  "instrumentedFileSelectionChange",
+  "state.fileSelection = fileSelection",
+]);
+const LEGACY_FILE_SELECTION_SNAPSHOT_MARKERS = Object.freeze([
+  "fileSelectionAt",
+  "selectedFileName",
+  "selectedFileSize",
+]);
 
 function readRepoFile(relativePath) {
   return fs.readFileSync(path.join(ROOT_DIR, relativePath), "utf8");
+}
+
+function repoFileExists(relativePath) {
+  return fs.existsSync(path.join(ROOT_DIR, relativePath));
+}
+
+function walkFiles(dir) {
+  if (!fs.existsSync(dir)) {
+    return [];
+  }
+
+  const files = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const file = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...walkFiles(file));
+    } else if (entry.isFile()) {
+      files.push(file);
+    }
+  }
+  return files;
+}
+
+function assertFilesDoNotContain(files, markers, label) {
+  for (const file of files) {
+    const source = fs.readFileSync(file, "utf8");
+    for (const marker of markers) {
+      assert.equal(
+        source.includes(marker),
+        false,
+        `${label} must not contain ${marker}: ${path.relative(ROOT_DIR, file)}`,
+      );
+    }
+  }
 }
 
 function request(url, options = {}) {
@@ -444,7 +512,7 @@ function assertAppLoadUsesSharedHelpers() {
 }
 
 function assertInteractiveCheckUsesSharedHelpers() {
-  const source = readRepoFile("tools/interactive-ingest-browser-check.js");
+  const source = readRepoFile(BROWSER_FILE_SELECTION_CHECK);
   const browserEnvOffset = source.indexOf('"TRACY_INTERACTIVE_INGEST_BROWSER"');
   const puppeteerEnvOffset = source.indexOf('"PUPPETEER_EXECUTABLE_PATH"');
   const chromeEnvOffset = source.indexOf('"CHROME_PATH"');
@@ -463,6 +531,39 @@ function assertInteractiveCheckUsesSharedHelpers() {
   assert.doesNotMatch(source, /\bfunction contentType\b/);
   assert.doesNotMatch(source, /\bfunction resolveDistPath\b/);
   assert.doesNotMatch(source, /\bfunction cachedPlaywrightChromes\b/);
+}
+
+function assertBrowserFileSelectionInstrumentationBoundary() {
+  const helper = readRepoFile(BROWSER_FILE_SELECTION_HELPER);
+  const check = readRepoFile(BROWSER_FILE_SELECTION_CHECK);
+
+  assert.match(check, /require\("\.\/browser-file-selection-page-helper\.js"\)/);
+  assert.match(check, /installBrowserFileSelectionInstrumentation\(page\)/);
+  assert.doesNotMatch(check, /EventTarget\.prototype\.addEventListener/);
+  assert.doesNotMatch(check, /this instanceof HTMLInputElement/);
+  assert.doesNotMatch(
+    check,
+    new RegExp(LEGACY_FILE_SELECTION_SNAPSHOT_MARKERS.join("|")),
+  );
+  assert.match(helper, /EventTarget\.prototype\.addEventListener/);
+  assert.match(helper, /this instanceof HTMLInputElement/);
+  assert.match(helper, /fileSelectionSnapshot/);
+
+  assertFilesDoNotContain(
+    PRODUCTION_APP_TEXT_FILES
+      .filter(repoFileExists)
+      .map((relativePath) => path.join(ROOT_DIR, relativePath)),
+    FILE_SELECTION_INSTRUMENTATION_MARKERS,
+    "production app source",
+  );
+
+  assertFilesDoNotContain(
+    walkFiles(path.join(ROOT_DIR, "dist")).filter((file) =>
+      DIST_APP_TEXT_EXTENSIONS.has(path.extname(file)),
+    ),
+    FILE_SELECTION_INSTRUMENTATION_MARKERS,
+    "dist app file",
+  );
 }
 
 function assertDelayedWasmImportBoundary() {
@@ -506,6 +607,7 @@ async function main() {
   assertBrowserDiscovery();
   assertAppLoadUsesSharedHelpers();
   assertInteractiveCheckUsesSharedHelpers();
+  assertBrowserFileSelectionInstrumentationBoundary();
   assertDelayedWasmImportBoundary();
   await assertServerResponseModes();
   await assertServerFailureModes();
