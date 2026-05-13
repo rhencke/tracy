@@ -7,7 +7,7 @@ export default defineConfig({
     coverage: {
       provider: "custom",
       customProviderModule: "./tools/vitest-wat-coverage-provider.mjs",
-      reportsDirectory: "dist/wasm-cov",
+      reportsDirectory: "dist/js-cov",
       reporter: ["text"],
     },
   },

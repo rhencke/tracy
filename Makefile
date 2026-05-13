@@ -272,12 +272,12 @@ test: dist check-generated
 	node tools/cold-reload-index-check.js
 
 coverage: wasm-cov
-	npm run test:node -- --coverage tools/wat-coverage.test.mjs
+	npm run test:node -- --coverage
 
 coverage-strict: coverage
 
 coverage-report: wasm-cov
-	npm run test:node -- tools/wat-coverage.test.mjs
+	npm run test:node -- --coverage
 
 clean:
 	rm -rf dist $(CLEAN_GENERATED_FILES)
