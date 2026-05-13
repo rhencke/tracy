@@ -95,7 +95,11 @@ if (!artifacts.rootExists) {
     throw new Error("dist/wasm-cov coverage artifacts are not built");
   });
 } else if (artifacts.cases.length === 0) {
-  test.skip("dist/wasm-cov coverage artifacts are not built", () => {});
+  const testMissingCoverageManifests = CHECK_COVERAGE ? test : test.skip;
+
+  testMissingCoverageManifests("dist/wasm-cov coverage manifests are built", () => {
+    throw new Error("no coverage manifests found in dist/wasm-cov");
+  });
 } else {
   describe.sequential("WAT coverage", () => {
     for (const coverageCase of artifacts.cases) {
