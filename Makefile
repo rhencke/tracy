@@ -116,8 +116,6 @@ GENERATED_INPUTS := \
 	check-generated \
 	clean \
 	coverage \
-	coverage-report \
-	coverage-strict \
 	dist \
 	dist-size-budget \
 	generated \

@@ -35,7 +35,7 @@
     "test:cold-reload-index": "node tools/cold-reload-index-check.js",
     "test:coverage-selftest": "node tools/coverage-selftest.js",
     "coverage": "make coverage",
-    "coverage:strict": "make coverage-strict"
+    "coverage:strict": "make coverage"
   },
   "devDependencies": {
     "@lhci/cli": "0.15.1",
