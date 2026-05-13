@@ -204,6 +204,14 @@
         "description": "Lane height and incomplete-query stripe spacing are separate visual defaults and may move independently."
       },
       {
+        "numericValue": 100,
+        "paths": [
+          "appLoadBench.startupBoundary.selfTest.coreReadyStartMs",
+          "interactiveIngestCheck.FIRST_EVENTS_BUDGET_MS"
+        ],
+        "description": "The app-load self-test coreReady fixture time and synthetic interactive ingest first-events budget are separate timing contracts."
+      },
+      {
         "numericValue": 4096,
         "paths": [
           "appLoadBench.startupResourceTimingBufferSize",
@@ -274,6 +282,14 @@
     "FRAME_BUDGET_MS": {
       "value": 16.67,
       "description": "60 fps pan/zoom frame budget enforced by the interactive ingest verification gate."
+    },
+    "FIRST_EVENTS_BUDGET_MS": {
+      "value": 100,
+      "description": "Maximum time for the synthetic interactive ingest verification gate to create the renderer and draw the first visible trace events after file selection."
+    },
+    "FIRST_PRESENTED_BUDGET_MS": {
+      "value": 125,
+      "description": "Maximum time for the browser interactive ingest verification gate to present the first trace draw after file selection, including browser frame scheduling."
     },
     "FILE_CHOOSER_TIMEOUT_MS": {
       "value": 1000,
