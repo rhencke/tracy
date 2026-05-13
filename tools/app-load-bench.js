@@ -52,6 +52,7 @@ const CORE_TRANSFER_RESOURCE_TYPES = new Set([
   "TextTrack",
   "XHR",
 ]);
+const PROTECTED_STARTUP_BOUNDARY_RESOURCE_INITIATOR_TYPES = new Set(["link", "script"]);
 const resourceTimingBufferPages = new WeakSet();
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
@@ -782,6 +783,13 @@ function protectedStartupBoundaryResourceViolations(
       continue;
     }
 
+    if (
+      typeof resource.initiatorType === "string" &&
+      !PROTECTED_STARTUP_BOUNDARY_RESOURCE_INITIATOR_TYPES.has(resource.initiatorType)
+    ) {
+      continue;
+    }
+
     let pathname;
     try {
       pathname = new URL(resource.name).pathname.replace(/^\//, "");
@@ -877,6 +885,7 @@ async function performanceMarkWallMs(cdp, page, markName) {
 async function resourceTimings(cdp, page) {
   const result = await cdp.send("Runtime.evaluate", {
     expression: `performance.getEntriesByType("resource").map((entry) => ({
+      initiatorType: entry.initiatorType,
       name: entry.name,
       startTime: entry.startTime,
     }))`,
@@ -1426,13 +1435,21 @@ async function runSelfTest() {
   assert.deepEqual(
     protectedStartupBoundaryResourceViolations(
       [
-        { name: "host/wasm-modules.mjs", startTime: 90 },
-        { name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 101 },
+        { initiatorType: "fetch", name: "host/wasm-modules.mjs", startTime: 90 },
+        { initiatorType: "link", name: "host/wasm-modules.mjs", startTime: 90 },
+        { initiatorType: "script", name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 101 },
       ],
       coreReadyStartMs,
       ["host/wasm-modules.mjs"],
     ),
     ["host/wasm-modules.mjs"],
+  );
+  assert.doesNotThrow(() =>
+    assertNoProtectedStartupBoundaryResources(
+      [{ initiatorType: "fetch", name: "host/wasm-modules.mjs", startTime: 90 }],
+      coreReadyStartMs,
+      ["host/wasm-modules.mjs"],
+    ),
   );
   assert.doesNotThrow(() =>
     assertNoProtectedStartupBoundaryResources(
