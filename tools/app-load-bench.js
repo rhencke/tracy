@@ -668,6 +668,33 @@ async function waitForNetworkStartQuiet(lastRequestStartedAt, quietMs) {
   });
 }
 
+function networkRequestMonotonicWallTimeOffsetMs(event) {
+  if (!Number.isFinite(event.wallTime) || !Number.isFinite(event.timestamp)) {
+    return null;
+  }
+
+  return (event.wallTime * 1000) - (event.timestamp * 1000);
+}
+
+function networkRequestStartWallMs(
+  event,
+  observedWallMs,
+  monotonicWallTimeOffsetMs,
+) {
+  if (Number.isFinite(event.wallTime)) {
+    return event.wallTime * 1000;
+  }
+
+  if (
+    Number.isFinite(event.timestamp) &&
+    Number.isFinite(monotonicWallTimeOffsetMs)
+  ) {
+    return (event.timestamp * 1000) + monotonicWallTimeOffsetMs;
+  }
+
+  return observedWallMs;
+}
+
 function requestIdsStartedAtOrBefore(requestStartWallMs, wallTimeMs, fallbackRequestIds) {
   if (!Number.isFinite(wallTimeMs)) {
     return new Set(fallbackRequestIds);
@@ -801,21 +828,33 @@ async function navigateAndMeasure(cdp, page, url, options = {}) {
   const loadingBytes = new Map();
   const loadingFailures = new Map();
   let lastRequestStartedAt = Date.now();
+  let monotonicWallTimeOffsetMs = null;
   let coreRequestIds = null;
 
   const offRequest = cdp.on("Network.requestWillBeSent", (event, sessionId) => {
     if (sessionId !== page.sessionId) {
       return;
     }
+    const observedWallMs = Date.now();
+    monotonicWallTimeOffsetMs =
+      networkRequestMonotonicWallTimeOffsetMs(event) ??
+      monotonicWallTimeOffsetMs;
     requestIds.add(event.requestId);
-    lastRequestStartedAt = Date.now();
+    lastRequestStartedAt = observedWallMs;
     if (event.frameId !== undefined) {
       requestFrameIds.set(event.requestId, event.frameId);
     }
     requestTypes.set(event.requestId, event.type);
     requestUrls.set(event.requestId, event.request.url);
-    if (Number.isFinite(event.wallTime) && !requestStartWallMs.has(event.requestId)) {
-      requestStartWallMs.set(event.requestId, event.wallTime * 1000);
+    if (!requestStartWallMs.has(event.requestId)) {
+      requestStartWallMs.set(
+        event.requestId,
+        networkRequestStartWallMs(
+          event,
+          observedWallMs,
+          monotonicWallTimeOffsetMs,
+        ),
+      );
     }
   });
   const offCache = cdp.on("Network.requestServedFromCache", (event, sessionId) => {
@@ -1160,6 +1199,33 @@ async function runSelfTest() {
       loadingTransferBytes,
     ),
     46,
+  );
+  assert.equal(
+    networkRequestMonotonicWallTimeOffsetMs({
+      timestamp: 10,
+      wallTime: 100,
+    }),
+    90000,
+  );
+  assert.equal(
+    networkRequestMonotonicWallTimeOffsetMs({ timestamp: 10 }),
+    null,
+  );
+  assert.equal(
+    networkRequestStartWallMs(
+      { timestamp: 10, wallTime: 100 },
+      123000,
+      90000,
+    ),
+    100000,
+  );
+  assert.equal(
+    networkRequestStartWallMs({ timestamp: 11 }, 123000, 90000),
+    101000,
+  );
+  assert.equal(
+    networkRequestStartWallMs({ timestamp: 11 }, 123000, null),
+    123000,
   );
   assert.deepEqual(
     requestIdsStartedAtOrBefore(
@@ -1635,6 +1701,14 @@ async function runSelfTest() {
   assert.match(
     navigateAndMeasure.toString(),
     /performanceMarkWallMs\([\s\S]+PERFORMANCE_MARKS\.coreReady/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /networkRequestMonotonicWallTimeOffsetMs\(event\)/,
+  );
+  assert.match(
+    navigateAndMeasure.toString(),
+    /networkRequestStartWallMs\([\s\S]+event,[\s\S]+observedWallMs,[\s\S]+monotonicWallTimeOffsetMs/,
   );
   assert.match(
     navigateAndMeasure.toString(),
