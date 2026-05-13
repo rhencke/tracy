@@ -61,7 +61,12 @@ const CORE_TRANSFER_RESOURCE_TYPES = new Set([
   "TextTrack",
   "XHR",
 ]);
-const PROTECTED_STARTUP_BOUNDARY_RESOURCE_INITIATOR_TYPES = new Set(["link", "script"]);
+const PROTECTED_STARTUP_BOUNDARY_RESOURCE_INITIATOR_TYPES = new Set([
+  "fetch",
+  "link",
+  "script",
+  "xmlhttprequest",
+]);
 const resourceTimingBufferPages = new WeakSet();
 const FAST_3G = Object.freeze({
   downloadThroughput: RUNTIME_SPEC.appLoadBench.fast3g.downloadThroughputBytesPerSecond,
@@ -784,11 +789,10 @@ function protectedStartupBoundaryResourceViolations(
   protectedPaths,
 ) {
   const paths = new Set(protectedPaths);
-  const cutoffMs = markStartMs + CORE_READY_REQUEST_EPSILON_MS;
   const violations = [];
 
   for (const resource of resourceTimings) {
-    if (!Number.isFinite(resource.startTime) || resource.startTime > cutoffMs) {
+    if (!Number.isFinite(resource.startTime) || resource.startTime > markStartMs) {
       continue;
     }
 
@@ -1468,6 +1472,11 @@ async function runSelfTest() {
           startTime: beforeCoreReadyStartMs,
         },
         {
+          initiatorType: "xmlhttprequest",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+        {
           initiatorType: "link",
           name: "host/wasm-modules.mjs",
           startTime: beforeCoreReadyStartMs,
@@ -1481,15 +1490,36 @@ async function runSelfTest() {
       coreReadyStartMs,
       ["host/wasm-modules.mjs"],
     ),
-    ["host/wasm-modules.mjs"],
+    [
+      "host/wasm-modules.mjs",
+      "host/wasm-modules.mjs",
+      "host/wasm-modules.mjs",
+    ],
   );
+  for (const initiatorType of ["fetch", "xmlhttprequest"]) {
+    assert.throws(
+      () =>
+        assertNoProtectedStartupBoundaryResources(
+          [
+            {
+              initiatorType,
+              name: "host/wasm-modules.mjs",
+              startTime: beforeCoreReadyStartMs,
+            },
+          ],
+          coreReadyStartMs,
+          ["host/wasm-modules.mjs"],
+        ),
+      /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
+    );
+  }
   assert.doesNotThrow(() =>
     assertNoProtectedStartupBoundaryResources(
       [
         {
-          initiatorType: "fetch",
-          name: "host/wasm-modules.mjs",
-          startTime: beforeCoreReadyStartMs,
+          initiatorType: "script",
+          name: "http://127.0.0.1/host/wasm-modules.mjs",
+          startTime: coreReadyStartMs + (CORE_READY_REQUEST_EPSILON_MS / 2),
         },
       ],
       coreReadyStartMs,
