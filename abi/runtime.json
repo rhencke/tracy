@@ -30,6 +30,30 @@
   "bootstrap": {},
   "appLoadBench": {
     "startupResourceTimingBufferSize": 4096,
+    "startupBoundary": {
+      "coreReadyRequestEpsilonMs": 0.5,
+      "selfTest": {
+        "coreReadyStartMs": 100,
+        "beforeCoreReadyStartMs": 90,
+        "runtimeBeforeCoreReadyStartMs": 95,
+        "scriptAfterCoreReadyStartMs": 101,
+        "resourceAfterCoreReadyStartMs": 102,
+        "resourceTimingsBeforeCoreReady": [
+          {
+            "name": "http://127.0.0.1/bootstrap.mjs",
+            "startTime": 5
+          },
+          {
+            "name": "http://127.0.0.1/host/wasm-modules.mjs",
+            "startTime": 90
+          },
+          {
+            "name": "http://127.0.0.1/host/runtime.mjs",
+            "startTime": 95
+          }
+        ]
+      }
+    },
     "fast3g": {
       "downloadThroughputBytesPerSecond": 209715,
       "latencyMs": 150,

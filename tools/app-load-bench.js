@@ -24,9 +24,18 @@ const READINESS_DIAGNOSTIC_MARK_NAMES = Object.freeze(
   Object.values(PERFORMANCE_MARKS),
 );
 const DEFAULT_TIMEOUT_MS = 15000;
-const CORE_READY_REQUEST_EPSILON_MS = 0.5;
+const CORE_READY_REQUEST_EPSILON_MS =
+  RUNTIME_SPEC.appLoadBench.startupBoundary.coreReadyRequestEpsilonMs;
 const STARTUP_RESOURCE_TIMING_BUFFER_SIZE =
   RUNTIME_SPEC.appLoadBench.startupResourceTimingBufferSize;
+const STARTUP_BOUNDARY_SELF_TEST = Object.freeze({
+  ...RUNTIME_SPEC.appLoadBench.startupBoundary.selfTest,
+  resourceTimingsBeforeCoreReady: Object.freeze(
+    RUNTIME_SPEC.appLoadBench.startupBoundary.selfTest.resourceTimingsBeforeCoreReady.map(
+      (resource) => Object.freeze({ ...resource }),
+    ),
+  ),
+});
 // Warm samples reuse a page, so let post-ready frame callbacks start their
 // deferred preload requests and then require a short quiet window before reuse.
 const POST_READY_SETTLE_FRAME_COUNT = 2;
@@ -1418,12 +1427,30 @@ async function runSelfTest() {
       ),
     /protected startup boundary fetched broad modules before coreReady: host\/wasm-modules\.mjs/,
   );
-  const coreReadyStartMs = 100;
-  const resourceTimingsBeforeCoreReady = [
-    { name: "http://127.0.0.1/bootstrap.mjs", startTime: 5 },
-    { name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 90 },
-    { name: "http://127.0.0.1/host/runtime.mjs", startTime: 95 },
-  ];
+  const {
+    beforeCoreReadyStartMs,
+    coreReadyStartMs,
+    resourceAfterCoreReadyStartMs,
+    resourceTimingsBeforeCoreReady,
+    runtimeBeforeCoreReadyStartMs,
+    scriptAfterCoreReadyStartMs,
+  } = STARTUP_BOUNDARY_SELF_TEST;
+  assert.deepEqual(
+    resourceTimingsBeforeCoreReady,
+    RUNTIME_SPEC.appLoadBench.startupBoundary.selfTest.resourceTimingsBeforeCoreReady,
+  );
+  assert.equal(
+    resourceTimingsBeforeCoreReady.find((resource) =>
+      resource.name.endsWith("/host/wasm-modules.mjs"),
+    )?.startTime,
+    beforeCoreReadyStartMs,
+  );
+  assert.equal(
+    resourceTimingsBeforeCoreReady.find((resource) =>
+      resource.name.endsWith("/host/runtime.mjs"),
+    )?.startTime,
+    runtimeBeforeCoreReadyStartMs,
+  );
   assert.deepEqual(
     protectedStartupBoundaryResourceViolations(
       resourceTimingsBeforeCoreReady,
@@ -1435,9 +1462,21 @@ async function runSelfTest() {
   assert.deepEqual(
     protectedStartupBoundaryResourceViolations(
       [
-        { initiatorType: "fetch", name: "host/wasm-modules.mjs", startTime: 90 },
-        { initiatorType: "link", name: "host/wasm-modules.mjs", startTime: 90 },
-        { initiatorType: "script", name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 101 },
+        {
+          initiatorType: "fetch",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+        {
+          initiatorType: "link",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+        {
+          initiatorType: "script",
+          name: "http://127.0.0.1/host/wasm-modules.mjs",
+          startTime: scriptAfterCoreReadyStartMs,
+        },
       ],
       coreReadyStartMs,
       ["host/wasm-modules.mjs"],
@@ -1446,14 +1485,25 @@ async function runSelfTest() {
   );
   assert.doesNotThrow(() =>
     assertNoProtectedStartupBoundaryResources(
-      [{ initiatorType: "fetch", name: "host/wasm-modules.mjs", startTime: 90 }],
+      [
+        {
+          initiatorType: "fetch",
+          name: "host/wasm-modules.mjs",
+          startTime: beforeCoreReadyStartMs,
+        },
+      ],
       coreReadyStartMs,
       ["host/wasm-modules.mjs"],
     ),
   );
   assert.doesNotThrow(() =>
     assertNoProtectedStartupBoundaryResources(
-      [{ name: "http://127.0.0.1/host/wasm-modules.mjs", startTime: 102 }],
+      [
+        {
+          name: "http://127.0.0.1/host/wasm-modules.mjs",
+          startTime: resourceAfterCoreReadyStartMs,
+        },
+      ],
       coreReadyStartMs,
       ["host/wasm-modules.mjs"],
     ),
@@ -1834,6 +1884,9 @@ async function runSelfTest() {
   assert.doesNotMatch(bootstrap, /progressive-trace-renderer-loader/);
   assert.doesNotMatch(bootstrap, /startup-palette\.mjs/);
   assert.match(startupSpec, /APP_SHELL_COLORS/);
+  assert.match(startupSpec, /APP_LOAD_BENCH_STARTUP/);
+  assert.match(startupSpec, /startupBoundary/);
+  assert.match(startupSpec, /coreReadyRequestEpsilonMs/);
   assert.doesNotMatch(startupSpec, /TRACE_RENDERER_COLORS/);
   assert.match(traceRendererSpec, /TRACE_RENDERER_COLORS/);
   assert.doesNotMatch(traceRendererSpec, /APP_SHELL_COLORS/);

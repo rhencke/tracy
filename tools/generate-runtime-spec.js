@@ -332,6 +332,10 @@ function renderObjectConstant(groupName, value) {
 
 function renderStartupSpecModule() {
   const initColors = colorEntriesByScope("default", "init");
+  const appLoadBenchStartup = {
+    startupResourceTimingBufferSize: spec.appLoadBench.startupResourceTimingBufferSize,
+    startupBoundary: spec.appLoadBench.startupBoundary,
+  };
   const bootstrapTiming =
     Object.keys(spec.bootstrap).length === 0
       ? []
@@ -346,6 +350,8 @@ function renderStartupSpecModule() {
     renderStringConstants("RUNTIME_URLS", spec.urls),
     "",
     renderStringConstants("APP_SHELL_COLORS", initColors),
+    "",
+    renderObjectConstant("APP_LOAD_BENCH_STARTUP", appLoadBenchStartup),
     "",
     renderNumberConstants("BOOTSTRAP_WASM_MEMORY", spec.wasmMemory),
     ...bootstrapTiming,

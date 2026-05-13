@@ -13,6 +13,34 @@ export const APP_SHELL_COLORS = Object.freeze({
   ERROR_TEXT: "#1f1b16",
 });
 
+export const APP_LOAD_BENCH_STARTUP = Object.freeze({
+  "startupResourceTimingBufferSize": 4096,
+  "startupBoundary": {
+    "coreReadyRequestEpsilonMs": 0.5,
+    "selfTest": {
+      "coreReadyStartMs": 100,
+      "beforeCoreReadyStartMs": 90,
+      "runtimeBeforeCoreReadyStartMs": 95,
+      "scriptAfterCoreReadyStartMs": 101,
+      "resourceAfterCoreReadyStartMs": 102,
+      "resourceTimingsBeforeCoreReady": [
+        {
+          "name": "http://127.0.0.1/bootstrap.mjs",
+          "startTime": 5
+        },
+        {
+          "name": "http://127.0.0.1/host/wasm-modules.mjs",
+          "startTime": 90
+        },
+        {
+          "name": "http://127.0.0.1/host/runtime.mjs",
+          "startTime": 95
+        }
+      ]
+    }
+  }
+});
+
 export const BOOTSTRAP_WASM_MEMORY = Object.freeze({
   BOOTSTRAP_MEMORY_INITIAL_PAGES: 256,
   BOOTSTRAP_MEMORY_MAXIMUM_PAGES: 32768,
