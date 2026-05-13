@@ -272,7 +272,7 @@ test: dist check-generated
 	node tools/cold-reload-index-check.js
 
 coverage: wasm-cov
-	WAT_COVERAGE_CHECK=1 npm run test:node -- tools/wat-coverage.test.mjs
+	npm run test:node -- --coverage tools/wat-coverage.test.mjs
 
 coverage-strict: coverage
 
