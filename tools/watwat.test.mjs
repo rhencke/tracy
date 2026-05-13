@@ -23,6 +23,10 @@ const EXPECTED_FAILURE_PROBE_FILES = Object.freeze([
   "dist/wasm/std/assert.test.wasm",
 ]);
 
+function normalizedWatTestPath(file) {
+  return file.replaceAll(path.sep, "/");
+}
+
 async function watTestFilesIn(dir) {
   let entries;
 
@@ -38,7 +42,7 @@ async function watTestFilesIn(dir) {
 
   return entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".test.wasm"))
-    .map((entry) => path.join(dir, entry.name));
+    .map((entry) => normalizedWatTestPath(path.join(dir, entry.name)));
 }
 
 const watTestFiles = (
@@ -46,7 +50,7 @@ const watTestFiles = (
 ).flat().sort();
 const watTestFileSet = new Set(watTestFiles);
 const missingExpectedFailureProbeFiles = EXPECTED_FAILURE_PROBE_FILES.filter(
-  (file) => !watTestFileSet.has(file),
+  (file) => !watTestFileSet.has(normalizedWatTestPath(file)),
 );
 
 if (missingExpectedFailureProbeFiles.length > 0) {
