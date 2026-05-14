@@ -380,7 +380,7 @@ async function assertSharedWasmBoundaryHelpersStayOnStartupPath(bootstrapSource,
 async function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
   const source = await readRepoFile("tools/runtime-worker-orchestration-check.js");
 
-  assert.match(
+  requirePattern(
     source,
     /host\/index-format-spec\.mjs/,
     "runtime worker orchestration check should import generated index format values",
@@ -392,7 +392,7 @@ async function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
     [/const\s+INDEX_PAGE_HEADER_[A-Z_]+_OFFSET\s*=/, "index page header offsets"],
     [/\b0x00010000\b/, "OPFS page size literal"],
   ]) {
-    assert.doesNotMatch(
+    forbidPattern(
       source,
       pattern,
       `runtime worker orchestration check should read ${message} from generated index format values`,
@@ -408,7 +408,7 @@ async function assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec() {
     [/INDEX_PAGE_HEADER_OFFSETS\.RECORD_COUNT/, "record count offset"],
     [/INDEX_PAGE_HEADER_OFFSETS\.DECODE_HINTS/, "decode hints offset"],
   ]) {
-    assert.match(
+    requirePattern(
       source,
       pattern,
       `runtime worker orchestration check should consume generated ${message}`,
