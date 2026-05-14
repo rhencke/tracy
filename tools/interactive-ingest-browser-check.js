@@ -23,6 +23,12 @@ const {
   installBrowserFileSelectionInstrumentation,
 } = require("./browser-file-selection-page-helper.js");
 const {
+  DRAW_TIMING_SAMPLE_LIMIT,
+  drawTimingSnapshot,
+  emptyDrawTimingSnapshot,
+  installBrowserDrawTimingInstrumentation,
+} = require("./browser-draw-timing-page-helper.js");
+const {
   WORKER_MESSAGE_DIAGNOSTIC_LIMIT,
   emptyWorkerMessageSnapshot,
   installBrowserWorkerMessageInstrumentation,
@@ -102,132 +108,108 @@ async function writeTraceFile(file) {
 async function installIngestInstrumentation(page) {
   await installBrowserFileSelectionInstrumentation(page);
   await installBrowserWorkerMessageInstrumentation(page);
+  await installBrowserDrawTimingInstrumentation(page);
   await page.evaluateOnNewDocument((stateKey) => {
     const state = globalThis[stateKey] ?? {};
 
     Object.assign(state, {
-      firstDrawAt: null,
-      firstPresentedAt: null,
-      fillRectCount: 0,
-      fillRectSamples: [],
-      frameDurations: [],
-      maxFrameDuration: 0,
       promisingType: typeof WebAssembly.promising,
       suspendingType: typeof WebAssembly.Suspending,
     });
     globalThis[stateKey] = state;
-    const fileSelectionStarted = () =>
-      state.fileSelection?.selectedAt !== null &&
-      state.fileSelection?.selectedAt !== undefined;
-
-    const requestAnimationFrame = globalThis.requestAnimationFrame.bind(globalThis);
-    globalThis.requestAnimationFrame = (callback) =>
-      requestAnimationFrame((timestamp) => {
-        const startedAt = performance.now();
-        try {
-          return callback(timestamp);
-        } finally {
-          if (fileSelectionStarted()) {
-            const duration = performance.now() - startedAt;
-            state.frameDurations.push(duration);
-            state.maxFrameDuration = Math.max(state.maxFrameDuration, duration);
-          }
-        }
-      });
-
-    const fillRect = CanvasRenderingContext2D.prototype.fillRect;
-    CanvasRenderingContext2D.prototype.fillRect = function instrumentedFillRect(
-      x,
-      y,
-      width,
-      height,
-    ) {
-      const result = fillRect.apply(this, arguments);
-      if (this.canvas?.id === "tracy" && fileSelectionStarted()) {
-        state.fillRectCount += 1;
-        if (state.fillRectSamples.length < 16) {
-          state.fillRectSamples.push({ height, width, x, y });
-        }
-      }
-      if (
-        this.canvas?.id === "tracy" &&
-        fileSelectionStarted() &&
-        state.firstDrawAt === null &&
-        y > 0 &&
-        height > 0 &&
-        width > 0
-      ) {
-        state.firstDrawAt = performance.now();
-        requestAnimationFrame(() => {
-          state.firstPresentedAt ??= performance.now();
-        });
-      }
-      return result;
-    };
-
   }, BROWSER_INGEST_STATE_KEY);
 }
 
 async function browserState(page, { diagnoseReader = false } = {}) {
-  const state = await page.evaluate(async (
-    shouldDiagnoseReader,
-    stateKey,
-    workerMessageDiagnosticLimit,
-  ) => {
-    const state = globalThis[stateKey] ?? {};
-    const workerMessages = state.workerMessages ?? {};
-    const workerMessageSnapshot = {
-      messageCount: workerMessages.messages?.length ?? 0,
-      messagesHead: workerMessages.messages?.slice(0, workerMessageDiagnosticLimit) ?? [],
-      messagesTail: workerMessages.messages?.slice(-workerMessageDiagnosticLimit) ?? [],
-      postCount: workerMessages.posts?.length ?? 0,
-      postsHead: workerMessages.posts?.slice(0, workerMessageDiagnosticLimit) ?? [],
-      postsTail: workerMessages.posts?.slice(-workerMessageDiagnosticLimit) ?? [],
-    };
-    let readerDiagnostic = null;
+  const state = await page.evaluate(
+    async (
+      shouldDiagnoseReader,
+      drawTimingSampleLimit,
+      stateKey,
+      workerMessageDiagnosticLimit,
+    ) => {
+      const state = globalThis[stateKey] ?? {};
+      const drawTiming = state.drawTiming ?? {};
+      const workerMessages = state.workerMessages ?? {};
+      const drawTimingSnapshot = {
+        fillRectCount: drawTiming.fillRectCount ?? 0,
+        fillRectSamples:
+          drawTiming.fillRectSamples?.slice(0, drawTimingSampleLimit) ?? [],
+        firstDrawAt: drawTiming.firstDrawAt ?? null,
+        firstPresentedAt: drawTiming.firstPresentedAt ?? null,
+        frameDurationsSample:
+          drawTiming.frameDurations?.slice(0, drawTimingSampleLimit) ?? [],
+        maxFrameDuration: drawTiming.maxFrameDuration ?? 0,
+      };
+      const workerMessageSnapshot = {
+        messageCount: workerMessages.messages?.length ?? 0,
+        messagesHead:
+          workerMessages.messages?.slice(0, workerMessageDiagnosticLimit) ?? [],
+        messagesTail:
+          workerMessages.messages?.slice(-workerMessageDiagnosticLimit) ?? [],
+        postCount: workerMessages.posts?.length ?? 0,
+        postsHead:
+          workerMessages.posts?.slice(0, workerMessageDiagnosticLimit) ?? [],
+        postsTail:
+          workerMessages.posts?.slice(-workerMessageDiagnosticLimit) ?? [],
+      };
+      let readerDiagnostic = null;
 
-    if (shouldDiagnoseReader) {
-      const startPost = workerMessages.posts?.find((message) => message.indexName !== null);
-      if (startPost?.indexName !== undefined && startPost.indexName !== null) {
-        try {
-          const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
-          const { makeMainThreadHost } = await import("./host/shim.mjs");
-          const { createMainThreadIndexReaderController } =
-            await import("./host/runtime.mjs");
-          const host = makeMainThreadHost(memory);
-          const reader = createMainThreadIndexReaderController(memory, host);
+      if (shouldDiagnoseReader) {
+        const startPost = workerMessages.posts?.find(
+          (message) => message.indexName !== null,
+        );
+        if (startPost?.indexName !== undefined && startPost.indexName !== null) {
+          try {
+            const memory = new WebAssembly.Memory({
+              initial: 8272,
+              maximum: 32768,
+            });
+            const { makeMainThreadHost } = await import("./host/shim.mjs");
+            const { createMainThreadIndexReaderController } =
+              await import("./host/runtime.mjs");
+            const host = makeMainThreadHost(memory);
+            const reader = createMainThreadIndexReaderController(memory, host);
 
-          await reader.open(startPost.indexName);
-          readerDiagnostic = {
-            coveredRange: reader.coveredRange(),
-            queryRange: await reader.queryRange(0, 0, 1000, 12288),
-            status: reader.status(),
-            trackCount: reader.trackCount(),
-          };
-        } catch (error) {
-          readerDiagnostic = {
-            error: error instanceof Error ? error.message : String(error),
-          };
+            await reader.open(startPost.indexName);
+            readerDiagnostic = {
+              coveredRange: reader.coveredRange(),
+              queryRange: await reader.queryRange(0, 0, 1000, 12288),
+              status: reader.status(),
+              trackCount: reader.trackCount(),
+            };
+          } catch (error) {
+            readerDiagnostic = {
+              error: error instanceof Error ? error.message : String(error),
+            };
+          }
         }
       }
-    }
 
-    return {
-      appError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
-      frameDurationsSample: state.frameDurations?.slice(0, 16),
-      performanceMarks: performance.getEntriesByType("mark").map((entry) => entry.name),
-      workerMessages: workerMessageSnapshot,
-      readerDiagnostic,
-      ...Object.fromEntries(
-        Object.entries(state).filter(
-          ([key]) => key !== "frameDurations" && key !== "workerMessages",
+      return {
+        appError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
+        drawTiming: drawTimingSnapshot,
+        performanceMarks: performance
+          .getEntriesByType("mark")
+          .map((entry) => entry.name),
+        workerMessages: workerMessageSnapshot,
+        readerDiagnostic,
+        ...Object.fromEntries(
+          Object.entries(state).filter(
+            ([key]) => key !== "drawTiming" && key !== "workerMessages",
+          ),
         ),
-      ),
-    };
-  }, diagnoseReader, BROWSER_INGEST_STATE_KEY, WORKER_MESSAGE_DIAGNOSTIC_LIMIT);
+      };
+    },
+    diagnoseReader,
+    DRAW_TIMING_SAMPLE_LIMIT,
+    BROWSER_INGEST_STATE_KEY,
+    WORKER_MESSAGE_DIAGNOSTIC_LIMIT,
+  );
 
   return {
     ...state,
+    drawTiming: drawTimingSnapshot(state.drawTiming),
     fileSelection: fileSelectionSnapshot(state.fileSelection),
     workerMessages: workerMessageSnapshot(state.workerMessages),
   };
@@ -311,26 +293,26 @@ async function checkBrowserInteractiveIngest() {
       page,
       () =>
         globalThis.__TRACY_APP_LOAD_ERROR__ !== undefined ||
-        globalThis.__TRACY_BROWSER_INGEST__?.firstPresentedAt !== null,
+        globalThis.__TRACY_BROWSER_INGEST__?.drawTiming?.firstPresentedAt !== null,
       "browser did not present first ingest draw",
       10_000,
     );
 
     const result = await browserState(page);
-    const { fileSelection } = result;
+    const { drawTiming, fileSelection } = result;
     assert.equal(result.appError, "");
     assert.equal(fileSelection.selectedFile.name, "throttled-100mb.json");
     assert.equal(fileSelection.selectedFile.size, TRACE_SIZE_BYTES);
     assert.notEqual(fileSelection.selectedAt, null);
-    assert.notEqual(result.firstDrawAt, null);
-    assert.notEqual(result.firstPresentedAt, null);
+    assert.notEqual(drawTiming.firstDrawAt, null);
+    assert.notEqual(drawTiming.firstPresentedAt, null);
     assert.ok(
-      result.firstPresentedAt - fileSelection.selectedAt <= FIRST_PRESENTED_BUDGET,
-      `first presented ingest draw took ${result.firstPresentedAt - fileSelection.selectedAt}ms`,
+      drawTiming.firstPresentedAt - fileSelection.selectedAt <= FIRST_PRESENTED_BUDGET,
+      `first presented ingest draw took ${drawTiming.firstPresentedAt - fileSelection.selectedAt}ms`,
     );
     assert.ok(
-      result.maxFrameDuration <= FRAME_BUDGET,
-      `slowest ingest frame took ${result.maxFrameDuration}ms`,
+      drawTiming.maxFrameDuration <= FRAME_BUDGET,
+      `slowest ingest frame took ${drawTiming.maxFrameDuration}ms`,
     );
   } finally {
     await browser.close();
@@ -341,6 +323,31 @@ async function checkBrowserInteractiveIngest() {
 
 async function runSelfTest() {
   assert.deepEqual(fileSelectionSnapshot(), emptyFileSelectionSnapshot());
+  assert.deepEqual(drawTimingSnapshot(), emptyDrawTimingSnapshot());
+  assert.deepEqual(
+    drawTimingSnapshot({
+      fillRectCount: 2,
+      fillRectSamples: [
+        { height: 10, width: 20, x: 1, y: 2 },
+        { height: 12, width: 22, x: 3, y: 4 },
+      ],
+      firstDrawAt: 15.5,
+      firstPresentedAt: 16.75,
+      frameDurations: [1.25, 2.5],
+      maxFrameDuration: 2.5,
+    }),
+    {
+      fillRectCount: 2,
+      fillRectSamples: [
+        { height: 10, width: 20, x: 1, y: 2 },
+        { height: 12, width: 22, x: 3, y: 4 },
+      ],
+      firstDrawAt: 15.5,
+      firstPresentedAt: 16.75,
+      frameDurationsSample: [1.25, 2.5],
+      maxFrameDuration: 2.5,
+    },
+  );
   assert.deepEqual(
     fileSelectionSnapshot({
       selectedAt: 12.5,
@@ -405,6 +412,17 @@ async function runSelfTest() {
   const previousIngestState = globalThis[BROWSER_INGEST_STATE_KEY];
   try {
     globalThis[BROWSER_INGEST_STATE_KEY] = {
+      drawTiming: {
+        fillRectCount: 20,
+        fillRectSamples: Array.from({ length: 20 }, (_value, index) => ({
+          height: index + 1,
+          width: index + 2,
+          x: index,
+          y: index,
+        })),
+        frameDurations: Array.from({ length: 20 }, (_value, index) => index + 0.5),
+        maxFrameDuration: 19.5,
+      },
       workerMessages: {
         messages: Array.from({ length: 12 }, (_value, index) => ({
           fileOffset: index,
@@ -421,6 +439,10 @@ async function runSelfTest() {
         return callback(...args);
       },
     });
+    assert.equal(boundedState.drawTiming.fillRectCount, 20);
+    assert.equal(boundedState.drawTiming.fillRectSamples.length, 16);
+    assert.equal(boundedState.drawTiming.frameDurationsSample.length, 16);
+    assert.equal(boundedState.drawTiming.frameDurations, undefined);
     assert.equal(boundedState.workerMessages.messageCount, 12);
     assert.equal(boundedState.workerMessages.messagesHead.length, 8);
     assert.equal(boundedState.workerMessages.messagesTail.length, 8);
@@ -468,7 +490,7 @@ async function runSelfTest() {
   try {
     await waitForPageCondition(
       timedOutPage,
-      () => globalThis.__TRACY_BROWSER_INGEST__?.firstPresentedAt !== null,
+      () => globalThis.__TRACY_BROWSER_INGEST__?.drawTiming?.firstPresentedAt !== null,
       "browser did not present first ingest draw",
       0,
     );
