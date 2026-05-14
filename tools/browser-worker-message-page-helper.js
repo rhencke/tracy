@@ -11,7 +11,9 @@ function emptyWorkerMessageSnapshot() {
     messageCount: 0,
     messagesHead: [],
     messagesTail: [],
-    posts: [],
+    postCount: 0,
+    postsHead: [],
+    postsTail: [],
   };
 }
 
@@ -21,10 +23,14 @@ function workerMessageSnapshot(value = {}) {
   const posts = Array.isArray(snapshot.posts) ? snapshot.posts : [];
 
   return {
-    messageCount: messages.length,
-    messagesHead: messages.slice(0, WORKER_MESSAGE_DIAGNOSTIC_LIMIT),
-    messagesTail: messages.slice(-WORKER_MESSAGE_DIAGNOSTIC_LIMIT),
-    posts,
+    messageCount: snapshot.messageCount ?? messages.length,
+    messagesHead:
+      snapshot.messagesHead ?? messages.slice(0, WORKER_MESSAGE_DIAGNOSTIC_LIMIT),
+    messagesTail:
+      snapshot.messagesTail ?? messages.slice(-WORKER_MESSAGE_DIAGNOSTIC_LIMIT),
+    postCount: snapshot.postCount ?? posts.length,
+    postsHead: snapshot.postsHead ?? posts.slice(0, WORKER_MESSAGE_DIAGNOSTIC_LIMIT),
+    postsTail: snapshot.postsTail ?? posts.slice(-WORKER_MESSAGE_DIAGNOSTIC_LIMIT),
   };
 }
 
@@ -81,6 +87,7 @@ async function installBrowserWorkerMessageInstrumentation(page) {
 }
 
 module.exports = {
+  WORKER_MESSAGE_DIAGNOSTIC_LIMIT,
   emptyWorkerMessageSnapshot,
   installBrowserWorkerMessageInstrumentation,
   workerMessageSnapshot,

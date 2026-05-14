@@ -23,6 +23,7 @@ const {
   installBrowserFileSelectionInstrumentation,
 } = require("./browser-file-selection-page-helper.js");
 const {
+  WORKER_MESSAGE_DIAGNOSTIC_LIMIT,
   emptyWorkerMessageSnapshot,
   installBrowserWorkerMessageInstrumentation,
   workerMessageSnapshot,
@@ -168,9 +169,21 @@ async function installIngestInstrumentation(page) {
 }
 
 async function browserState(page, { diagnoseReader = false } = {}) {
-  const state = await page.evaluate(async (shouldDiagnoseReader, stateKey) => {
+  const state = await page.evaluate(async (
+    shouldDiagnoseReader,
+    stateKey,
+    workerMessageDiagnosticLimit,
+  ) => {
     const state = globalThis[stateKey] ?? {};
     const workerMessages = state.workerMessages ?? {};
+    const workerMessageSnapshot = {
+      messageCount: workerMessages.messages?.length ?? 0,
+      messagesHead: workerMessages.messages?.slice(0, workerMessageDiagnosticLimit) ?? [],
+      messagesTail: workerMessages.messages?.slice(-workerMessageDiagnosticLimit) ?? [],
+      postCount: workerMessages.posts?.length ?? 0,
+      postsHead: workerMessages.posts?.slice(0, workerMessageDiagnosticLimit) ?? [],
+      postsTail: workerMessages.posts?.slice(-workerMessageDiagnosticLimit) ?? [],
+    };
     let readerDiagnostic = null;
 
     if (shouldDiagnoseReader) {
@@ -203,7 +216,7 @@ async function browserState(page, { diagnoseReader = false } = {}) {
       appError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
       frameDurationsSample: state.frameDurations?.slice(0, 16),
       performanceMarks: performance.getEntriesByType("mark").map((entry) => entry.name),
-      workerMessages,
+      workerMessages: workerMessageSnapshot,
       readerDiagnostic,
       ...Object.fromEntries(
         Object.entries(state).filter(
@@ -211,7 +224,7 @@ async function browserState(page, { diagnoseReader = false } = {}) {
         ),
       ),
     };
-  }, diagnoseReader, BROWSER_INGEST_STATE_KEY);
+  }, diagnoseReader, BROWSER_INGEST_STATE_KEY, WORKER_MESSAGE_DIAGNOSTIC_LIMIT);
 
   return {
     ...state,
@@ -362,11 +375,67 @@ async function runSelfTest() {
         { fileOffset: 65536, type: "progress" },
         { error: "stalled", type: "worker-error" },
       ],
-      posts: [
+      postCount: 1,
+      postsHead: [
+        { indexName: "tracy-index", sourceName: "trace.json", type: "start" },
+      ],
+      postsTail: [
         { indexName: "tracy-index", sourceName: "trace.json", type: "start" },
       ],
     },
   );
+  assert.deepEqual(
+    workerMessageSnapshot({
+      messageCount: 12,
+      messagesHead: [{ type: "preloaded" }],
+      messagesTail: [{ type: "done" }],
+      postCount: 2,
+      postsHead: [{ type: "start" }],
+      postsTail: [{ type: "cancel" }],
+    }),
+    {
+      messageCount: 12,
+      messagesHead: [{ type: "preloaded" }],
+      messagesTail: [{ type: "done" }],
+      postCount: 2,
+      postsHead: [{ type: "start" }],
+      postsTail: [{ type: "cancel" }],
+    },
+  );
+  const previousIngestState = globalThis[BROWSER_INGEST_STATE_KEY];
+  try {
+    globalThis[BROWSER_INGEST_STATE_KEY] = {
+      workerMessages: {
+        messages: Array.from({ length: 12 }, (_value, index) => ({
+          fileOffset: index,
+          type: "progress",
+        })),
+        posts: Array.from({ length: 10 }, (_value, index) => ({
+          indexName: `tracy-index-${index}`,
+          type: "start",
+        })),
+      },
+    };
+    const boundedState = await browserState({
+      async evaluate(callback, ...args) {
+        return callback(...args);
+      },
+    });
+    assert.equal(boundedState.workerMessages.messageCount, 12);
+    assert.equal(boundedState.workerMessages.messagesHead.length, 8);
+    assert.equal(boundedState.workerMessages.messagesTail.length, 8);
+    assert.equal(boundedState.workerMessages.postCount, 10);
+    assert.equal(boundedState.workerMessages.postsHead.length, 8);
+    assert.equal(boundedState.workerMessages.postsTail.length, 8);
+    assert.equal(boundedState.workerMessages.messages, undefined);
+    assert.equal(boundedState.workerMessages.posts, undefined);
+  } finally {
+    if (previousIngestState === undefined) {
+      delete globalThis[BROWSER_INGEST_STATE_KEY];
+    } else {
+      globalThis[BROWSER_INGEST_STATE_KEY] = previousIngestState;
+    }
+  }
 
   const ingestTimeoutState = {
     appError: "",
