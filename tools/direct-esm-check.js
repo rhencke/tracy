@@ -193,25 +193,38 @@ async function assertDistCopy(relativePath) {
   );
 }
 
-async function assertNoInlinePaletteColor(relativePath) {
-  const source = await readRepoFile(relativePath);
-  const forbiddenColors = [
-    "#1f1b16",
-    "#3f6ea8",
-    "#fbf8f4",
-    "rgba(40, 45, 52, 0.35)",
-    "rgba(76, 85, 99, 0.38)",
-    "rgba(92, 109, 130, 0.58)",
-    "rgba(126, 134, 146, 0.18)",
-    "rgba(146, 64, 14, 0.42)",
-    "rgba(180, 83, 9, 0.16)",
-    "rgba(251, 248, 244, 0.92)",
-  ];
+function paletteColorEntries(paletteSpec) {
+  const colors = [];
 
-  for (const color of forbiddenColors) {
+  for (const [paletteName, palette] of Object.entries(paletteSpec.palettes ?? {})) {
+    for (const [owner, group] of Object.entries(palette)) {
+      for (const [name, entry] of Object.entries(group)) {
+        if (entry.scope !== "init" && entry.scope !== "full") {
+          assert.fail(`${paletteName}.${owner}.${name} should declare palette scope init or full`);
+        }
+        colors.push({
+          name,
+          owner,
+          paletteName,
+          scope: entry.scope,
+          value: entry.value,
+        });
+      }
+    }
+  }
+
+  return colors;
+}
+
+async function assertNoInlinePaletteColor(relativePath, paletteSpec) {
+  const source = await readRepoFile(relativePath);
+
+  for (const color of paletteColorEntries(paletteSpec)) {
     assert(
-      !source.includes(color),
-      `${relativePath} should read ${color} from abi/palette.json instead of inlining it`,
+      !source.includes(color.value),
+      `${relativePath} should read ${color.paletteName}.${color.owner}.${color.name} ` +
+        `(${color.scope}-scoped ${color.owner} color ${color.value}) from ` +
+        "abi/palette.json instead of inlining it",
     );
   }
 }
@@ -963,27 +976,13 @@ function assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, t
 }
 
 function assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource) {
-  const initColors = [];
-  const fullColors = [];
-
-  for (const palette of Object.values(paletteSpec.palettes ?? {})) {
-    for (const group of Object.values(palette)) {
-      for (const [name, entry] of Object.entries(group)) {
-        if (entry.scope === "init") {
-          initColors.push([name, entry.value]);
-        } else if (entry.scope === "full") {
-          fullColors.push([name, entry.value]);
-        } else {
-          assert.fail(`${name} should declare palette scope init or full`);
-        }
-      }
-    }
-  }
+  const initColors = paletteColorEntries(paletteSpec).filter((color) => color.scope === "init");
+  const fullColors = paletteColorEntries(paletteSpec).filter((color) => color.scope === "full");
 
   assert(initColors.length > 0, "palette should define init-scoped colors");
   assert(fullColors.length > 0, "palette should define full-scoped colors");
 
-  for (const [name, value] of initColors) {
+  for (const { name, value } of initColors) {
     assert.match(
       startupSpecSource,
       new RegExp(`${name}: ${escapeRegExp(JSON.stringify(value))}`),
@@ -991,7 +990,7 @@ function assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, trace
     );
   }
 
-  for (const [name, value] of fullColors) {
+  for (const { name, value } of fullColors) {
     assert.doesNotMatch(
       startupSpecSource,
       new RegExp(`${name}: ${escapeRegExp(JSON.stringify(value))}`),
@@ -1392,9 +1391,9 @@ async function main() {
   }
 
   await Promise.all([
-    assertNoInlinePaletteColor("bootstrap.mjs"),
-    assertNoInlinePaletteColor("host/canvas.mjs"),
-    assertNoInlinePaletteColor("host/runtime.mjs"),
+    assertNoInlinePaletteColor("bootstrap.mjs", paletteSpec),
+    assertNoInlinePaletteColor("host/canvas.mjs", paletteSpec),
+    assertNoInlinePaletteColor("host/runtime.mjs", paletteSpec),
     assertIndexCatalogUsesGeneratedFormatSpec(),
     assertRuntimeWorkerCheckUsesGeneratedIndexFormatSpec(),
     assertRuntimeWorkerCheckUsesSharedHarness(),
