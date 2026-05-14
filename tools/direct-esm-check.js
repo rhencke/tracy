@@ -1004,7 +1004,86 @@ function assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, trace
   }
 }
 
-function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource) {
+function quotedLiteral(value) {
+  return escapeRegExp(JSON.stringify(value));
+}
+
+function runtimeBridgeForbiddenLiteralEntries(runtimeSpec) {
+  const bridge = runtimeSpec.runtimeBridge;
+  const entries = [
+    {
+      pattern: new RegExp(`const\\s+MAIN_THREAD\\s*=\\s*${quotedLiteral(bridge.threads.MAIN)}`),
+      protectedProperty: "runtime main thread id should come from RUNTIME_BRIDGE.threads.MAIN",
+    },
+    {
+      pattern: new RegExp(`type:\\s*${quotedLiteral(bridge.worker.MODULE_TYPE)}`),
+      protectedProperty: "runtime worker module type should come from RUNTIME_BRIDGE.worker.MODULE_TYPE",
+    },
+    {
+      pattern: new RegExp(`options\\.baseUrl \\?\\? ${quotedLiteral(bridge.modules.DEFAULT_BASE_URL)}`),
+      protectedProperty: "runtime default Wasm base URL should come from RUNTIME_BRIDGE.modules.DEFAULT_BASE_URL",
+    },
+  ];
+
+  for (const [name, value] of Object.entries(bridge.workerMessages)) {
+    entries.push({
+      pattern: new RegExp(`${name}:\\s*${quotedLiteral(value)}`),
+      protectedProperty: `runtime worker message ${name} should come from RUNTIME_BRIDGE.workerMessages`,
+    });
+  }
+
+  for (const [name, value] of Object.entries(bridge.workerStatus)) {
+    entries.push({
+      pattern: new RegExp(`(?:${name}:\\s*|state\\s*=\\s*)${quotedLiteral(value)}`),
+      protectedProperty: `runtime worker status ${name} should come from RUNTIME_BRIDGE.workerStatus`,
+    });
+  }
+
+  for (const [name, value] of Object.entries(bridge.readerStatus)) {
+    entries.push({
+      pattern: new RegExp(`(?:${name}:\\s*|state\\s*===\\s*)${quotedLiteral(value)}`),
+      protectedProperty: `runtime reader status ${name} should come from RUNTIME_BRIDGE.readerStatus`,
+    });
+  }
+
+  for (const [name, value] of Object.entries(bridge.errors)) {
+    entries.push({
+      pattern: new RegExp(quotedLiteral(value)),
+      protectedProperty: `runtime error string ${name} should come from RUNTIME_BRIDGE.errors`,
+    });
+  }
+
+  for (const [name, value] of Object.entries(bridge.fileSelection)) {
+    entries.push({
+      pattern: new RegExp(quotedLiteral(value)),
+      protectedProperty: `runtime file-selection value ${name} should come from RUNTIME_BRIDGE.fileSelection`,
+    });
+  }
+
+  return entries;
+}
+
+function runtimeUrlForbiddenLiteralEntries(runtimeSpec) {
+  return Object.entries(runtimeSpec.urls).map(([name, entry]) => ({
+    pattern: new RegExp(quotedLiteral(entry.value)),
+    protectedProperty: `runtime URL ${name} should come from generated RUNTIME_URLS`,
+  }));
+}
+
+function runtimeDefaultForbiddenLiteralEntries(runtimeSpec) {
+  return Object.entries(runtimeSpec.runtimeDefaults).flatMap(([name, entry]) => [
+    {
+      pattern: new RegExp(`const\\s+${name}\\s*=\\s*${entry.value}`),
+      protectedProperty: `runtime default ${name} should come from generated RUNTIME_DEFAULTS`,
+    },
+    {
+      pattern: new RegExp(`\\?\\?\\s*${entry.value}`),
+      protectedProperty: `runtime default ${name} should be read by name from generated RUNTIME_DEFAULTS`,
+    },
+  ]);
+}
+
+function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource, runtimeSpec) {
   assert.match(
     startupSpecSource,
     /export const RUNTIME_BRIDGE = Object\.freeze/,
@@ -1040,39 +1119,26 @@ function assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSour
     /RUNTIME_MODULES\.DEFAULT_BASE_URL/,
     "runtime Wasm base URL should come from the generated bridge contract",
   );
+  assert.match(
+    runtimeSource,
+    /RUNTIME_DEFAULTS,/,
+    "runtime should import generated runtime defaults",
+  );
+  assert.match(
+    runtimeSource,
+    /RUNTIME_URLS,/,
+    "runtime should import generated runtime URLs",
+  );
 
-  for (const [pattern, message] of [
-    [/const\s+MAIN_THREAD\s*=\s*"main"/, "main thread id"],
-    [/COMPLETE:\s*"complete"/, "worker complete message"],
-    [/COVERED_RANGE:\s*"covered_range"/, "worker covered-range message"],
-    [/state:\s*"idle"/, "idle state"],
-    [/state\s*=\s*"running"/, "running state"],
-    [/state\s*=\s*"complete"/, "complete state"],
-    [/state\s*=\s*"error"/, "error state"],
-    [/state\s*=\s*"terminated"/, "terminated state"],
-    [/state\s*=\s*"unavailable"/, "unavailable state"],
-    [/state\s*===\s*"ready"/, "ready reader state"],
-    [/type:\s*"module"/, "worker module type"],
-    [/options\.baseUrl \?\? "wasm\/"/, "default Wasm base URL"],
-    [/"main-thread index reader is not ready"/, "main-thread reader not-ready message"],
-    [/"module workers are unavailable"/, "module worker unavailable message"],
-    [/"worker ingest failed"/, "worker ingest failure message"],
-    [/"ingest worker failed"/, "ingest worker failure message"],
-    [/"tracy failed to load the WebAssembly viewer\."/,
-      "app-load failure message"],
-    [/"tracy needs a browser with WebAssembly JavaScript Promise Integration/,
-      "JSPI unavailable message"],
-    [/"main-thread index name"/, "main-thread index-name label"],
-    [/`indexes\/\$\{safeLeaf\}\.idx`/, "index name shape"],
-    [/`sources\/\$\{rawName\}`/, "source name shape"],
-    [/leaf \?\? "trace"/, "default trace leaf"],
-    [/:\s*"trace"/, "default selected-file trace name"],
-    [/\/\[\^A-Za-z0-9\._-\]\/g/, "source-name sanitizing pattern"],
+  for (const { pattern, protectedProperty } of [
+    ...runtimeBridgeForbiddenLiteralEntries(runtimeSpec),
+    ...runtimeUrlForbiddenLiteralEntries(runtimeSpec),
+    ...runtimeDefaultForbiddenLiteralEntries(runtimeSpec),
   ]) {
-    assert.doesNotMatch(
+    forbidPattern(
       runtimeSource,
       pattern,
-      `host/runtime.mjs should read ${message} from RUNTIME_BRIDGE`,
+      `host/runtime.mjs should read ${protectedProperty}`,
     );
   }
 }
@@ -1132,7 +1198,7 @@ async function main() {
   assertTraceRendererUsesGeneratedPolicyDefaults(rendererSource, traceRendererSpecSource);
   assertOpfsSourceUsesGeneratedBridgeContract(opfsSourceSource, hostAbiSource);
   assertRendererLoaderUsesGeneratedBridgeContract(rendererLoaderSource, traceRendererSpecSource);
-  assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource);
+  assertRuntimeUsesGeneratedBridgeContract(runtimeSource, startupSpecSource, runtimeSpec);
   assertPaletteScopesProtectStartup(paletteSpec, startupSpecSource, traceRendererSpecSource);
 
   assert.match(
