@@ -19,6 +19,7 @@ const {
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const BROWSER_FILE_SELECTION_HELPER = "tools/browser-file-selection-page-helper.js";
+const BROWSER_DRAW_TIMING_HELPER = "tools/browser-draw-timing-page-helper.js";
 const BROWSER_WORKER_MESSAGE_HELPER = "tools/browser-worker-message-page-helper.js";
 const BROWSER_FILE_SELECTION_CHECK = "tools/interactive-ingest-browser-check.js";
 const PRODUCTION_APP_TEXT_FILES = Object.freeze([
@@ -52,6 +53,12 @@ const LEGACY_FILE_SELECTION_SNAPSHOT_MARKERS = Object.freeze([
   "fileSelectionAt",
   "selectedFileName",
   "selectedFileSize",
+]);
+const DRAW_TIMING_INSTRUMENTATION_MARKERS = Object.freeze([
+  "installBrowserDrawTimingInstrumentation",
+  "browser-draw-timing-page-helper",
+  "instrumentedFillRect",
+  "state.drawTiming = drawTiming",
 ]);
 const WORKER_MESSAGE_INSTRUMENTATION_MARKERS = Object.freeze([
   "installBrowserWorkerMessageInstrumentation",
@@ -616,6 +623,41 @@ function assertBrowserWorkerMessageInstrumentationBoundary() {
   );
 }
 
+function assertBrowserDrawTimingInstrumentationBoundary() {
+  const helper = readRepoFile(BROWSER_DRAW_TIMING_HELPER);
+  const check = readRepoFile(BROWSER_FILE_SELECTION_CHECK);
+
+  assert.match(check, /require\("\.\/browser-draw-timing-page-helper\.js"\)/);
+  assert.match(check, /installBrowserDrawTimingInstrumentation\(page\)/);
+  assert.match(check, /drawTimingSnapshot\(state\.drawTiming\)/);
+  assert.doesNotMatch(check, /CanvasRenderingContext2D\.prototype\.fillRect/);
+  assert.doesNotMatch(check, /instrumentedFillRect/);
+  assert.doesNotMatch(
+    check,
+    /globalThis\.requestAnimationFrame\s*=\s*\(callback\)/,
+  );
+  assert.match(helper, /CanvasRenderingContext2D\.prototype\.fillRect/);
+  assert.match(helper, /instrumentedFillRect/);
+  assert.match(helper, /globalThis\.requestAnimationFrame\s*=\s*\(callback\)/);
+  assert.match(helper, /drawTimingSnapshot/);
+
+  assertFilesDoNotContain(
+    PRODUCTION_APP_TEXT_FILES
+      .filter(repoFileExists)
+      .map((relativePath) => path.join(ROOT_DIR, relativePath)),
+    DRAW_TIMING_INSTRUMENTATION_MARKERS,
+    "production app source",
+  );
+
+  assertFilesDoNotContain(
+    walkFiles(path.join(ROOT_DIR, "dist")).filter((file) =>
+      DIST_APP_TEXT_EXTENSIONS.has(path.extname(file)),
+    ),
+    DRAW_TIMING_INSTRUMENTATION_MARKERS,
+    "dist app file",
+  );
+}
+
 function assertDelayedWasmImportBoundary() {
   const bootstrap = readRepoFile("bootstrap.mjs");
   const coreReadyOffset = bootstrap.indexOf("const coreReadyPromise");
@@ -659,6 +701,7 @@ async function main() {
   assertInteractiveCheckUsesSharedHelpers();
   assertBrowserFileSelectionInstrumentationBoundary();
   assertBrowserWorkerMessageInstrumentationBoundary();
+  assertBrowserDrawTimingInstrumentationBoundary();
   assertDelayedWasmImportBoundary();
   await assertServerResponseModes();
   await assertServerFailureModes();
