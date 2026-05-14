@@ -109,6 +109,36 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function assertProtectedPropertyMessage(protectedProperty) {
+  assert.equal(
+    typeof protectedProperty,
+    "string",
+    "source contract assertions should name the protected property",
+  );
+  assert(
+    protectedProperty.trim().length > 0,
+    "source contract assertions should name the protected property",
+  );
+}
+
+function requirePattern(source, pattern, protectedProperty) {
+  assertProtectedPropertyMessage(protectedProperty);
+  assert.match(source, pattern, protectedProperty);
+}
+
+function forbidPattern(source, pattern, protectedProperty) {
+  assertProtectedPropertyMessage(protectedProperty);
+  assert.doesNotMatch(source, pattern, protectedProperty);
+}
+
+function requireOrderedText(source, firstText, secondText, protectedProperty) {
+  assertProtectedPropertyMessage(protectedProperty);
+  const firstIndex = source.indexOf(firstText);
+  const secondIndex = source.indexOf(secondText);
+
+  assert(firstIndex !== -1 && firstIndex < secondIndex, protectedProperty);
+}
+
 async function assertNoIsolationRequirement(relativePath) {
   const source = await readRepoFile(relativePath);
 
