@@ -22,6 +22,12 @@ const {
   fileSelectionSnapshot,
   installBrowserFileSelectionInstrumentation,
 } = require("./browser-file-selection-page-helper.js");
+const {
+  WORKER_MESSAGE_DIAGNOSTIC_LIMIT,
+  emptyWorkerMessageSnapshot,
+  installBrowserWorkerMessageInstrumentation,
+  workerMessageSnapshot,
+} = require("./browser-worker-message-page-helper.js");
 
 const DIST_DIR = repoPath("dist");
 const RUNTIME_SPEC = JSON.parse(
@@ -95,6 +101,7 @@ async function writeTraceFile(file) {
 
 async function installIngestInstrumentation(page) {
   await installBrowserFileSelectionInstrumentation(page);
+  await installBrowserWorkerMessageInstrumentation(page);
   await page.evaluateOnNewDocument((stateKey) => {
     const state = globalThis[stateKey] ?? {};
 
@@ -107,8 +114,6 @@ async function installIngestInstrumentation(page) {
       maxFrameDuration: 0,
       promisingType: typeof WebAssembly.promising,
       suspendingType: typeof WebAssembly.Suspending,
-      workerMessages: [],
-      workerPosts: [],
     });
     globalThis[stateKey] = state;
     const fileSelectionStarted = () =>
@@ -160,55 +165,29 @@ async function installIngestInstrumentation(page) {
       return result;
     };
 
-    const NativeWorker = globalThis.Worker;
-    globalThis.Worker = function InstrumentedWorker(...args) {
-      const worker = new NativeWorker(...args);
-      const postMessage = worker.postMessage;
-      worker.postMessage = function instrumentedPostMessage(message, transfer) {
-        state.workerPosts.push({
-          indexName: message?.indexName ?? null,
-          sourceFile: message?.sourceFile?.name ?? null,
-          sourceFileHandle: message?.sourceFileHandle ?? null,
-          sourceName: message?.sourceName ?? null,
-          sourceSize: message?.sourceSize ?? null,
-          type: message?.type ?? null,
-        });
-        return postMessage.call(this, message, transfer);
-      };
-      worker.addEventListener("message", (event) => {
-        state.workerMessages.push({
-          committedEvents: event.data?.committedEvents ?? null,
-          end: event.data?.end ?? null,
-          error: event.data?.message ?? null,
-          fileOffset: event.data?.fileOffset ?? null,
-          indexedEvents: event.data?.indexedEvents ?? null,
-          parsedEvents: event.data?.parsedEvents ?? null,
-          start: event.data?.start ?? null,
-          totalBytes: event.data?.totalBytes ?? null,
-          type: event.data?.type ?? null,
-          valid: event.data?.valid ?? null,
-        });
-      });
-      worker.addEventListener("error", (event) => {
-        state.workerMessages.push({
-          error: event.message,
-          fileOffset: null,
-          type: "worker-error",
-        });
-      });
-      return worker;
-    };
   }, BROWSER_INGEST_STATE_KEY);
 }
 
 async function browserState(page, { diagnoseReader = false } = {}) {
-  const state = await page.evaluate(async (shouldDiagnoseReader, stateKey) => {
+  const state = await page.evaluate(async (
+    shouldDiagnoseReader,
+    stateKey,
+    workerMessageDiagnosticLimit,
+  ) => {
     const state = globalThis[stateKey] ?? {};
-    const workerMessages = state.workerMessages ?? [];
+    const workerMessages = state.workerMessages ?? {};
+    const workerMessageSnapshot = {
+      messageCount: workerMessages.messages?.length ?? 0,
+      messagesHead: workerMessages.messages?.slice(0, workerMessageDiagnosticLimit) ?? [],
+      messagesTail: workerMessages.messages?.slice(-workerMessageDiagnosticLimit) ?? [],
+      postCount: workerMessages.posts?.length ?? 0,
+      postsHead: workerMessages.posts?.slice(0, workerMessageDiagnosticLimit) ?? [],
+      postsTail: workerMessages.posts?.slice(-workerMessageDiagnosticLimit) ?? [],
+    };
     let readerDiagnostic = null;
 
     if (shouldDiagnoseReader) {
-      const startPost = state.workerPosts?.find((message) => message.indexName !== null);
+      const startPost = workerMessages.posts?.find((message) => message.indexName !== null);
       if (startPost?.indexName !== undefined && startPost.indexName !== null) {
         try {
           const memory = new WebAssembly.Memory({ initial: 8272, maximum: 32768 });
@@ -237,9 +216,7 @@ async function browserState(page, { diagnoseReader = false } = {}) {
       appError: globalThis.__TRACY_APP_LOAD_ERROR__ ?? "",
       frameDurationsSample: state.frameDurations?.slice(0, 16),
       performanceMarks: performance.getEntriesByType("mark").map((entry) => entry.name),
-      workerMessageCount: workerMessages.length,
-      workerMessagesHead: workerMessages.slice(0, 8),
-      workerMessagesTail: workerMessages.slice(-8),
+      workerMessages: workerMessageSnapshot,
       readerDiagnostic,
       ...Object.fromEntries(
         Object.entries(state).filter(
@@ -247,11 +224,12 @@ async function browserState(page, { diagnoseReader = false } = {}) {
         ),
       ),
     };
-  }, diagnoseReader, BROWSER_INGEST_STATE_KEY);
+  }, diagnoseReader, BROWSER_INGEST_STATE_KEY, WORKER_MESSAGE_DIAGNOSTIC_LIMIT);
 
   return {
     ...state,
     fileSelection: fileSelectionSnapshot(state.fileSelection),
+    workerMessages: workerMessageSnapshot(state.workerMessages),
   };
 }
 
@@ -322,7 +300,7 @@ async function checkBrowserInteractiveIngest() {
     await waitForPageCondition(
       page,
       () =>
-        (globalThis.__TRACY_BROWSER_INGEST__?.workerMessages ?? []).some(
+        (globalThis.__TRACY_BROWSER_INGEST__?.workerMessages?.messages ?? []).some(
           (message) => message?.type === "preloaded",
         ),
       "browser did not preload worker wasm while file picker was open",
@@ -373,6 +351,91 @@ async function runSelfTest() {
       selectedFile: { name: "trace.json", size: TRACE_SIZE_BYTES },
     },
   );
+  assert.deepEqual(workerMessageSnapshot(), emptyWorkerMessageSnapshot());
+  assert.deepEqual(
+    workerMessageSnapshot({
+      messages: [
+        { fileOffset: 0, type: "preloaded" },
+        { fileOffset: 65536, type: "progress" },
+        { error: "stalled", type: "worker-error" },
+      ],
+      posts: [
+        { indexName: "tracy-index", sourceName: "trace.json", type: "start" },
+      ],
+    }),
+    {
+      messageCount: 3,
+      messagesHead: [
+        { fileOffset: 0, type: "preloaded" },
+        { fileOffset: 65536, type: "progress" },
+        { error: "stalled", type: "worker-error" },
+      ],
+      messagesTail: [
+        { fileOffset: 0, type: "preloaded" },
+        { fileOffset: 65536, type: "progress" },
+        { error: "stalled", type: "worker-error" },
+      ],
+      postCount: 1,
+      postsHead: [
+        { indexName: "tracy-index", sourceName: "trace.json", type: "start" },
+      ],
+      postsTail: [
+        { indexName: "tracy-index", sourceName: "trace.json", type: "start" },
+      ],
+    },
+  );
+  assert.deepEqual(
+    workerMessageSnapshot({
+      messageCount: 12,
+      messagesHead: [{ type: "preloaded" }],
+      messagesTail: [{ type: "done" }],
+      postCount: 2,
+      postsHead: [{ type: "start" }],
+      postsTail: [{ type: "cancel" }],
+    }),
+    {
+      messageCount: 12,
+      messagesHead: [{ type: "preloaded" }],
+      messagesTail: [{ type: "done" }],
+      postCount: 2,
+      postsHead: [{ type: "start" }],
+      postsTail: [{ type: "cancel" }],
+    },
+  );
+  const previousIngestState = globalThis[BROWSER_INGEST_STATE_KEY];
+  try {
+    globalThis[BROWSER_INGEST_STATE_KEY] = {
+      workerMessages: {
+        messages: Array.from({ length: 12 }, (_value, index) => ({
+          fileOffset: index,
+          type: "progress",
+        })),
+        posts: Array.from({ length: 10 }, (_value, index) => ({
+          indexName: `tracy-index-${index}`,
+          type: "start",
+        })),
+      },
+    };
+    const boundedState = await browserState({
+      async evaluate(callback, ...args) {
+        return callback(...args);
+      },
+    });
+    assert.equal(boundedState.workerMessages.messageCount, 12);
+    assert.equal(boundedState.workerMessages.messagesHead.length, 8);
+    assert.equal(boundedState.workerMessages.messagesTail.length, 8);
+    assert.equal(boundedState.workerMessages.postCount, 10);
+    assert.equal(boundedState.workerMessages.postsHead.length, 8);
+    assert.equal(boundedState.workerMessages.postsTail.length, 8);
+    assert.equal(boundedState.workerMessages.messages, undefined);
+    assert.equal(boundedState.workerMessages.posts, undefined);
+  } finally {
+    if (previousIngestState === undefined) {
+      delete globalThis[BROWSER_INGEST_STATE_KEY];
+    } else {
+      globalThis[BROWSER_INGEST_STATE_KEY] = previousIngestState;
+    }
+  }
 
   const ingestTimeoutState = {
     appError: "",
@@ -387,15 +450,13 @@ async function runSelfTest() {
       coveredRange: { end: 1000, start: 0 },
       status: { state: "ready" },
     },
-    workerMessageCount: 3,
-    workerMessagesHead: [
-      { fileOffset: 0, type: "preloaded" },
-      { fileOffset: 65536, type: "progress" },
-    ],
-    workerMessagesTail: [
-      { fileOffset: 65536, type: "progress" },
-      { error: "stalled", type: "worker-error" },
-    ],
+    workerMessages: {
+      messages: [
+        { fileOffset: 0, type: "preloaded" },
+        { fileOffset: 65536, type: "progress" },
+        { error: "stalled", type: "worker-error" },
+      ],
+    },
   };
   const timedOutPage = {
     async evaluate(_callback, ...args) {
@@ -419,8 +480,8 @@ async function runSelfTest() {
     timeoutError.message,
     /browser did not present first ingest draw timed out; readiness diagnostics=/,
   );
-  assert.match(timeoutError.message, /"workerMessagesHead":.*"preloaded"/);
-  assert.match(timeoutError.message, /"workerMessagesTail":.*"worker-error"/);
+  assert.match(timeoutError.message, /"workerMessages":.*"messagesHead":.*"preloaded"/);
+  assert.match(timeoutError.message, /"workerMessages":.*"messagesTail":.*"worker-error"/);
   assert.match(timeoutError.message, /"page":.*"readyState":"complete"/);
   assert.match(timeoutError.message, /"readerDiagnostic":/);
   assert.match(

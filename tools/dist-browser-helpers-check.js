@@ -19,6 +19,7 @@ const {
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const BROWSER_FILE_SELECTION_HELPER = "tools/browser-file-selection-page-helper.js";
+const BROWSER_WORKER_MESSAGE_HELPER = "tools/browser-worker-message-page-helper.js";
 const BROWSER_FILE_SELECTION_CHECK = "tools/interactive-ingest-browser-check.js";
 const PRODUCTION_APP_TEXT_FILES = Object.freeze([
   "bootstrap.mjs",
@@ -51,6 +52,19 @@ const LEGACY_FILE_SELECTION_SNAPSHOT_MARKERS = Object.freeze([
   "fileSelectionAt",
   "selectedFileName",
   "selectedFileSize",
+]);
+const WORKER_MESSAGE_INSTRUMENTATION_MARKERS = Object.freeze([
+  "installBrowserWorkerMessageInstrumentation",
+  "browser-worker-message-page-helper",
+  "InstrumentedWorker",
+  "instrumentedPostMessage",
+  "state.workerMessages = workerMessages",
+]);
+const LEGACY_WORKER_MESSAGE_SNAPSHOT_MARKERS = Object.freeze([
+  "workerMessageCount",
+  "workerMessagesHead",
+  "workerMessagesTail",
+  "workerPosts",
 ]);
 
 function readRepoFile(relativePath) {
@@ -566,6 +580,42 @@ function assertBrowserFileSelectionInstrumentationBoundary() {
   );
 }
 
+function assertBrowserWorkerMessageInstrumentationBoundary() {
+  const helper = readRepoFile(BROWSER_WORKER_MESSAGE_HELPER);
+  const check = readRepoFile(BROWSER_FILE_SELECTION_CHECK);
+
+  assert.match(check, /require\("\.\/browser-worker-message-page-helper\.js"\)/);
+  assert.match(check, /installBrowserWorkerMessageInstrumentation\(page\)/);
+  assert.match(check, /workerMessageSnapshot\(state\.workerMessages\)/);
+  assert.doesNotMatch(check, /globalThis\.Worker/);
+  assert.doesNotMatch(check, /InstrumentedWorker/);
+  assert.doesNotMatch(check, /instrumentedPostMessage/);
+  assert.doesNotMatch(
+    check,
+    new RegExp(LEGACY_WORKER_MESSAGE_SNAPSHOT_MARKERS.join("|")),
+  );
+  assert.match(helper, /globalThis\.Worker/);
+  assert.match(helper, /InstrumentedWorker/);
+  assert.match(helper, /instrumentedPostMessage/);
+  assert.match(helper, /workerMessageSnapshot/);
+
+  assertFilesDoNotContain(
+    PRODUCTION_APP_TEXT_FILES
+      .filter(repoFileExists)
+      .map((relativePath) => path.join(ROOT_DIR, relativePath)),
+    WORKER_MESSAGE_INSTRUMENTATION_MARKERS,
+    "production app source",
+  );
+
+  assertFilesDoNotContain(
+    walkFiles(path.join(ROOT_DIR, "dist")).filter((file) =>
+      DIST_APP_TEXT_EXTENSIONS.has(path.extname(file)),
+    ),
+    WORKER_MESSAGE_INSTRUMENTATION_MARKERS,
+    "dist app file",
+  );
+}
+
 function assertDelayedWasmImportBoundary() {
   const bootstrap = readRepoFile("bootstrap.mjs");
   const coreReadyOffset = bootstrap.indexOf("const coreReadyPromise");
@@ -608,6 +658,7 @@ async function main() {
   assertAppLoadUsesSharedHelpers();
   assertInteractiveCheckUsesSharedHelpers();
   assertBrowserFileSelectionInstrumentationBoundary();
+  assertBrowserWorkerMessageInstrumentationBoundary();
   assertDelayedWasmImportBoundary();
   await assertServerResponseModes();
   await assertServerFailureModes();
